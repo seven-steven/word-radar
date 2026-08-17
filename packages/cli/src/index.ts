@@ -11,6 +11,7 @@
 import { Command } from "commander";
 import { CORE_VERSION } from "@word-radar/core";
 import { processInput } from "./extract.js";
+import { mergeFiles } from "./merge.js";
 
 const program = new Command();
 
@@ -35,6 +36,19 @@ program
   .option("-o, --out <file>", "输出文件路径（仅单文件时有效）")
   .action(async (path: string, options: { out?: string }) => {
     await processInput(path, options);
+  });
+
+program
+  .command("merge <csv...>")
+  .description(
+    "合并多份 CSV 词表并去重，同词 flags 按位 OR。\n\n" +
+      "汇总不同来源时，任何来源里已推的词不会被洗回待推。\n\n" +
+      "结果默认打印到 stdout；使用 -o/--out 写入文件。\n\n" +
+      "输入含坏行时报出文件名与行号，命令非零退出。",
+  )
+  .option("-o, --out <file>", "输出文件路径（默认输出到 stdout）")
+  .action(async (csvFiles: string[], options: { out?: string }) => {
+    await mergeFiles(csvFiles, options);
   });
 
 /**
