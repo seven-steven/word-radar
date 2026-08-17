@@ -18,11 +18,28 @@ export const WORDS_COLLECTED = "WORDS_COLLECTED" as const;
 export const GET_COUNTS = "GET_COUNTS" as const;
 export const MARK_PUSHED = "MARK_PUSHED" as const;
 export const CHECK_LOGIN = "CHECK_LOGIN" as const;
+export const RETRY_PUSH = "RETRY_PUSH" as const;
+export const GET_PUSH_STATUS = "GET_PUSH_STATUS" as const;
 
 export interface Counts {
   total: number;
   pending: number;
 }
+
+export interface PushStatus {
+  phase: "idle" | "running" | "paused" | "completed";
+  total: number;
+  processed: number;
+  succeeded: number;
+  existing: number;
+  failed: number;
+  pending: number;
+  current?: string;
+  error?: string;
+}
+
+export interface RetryPushMessage { type: typeof RETRY_PUSH }
+export interface GetPushStatusMessage { type: typeof GET_PUSH_STATUS }
 
 /** popup → content：请求对当前活动标签页执行一次采集。 */
 export interface CollectWordsMessage {
@@ -71,7 +88,9 @@ export type ExtensionMessage =
   | WordsCollectedMessage
   | GetCountsMessage
   | MarkPushedMessage
-  | CheckLoginMessage;
+  | CheckLoginMessage
+  | RetryPushMessage
+  | GetPushStatusMessage;
 
 /** content → popup 的同步应答。 */
 export type CollectResponse =
@@ -121,9 +140,15 @@ export function isCheckLoginMessage(value: unknown): value is CheckLoginMessage 
   return isObject(value) && value.type === CHECK_LOGIN;
 }
 
-export function isCheckLoginResponse(
-  value: unknown,
-): value is CheckLoginResponse {
+export function isRetryPushMessage(value: unknown): value is RetryPushMessage {
+  return isObject(value) && value.type === RETRY_PUSH;
+}
+
+export function isGetPushStatusMessage(value: unknown): value is GetPushStatusMessage {
+  return isObject(value) && value.type === GET_PUSH_STATUS;
+}
+
+  export function isCheckLoginResponse(value: unknown): value is CheckLoginResponse {
   if (!isObject(value)) return false;
   if (value.loggedIn === true) return true;
   if (value.loggedIn === false) return true;

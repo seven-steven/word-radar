@@ -47,7 +47,16 @@
         font-size: 12px;
         min-height: 1em;
       }
-      .login {
+      .push {
+        margin-top: 12px;
+        padding-top: 8px;
+        border-top: 1px solid #eee;
+      }
+      .push-stats {
+        color: #555;
+        font-size: 12px;
+        line-height: 1.6;
+      }
         margin-top: 12px;
         padding-top: 8px;
         border-top: 1px solid #eee;
@@ -89,6 +98,15 @@
       </div>
       <p data-testid="status">采集中…</p>
       <button type="button" data-testid="collect">重新采集</button>
+      <section class="push">
+        <div class="push-stats" data-testid="push-status">推送状态：空闲</div>
+        <div class="push-stats">
+          成功 <span data-testid="push-succeeded">0</span> ·
+          已存在 <span data-testid="push-existing">0</span> ·
+          失败 <span data-testid="push-failed">0</span>
+        </div>
+        <button type="button" data-testid="retry-push">重试待推</button>
+      </section>
       <section class="login">
         <div class="login-row">
           <span class="login-status" data-testid="login-status" data-state="unknown">登录状态：未知</span>

@@ -8,9 +8,12 @@ import {
   CHECK_LOGIN,
   GET_COUNTS,
   MARK_PUSHED,
+  RETRY_PUSH,
+  GET_PUSH_STATUS,
   WORDS_COLLECTED,
 } from "../src/lib/messages.js";
 import type { BackgroundRepository } from "../src/lib/background-listener.js";
+import type { PushCoordinator } from "../src/lib/push-coordinator.js";
 import type { WordEntry } from "@word-radar/core";
 
 function fakeRepository(): BackgroundRepository & {
@@ -43,6 +46,32 @@ function fakeActionBadge(): ActionBadgeGateway & {
 } {
   return {
     set: vi.fn(async () => undefined),
+  };
+}
+
+function fakePushCoordinator(): PushCoordinator & {
+  start: ReturnType<typeof vi.fn>;
+  getStatus: ReturnType<typeof vi.fn>;
+} {
+  return {
+    start: vi.fn(async () => ({
+      phase: "idle" as const,
+      total: 0,
+      processed: 0,
+      succeeded: 0,
+      existing: 0,
+      failed: 0,
+      pending: 0,
+    })),
+    getStatus: vi.fn(() => ({
+      phase: "idle" as const,
+      total: 0,
+      processed: 0,
+      succeeded: 0,
+      existing: 0,
+      failed: 0,
+      pending: 0,
+    })),
   };
 }
 
@@ -152,14 +181,20 @@ describe("createBackgroundListener", () => {
   });
 });
 
-describe("createBackgroundListener CHECK_LOGIN（T09）", () => {
-  it("已登录 → 应答 {loggedIn:true} + 清除 badge", async () => {
+describe("createBackgroundListener CHECK_LOGIN（T09 + T10）", () => {
+  it("已登录 → 应答 {loggedIn:true} + 清除 badge + 非阻塞触发 pushCoordinator.start()", async () => {
     const repository = fakeRepository();
     const bbdcClient = fakeBbdcClient({
       checkLogin: vi.fn(async () => ({ loggedIn: true, resultCode: 200 })),
     });
     const badge = fakeActionBadge();
-    const listener = createBackgroundListener({ repository, bbdcClient, actionBadge: badge });
+    const push = fakePushCoordinator();
+    const listener = createBackgroundListener({
+      repository,
+      bbdcClient,
+      actionBadge: badge,
+      pushCoordinator: push,
+    });
     const sendResponse = vi.fn();
 
     const keepChannel = listener({ type: CHECK_LOGIN }, {}, sendResponse);
@@ -169,15 +204,22 @@ describe("createBackgroundListener CHECK_LOGIN（T09）", () => {
     expect(bbdcClient.checkLogin).toHaveBeenCalledTimes(1);
     expect(badge.set).toHaveBeenCalledWith(null);
     expect(sendResponse).toHaveBeenCalledWith({ loggedIn: true });
+    expect(push.start).toHaveBeenCalledTimes(1);
   });
 
-  it("check-login result_code 非 200 → 应答 {loggedIn:false} + 设 badge \"!\"", async () => {
+  it("check-login result_code 非 200 → 应答 {loggedIn:false} + 设 badge \"!\" + 不触发 push", async () => {
     const repository = fakeRepository();
     const bbdcClient = fakeBbdcClient({
       checkLogin: vi.fn(async () => ({ loggedIn: false, resultCode: 401 })),
     });
     const badge = fakeActionBadge();
-    const listener = createBackgroundListener({ repository, bbdcClient, actionBadge: badge });
+    const push = fakePushCoordinator();
+    const listener = createBackgroundListener({
+      repository,
+      bbdcClient,
+      actionBadge: badge,
+      pushCoordinator: push,
+    });
     const sendResponse = vi.fn();
 
     listener({ type: CHECK_LOGIN }, {}, sendResponse);
@@ -185,6 +227,7 @@ describe("createBackgroundListener CHECK_LOGIN（T09）", () => {
 
     expect(badge.set).toHaveBeenCalledWith("!");
     expect(sendResponse).toHaveBeenCalledWith({ loggedIn: false });
+    expect(push.start).not.toHaveBeenCalled();
   });
 
   it("BbdcAuthError（HTTP 401/403）→ 保守视为未登录 + 设 badge \"!\"", async () => {
@@ -196,7 +239,13 @@ describe("createBackgroundListener CHECK_LOGIN（T09）", () => {
       }),
     });
     const badge = fakeActionBadge();
-    const listener = createBackgroundListener({ repository, bbdcClient, actionBadge: badge });
+    const push = fakePushCoordinator();
+    const listener = createBackgroundListener({
+      repository,
+      bbdcClient,
+      actionBadge: badge,
+      pushCoordinator: push,
+    });
     const sendResponse = vi.fn();
 
     listener({ type: CHECK_LOGIN }, {}, sendResponse);
@@ -204,6 +253,7 @@ describe("createBackgroundListener CHECK_LOGIN（T09）", () => {
 
     expect(badge.set).toHaveBeenCalledWith("!");
     expect(sendResponse).toHaveBeenCalledWith({ loggedIn: false });
+    expect(push.start).not.toHaveBeenCalled();
   });
 
   it("未知错误（解析/网络）也保守视为未登录", async () => {
@@ -214,7 +264,13 @@ describe("createBackgroundListener CHECK_LOGIN（T09）", () => {
       }),
     });
     const badge = fakeActionBadge();
-    const listener = createBackgroundListener({ repository, bbdcClient, actionBadge: badge });
+    const push = fakePushCoordinator();
+    const listener = createBackgroundListener({
+      repository,
+      bbdcClient,
+      actionBadge: badge,
+      pushCoordinator: push,
+    });
     const sendResponse = vi.fn();
 
     listener({ type: CHECK_LOGIN }, {}, sendResponse);
@@ -222,6 +278,7 @@ describe("createBackgroundListener CHECK_LOGIN（T09）", () => {
 
     expect(badge.set).toHaveBeenCalledWith("!");
     expect(sendResponse).toHaveBeenCalledWith({ loggedIn: false });
+    expect(push.start).not.toHaveBeenCalled();
   });
 
   it("CHECK_LOGIN 异步：返回 true 持有消息通道", async () => {
@@ -231,9 +288,81 @@ describe("createBackgroundListener CHECK_LOGIN（T09）", () => {
         async () => new Promise((resolve) => setTimeout(() => resolve({ loggedIn: true, resultCode: 200 }), 5)),
       ),
     });
-    const listener = createBackgroundListener({ repository, bbdcClient });
+    const push = fakePushCoordinator();
+    const listener = createBackgroundListener({
+      repository,
+      bbdcClient,
+      pushCoordinator: push,
+    });
     const sendResponse = vi.fn();
 
     expect(listener({ type: CHECK_LOGIN }, {}, sendResponse)).toBe(true);
+  });
+});
+
+describe("createBackgroundListener T10 push 消息", () => {
+  it("WORDS_COLLECTED 后非阻塞触发 pushCoordinator.start()", async () => {
+    const repository = fakeRepository();
+    const push = fakePushCoordinator();
+    const listener = createBackgroundListener({ repository, pushCoordinator: push });
+    const sendResponse = vi.fn();
+
+    listener(
+      {
+        type: WORDS_COLLECTED,
+        entries: [{ lemma: "run", flags: 0 }],
+      },
+      {},
+      sendResponse,
+    );
+
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    expect(repository.mergeCollected).toHaveBeenCalled();
+    expect(push.start).toHaveBeenCalledTimes(1);
+  });
+
+  it("RETRY_PUSH 转发给 pushCoordinator.start()；不持有通道", () => {
+    const repository = fakeRepository();
+    const push = fakePushCoordinator();
+    const listener = createBackgroundListener({ repository, pushCoordinator: push });
+    const sendResponse = vi.fn();
+
+    const keepChannel = listener({ type: RETRY_PUSH }, {}, sendResponse);
+
+    expect(keepChannel).toBe(false);
+    expect(push.start).toHaveBeenCalledTimes(1);
+    expect(sendResponse).not.toHaveBeenCalled();
+  });
+
+  it("GET_PUSH_STATUS 同步返回 pushCoordinator.getStatus() 快照", () => {
+    const repository = fakeRepository();
+    const push = fakePushCoordinator();
+    push.getStatus = vi.fn(() => ({
+      phase: "running" as const,
+      total: 5,
+      processed: 2,
+      succeeded: 1,
+      existing: 1,
+      failed: 0,
+      pending: 3,
+      current: "garden",
+    }));
+    const listener = createBackgroundListener({ repository, pushCoordinator: push });
+    const sendResponse = vi.fn();
+
+    const keepChannel = listener({ type: GET_PUSH_STATUS }, {}, sendResponse);
+
+    expect(keepChannel).toBe(false);
+    expect(push.getStatus).toHaveBeenCalledTimes(1);
+    expect(sendResponse).toHaveBeenCalledWith({
+      phase: "running",
+      total: 5,
+      processed: 2,
+      succeeded: 1,
+      existing: 1,
+      failed: 0,
+      pending: 3,
+      current: "garden",
+    });
   });
 });

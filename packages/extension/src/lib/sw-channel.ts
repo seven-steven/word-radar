@@ -2,8 +2,11 @@ import {
   GET_COUNTS,
   MARK_PUSHED,
   CHECK_LOGIN,
+  GET_PUSH_STATUS,
+  RETRY_PUSH,
   type CheckLoginResponse,
   type Counts,
+  type PushStatus,
   type GetCountsMessage,
   type MarkPushedMessage,
   type CheckLoginMessage,
@@ -22,6 +25,8 @@ export interface SwChannel {
   getCounts(): Promise<unknown>;
   markPushed(lemmas: string[]): Promise<unknown>;
   checkLogin(): Promise<unknown>;
+  getPushStatus(): Promise<unknown>;
+  retryPush(): Promise<unknown>;
 }
 
 export const chromeSwChannel: SwChannel = {
@@ -36,6 +41,12 @@ export const chromeSwChannel: SwChannel = {
   checkLogin() {
     const message: CheckLoginMessage = { type: CHECK_LOGIN };
     return chrome.runtime.sendMessage(message);
+  },
+  getPushStatus() {
+    return chrome.runtime.sendMessage({ type: GET_PUSH_STATUS });
+  },
+  retryPush() {
+    return chrome.runtime.sendMessage({ type: RETRY_PUSH });
   },
 };
 
@@ -85,6 +96,28 @@ export async function fetchLoginStatus(
   } catch {
     return { loggedIn: false };
   }
+}
+
+export async function fetchPushStatus(channel: SwChannel): Promise<PushStatus | null> {
+  try {
+    const raw = await channel.getPushStatus();
+    return isPushStatus(raw) ? raw : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function retryPush(channel: SwChannel): Promise<void> {
+  await channel.retryPush();
+}
+
+function isPushStatus(value: unknown): value is PushStatus {
+  if (typeof value !== "object" || value === null) return false;
+  const status = value as Record<string, unknown>;
+  return ["idle", "running", "paused", "completed"].includes(String(status.phase)) &&
+    ["total", "processed", "succeeded", "existing", "failed", "pending"].every(
+      (field) => typeof status[field] === "number",
+    );
 }
 
 export type { CheckLoginResponse };

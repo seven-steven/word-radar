@@ -19,7 +19,10 @@ import {
   chromeSwChannel,
   fetchCounts,
   fetchLoginStatus,
+  fetchPushStatus,
+  retryPush,
 } from "./lib/sw-channel.js";
+import type { PushStatus } from "./lib/messages.js";
 
 const BBDC_HOME_URL = "https://bbdc.cn/";
 
@@ -39,6 +42,11 @@ const checkLoginButton = document.querySelector<HTMLButtonElement>(
 const openBbdcButton = document.querySelector<HTMLButtonElement>(
   '[data-testid="open-bbdc"]',
 );
+const retryPushButton = document.querySelector<HTMLButtonElement>('[data-testid="retry-push"]');
+const pushStatusEl = document.querySelector<HTMLElement>('[data-testid="push-status"]');
+const pushSucceededEl = document.querySelector<HTMLElement>('[data-testid="push-succeeded"]');
+const pushExistingEl = document.querySelector<HTMLElement>('[data-testid="push-existing"]');
+const pushFailedEl = document.querySelector<HTMLElement>('[data-testid="push-failed"]');
 
 if (versionEl) {
   versionEl.textContent = `core ${CORE_VERSION}`;
@@ -65,7 +73,39 @@ function renderLogin(state: LoginState): void {
   }
 }
 
-async function refreshCounts(): Promise<void> {
+function renderPushStatus(status: PushStatus): void {
+  const label = status.phase === "running"
+    ? `推送中 ${status.processed}/${status.total}${status.current ? `：${status.current}` : ""}`
+    : status.phase === "paused"
+      ? `推送已暂停${status.error ? `：${status.error}` : ""}`
+      : status.phase === "completed"
+        ? "推送完成"
+        : "推送状态：空闲";
+  if (pushStatusEl) pushStatusEl.textContent = label;
+  if (pushStatusEl) pushStatusEl.dataset.phase = status.phase;
+  if (pushSucceededEl) pushSucceededEl.textContent = String(status.succeeded);
+  if (pushExistingEl) pushExistingEl.textContent = String(status.existing);
+  if (pushFailedEl) pushFailedEl.textContent = String(status.failed);
+  if (retryPushButton) retryPushButton.disabled = status.phase === "running";
+}
+
+async function refreshPushStatus(): Promise<void> {
+  const status = await fetchPushStatus(chromeSwChannel);
+  if (status) renderPushStatus(status);
+}
+
+async function requestRetryPush(): Promise<void> {
+  if (retryPushButton) retryPushButton.disabled = true;
+  try {
+    await retryPush(chromeSwChannel);
+    await refreshPushStatus();
+  } finally {
+    if (retryPushButton) retryPushButton.disabled = false;
+  }
+}
+
+
+  async function refreshCounts(): Promise<void> {
   const counts = await fetchCounts(chromeSwChannel);
   if (counts) {
     renderCounts(counts.total, counts.pending);
@@ -119,9 +159,30 @@ openBbdcButton?.addEventListener("click", () => {
   void openBbdcHome(chromeTabsGateway, BBDC_HOME_URL);
 });
 
-// 打开即：拉一次计数 + 自动采集 + 拉一次登录态
+retryPushButton?.addEventListener("click", () => {
+  void requestRetryPush();
+});
+
+// 推送进行中每 ~500ms 拉一次状态，结束即停。
+let pushStatusTimer: number | undefined;
+function startPushStatusPolling(): void {
+  if (pushStatusTimer !== undefined) return;
+  const tick = async (): Promise<void> => {
+    await refreshPushStatus();
+    const phase = pushStatusEl?.dataset.phase;
+    if (phase === "running") {
+      pushStatusTimer = window.setTimeout(tick, 500);
+    } else {
+      pushStatusTimer = undefined;
+    }
+  };
+  pushStatusTimer = window.setTimeout(tick, 0);
+}
+
+// 打开即：拉一次计数 + 自动采集 + 拉一次登录态 + 拉一次推送状态
 void refreshCounts();
 void refreshLogin();
+void refreshPushStatus().then(startPushStatusPolling);
 void collect();
 
 export {};
