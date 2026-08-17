@@ -12,3 +12,5 @@ export {
   type ExtractOptions,
 } from "./extract.js";
 export { lemmatizeWord, isProperNoun } from "./lemma.js";
+export { mergeWordEntries } from "./merge.js";
+export { parseWordListCsv, stringifyWordListCsv } from "./csv.js";
