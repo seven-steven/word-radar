@@ -1,0 +1,38 @@
+{
+  "name": "@word-radar/cli",
+  "version": "0.1.0",
+  "description": "WordRadar 命令行版：清洗本地英文文本、合并词表",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "word-radar": "./dist/index.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist .turbo .vite *.tsbuildinfo"
+  },
+  "dependencies": {
+    "@word-radar/core": "workspace:*",
+    "commander": "15.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "26.2.0",
+    "tsup": "8.5.1",
+    "typescript": "5.9.3",
+    "vitest": "4.1.10"
+  }
+}

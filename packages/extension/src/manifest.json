@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "WordRadar",
+  "version": "0.1.0",
+  "description": "把网页里的英文生词一键提取出来，自动加到「不背单词」生词本。",
+  "minimum_chrome_version": "114",
+  "action": {
+    "default_title": "WordRadar",
+    "default_popup": "src/popup.html"
+  },
+  "background": {
+    "service_worker": "src/background.ts",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["src/content.ts"],
+      "run_at": "document_idle"
+    }
+  ],
+  "host_permissions": ["https://bbdc.cn/*", "https://langeasy.com.cn/*"],
+  "permissions": ["storage"]
+}

@@ -1,2 +1,16 @@
+node_modules/
+dist/
+build/
+*.tsbuildinfo
+.DS_Store
+.env
+.env.*
+!.env.example
+coverage/
 .playwright-mcp/
 .claude/worktrees/
+.vite/
+*.log
+.turbo/
+.pnpm-store/
+.pnpm-debug.log*
