@@ -8,7 +8,7 @@
       body {
         margin: 0;
         padding: 12px 16px;
-        min-width: 220px;
+        min-width: 240px;
         font-family: system-ui, sans-serif;
         font-size: 14px;
       }
@@ -16,19 +16,52 @@
         margin: 0 0 8px;
         font-size: 16px;
       }
-      button {
+      .counts {
+        display: flex;
+        gap: 16px;
         margin-top: 8px;
       }
+      .count-item {
+        display: flex;
+        flex-direction: column;
+      }
+      .count-label {
+        color: #888;
+        font-size: 11px;
+      }
+      .count-value {
+        font-size: 18px;
+        font-weight: 600;
+      }
+      button {
+        margin-top: 12px;
+      }
       [data-testid="version"] {
-        margin-top: 8px;
+        margin-top: 12px;
         color: #888;
         font-size: 12px;
+      }
+      [data-testid="status"] {
+        margin: 4px 0 0;
+        color: #555;
+        font-size: 12px;
+        min-height: 1em;
       }
     </style>
   </head>
   <body>
     <main>
       <h1>WordRadar</h1>
+      <div class="counts">
+        <div class="count-item">
+          <span class="count-label">累计采集</span>
+          <span class="count-value" data-testid="total">—</span>
+        </div>
+        <div class="count-item">
+          <span class="count-label">待推</span>
+          <span class="count-value" data-testid="pending">—</span>
+        </div>
+      </div>
       <p data-testid="status">采集中…</p>
       <button type="button" data-testid="collect">重新采集</button>
       <p data-testid="version"></p>

@@ -1,18 +1,27 @@
 import type { WordEntry } from "@word-radar/core";
 
 /**
- * 扩展内部消息协议（tracer bullet 版，T07）。
+ * 扩展内部消息协议。
  *
  * 流向：
  * - popup → content：`COLLECT_WORDS`（tabs.sendMessage，触发当前页提取）
  * - content → popup：sendResponse 回 `CollectResponse`（同步应答，携带词数）
  * - content → background：`WORDS_COLLECTED`（runtime.sendMessage，携带词条）
+ * - popup → background：`GET_COUNTS`（查 total/pending）+ `MARK_PUSHED`（标记已推）
  *
- * background 是 WORDS_COLLECTED 的唯一接收方（T08 起独占 IndexedDB 写入）。
+ * background 是 WORDS_COLLECTED / GET_COUNTS / MARK_PUSHED 的唯一接收方
+ * （独占 IndexedDB 写入 + 推送调度 + 所有 HTTP）。
  */
 
 export const COLLECT_WORDS = "COLLECT_WORDS" as const;
 export const WORDS_COLLECTED = "WORDS_COLLECTED" as const;
+export const GET_COUNTS = "GET_COUNTS" as const;
+export const MARK_PUSHED = "MARK_PUSHED" as const;
+
+export interface Counts {
+  total: number;
+  pending: number;
+}
 
 /** popup → content：请求对当前活动标签页执行一次采集。 */
 export interface CollectWordsMessage {
@@ -25,7 +34,22 @@ export interface WordsCollectedMessage {
   entries: WordEntry[];
 }
 
-export type ExtensionMessage = CollectWordsMessage | WordsCollectedMessage;
+/** popup → background：查询词库累计 / 待推计数。 */
+export interface GetCountsMessage {
+  type: typeof GET_COUNTS;
+}
+
+/** popup → background：把指定 lemma 标记为「不背单词已推」。 */
+export interface MarkPushedMessage {
+  type: typeof MARK_PUSHED;
+  lemmas: string[];
+}
+
+export type ExtensionMessage =
+  | CollectWordsMessage
+  | WordsCollectedMessage
+  | GetCountsMessage
+  | MarkPushedMessage;
 
 /** content → popup 的同步应答。 */
 export type CollectResponse =
@@ -53,6 +77,21 @@ export function isWordsCollectedMessage(
     value.type === WORDS_COLLECTED &&
     Array.isArray(value.entries) &&
     value.entries.every(isWordEntry)
+  );
+}
+
+export function isGetCountsMessage(value: unknown): value is GetCountsMessage {
+  return isObject(value) && value.type === GET_COUNTS;
+}
+
+export function isMarkPushedMessage(
+  value: unknown,
+): value is MarkPushedMessage {
+  return (
+    isObject(value) &&
+    value.type === MARK_PUSHED &&
+    Array.isArray(value.lemmas) &&
+    value.lemmas.every((lemma) => typeof lemma === "string")
   );
 }
 

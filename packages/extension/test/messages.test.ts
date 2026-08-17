@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   COLLECT_WORDS,
+  GET_COUNTS,
+  MARK_PUSHED,
   WORDS_COLLECTED,
   isCollectResponse,
   isCollectWordsMessage,
+  isGetCountsMessage,
+  isMarkPushedMessage,
   isWordsCollectedMessage,
 } from "../src/lib/messages.js";
 
@@ -11,6 +15,8 @@ describe("消息协议常量", () => {
   it("锁定 type 字段字面值", () => {
     expect(COLLECT_WORDS).toBe("COLLECT_WORDS");
     expect(WORDS_COLLECTED).toBe("WORDS_COLLECTED");
+    expect(GET_COUNTS).toBe("GET_COUNTS");
+    expect(MARK_PUSHED).toBe("MARK_PUSHED");
   });
 });
 
@@ -60,6 +66,34 @@ describe("isWordsCollectedMessage", () => {
       }),
     ).toBe(false);
     expect(isWordsCollectedMessage(null)).toBe(false);
+  });
+});
+
+describe("isGetCountsMessage", () => {
+  it("接受合法消息", () => {
+    expect(isGetCountsMessage({ type: "GET_COUNTS" })).toBe(true);
+  });
+
+  it("拒绝其他 type 与畸形值", () => {
+    expect(isGetCountsMessage({ type: "OTHER" })).toBe(false);
+    expect(isGetCountsMessage(null)).toBe(false);
+    expect(isGetCountsMessage(42)).toBe(false);
+  });
+});
+
+describe("isMarkPushedMessage", () => {
+  it("接受合法消息（含空 lemmas 数组）", () => {
+    expect(isMarkPushedMessage({ type: "MARK_PUSHED", lemmas: ["a"] })).toBe(true);
+    expect(isMarkPushedMessage({ type: "MARK_PUSHED", lemmas: [] })).toBe(true);
+  });
+
+  it("拒绝缺 lemmas、非数组 lemmas 与非字符串元素", () => {
+    expect(isMarkPushedMessage({ type: "MARK_PUSHED" })).toBe(false);
+    expect(isMarkPushedMessage({ type: "MARK_PUSHED", lemmas: "a,b" })).toBe(false);
+    expect(isMarkPushedMessage({ type: "MARK_PUSHED", lemmas: [1, 2] })).toBe(
+      false,
+    );
+    expect(isMarkPushedMessage(null)).toBe(false);
   });
 });
 
