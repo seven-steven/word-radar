@@ -1,14 +1,22 @@
 /**
- * WordRadar CLI 入口。占位实现：仅暴露 `hello` 与 `version`，
- * 后续工单会接上 `extract <file|dir>` 与 `merge <a.csv> <b.csv>`。
+ * WordRadar CLI 入口。
+ *
+ * 提供命令：
+ * - extract <file|dir>: 从文件或目录提取词表
+ * - merge <a.csv> <b.csv>: 合并词表（T06 实现）
  *
  * 真正的 `parseAsync` 触发由打包产物顶部由 tsup 添加的 shebang 引导
  * （`#!/usr/bin/env node`）；不在 import 时副作用执行。
  */
 import { Command } from "commander";
 import { CORE_VERSION } from "@word-radar/core";
+import { processInput } from "./extract.js";
 
 const program = new Command();
+
+// 在测试环境（vitest）中，让 commander 抛出错误而不是调用 process.exit
+// 这样测试可以捕获错误
+program.exitOverride();
 
 program
   .name("word-radar")
@@ -16,11 +24,17 @@ program
   .version(CORE_VERSION);
 
 program
-  .command("hello")
-  .description("占位命令，验证脚手架可跑通")
-  .argument("[name]", "问候对象", "world")
-  .action((name: string) => {
-    process.stdout.write(`hello, ${name}!\n`);
+  .command("extract <path>")
+  .description(
+    "从文件或目录提取英文单词，生成 CSV 词表。\n\n" +
+      "对单个文件：<file> → <file>.words.csv\n" +
+      "对目录：递归处理所有 .md/.txt 文件，每个文件生成一份输出。\n\n" +
+      "输出文件默认放在输入文件同目录；使用 -o/--out 指定单文件输出路径。\n\n" +
+      "处理进度会实时输出到 stderr。忽略隐藏文件（以 . 开头）和 node_modules 目录。",
+  )
+  .option("-o, --out <file>", "输出文件路径（仅单文件时有效）")
+  .action(async (path: string, options: { out?: string }) => {
+    await processInput(path, options);
   });
 
 /**
