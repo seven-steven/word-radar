@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  CHECK_LOGIN,
   COLLECT_WORDS,
   GET_COUNTS,
   MARK_PUSHED,
   WORDS_COLLECTED,
+  isCheckLoginMessage,
+  isCheckLoginResponse,
   isCollectResponse,
   isCollectWordsMessage,
   isGetCountsMessage,
@@ -17,6 +20,7 @@ describe("消息协议常量", () => {
     expect(WORDS_COLLECTED).toBe("WORDS_COLLECTED");
     expect(GET_COUNTS).toBe("GET_COUNTS");
     expect(MARK_PUSHED).toBe("MARK_PUSHED");
+    expect(CHECK_LOGIN).toBe("CHECK_LOGIN");
   });
 });
 
@@ -109,5 +113,32 @@ describe("isCollectResponse", () => {
     expect(isCollectResponse({ ok: false })).toBe(false);
     expect(isCollectResponse(null)).toBe(false);
     expect(isCollectResponse("ok")).toBe(false);
+  });
+});
+
+describe("isCheckLoginMessage", () => {
+  it("接受合法消息", () => {
+    expect(isCheckLoginMessage({ type: "CHECK_LOGIN" })).toBe(true);
+  });
+
+  it("拒绝其他 type 与畸形值", () => {
+    expect(isCheckLoginMessage({ type: "OTHER" })).toBe(false);
+    expect(isCheckLoginMessage(null)).toBe(false);
+    expect(isCheckLoginMessage(42)).toBe(false);
+  });
+});
+
+describe("isCheckLoginResponse", () => {
+  it("接受 loggedIn=true/false 与 {ok:false,error}", () => {
+    expect(isCheckLoginResponse({ loggedIn: true })).toBe(true);
+    expect(isCheckLoginResponse({ loggedIn: false })).toBe(true);
+    expect(isCheckLoginResponse({ ok: false, error: "boom" })).toBe(true);
+  });
+
+  it("拒绝畸形应答", () => {
+    expect(isCheckLoginResponse(null)).toBe(false);
+    expect(isCheckLoginResponse({ loggedIn: "yes" })).toBe(false);
+    expect(isCheckLoginResponse({ ok: false })).toBe(false);
+    expect(isCheckLoginResponse({ ok: true })).toBe(false);
   });
 });

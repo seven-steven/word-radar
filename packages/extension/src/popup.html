@@ -47,6 +47,31 @@
         font-size: 12px;
         min-height: 1em;
       }
+      .login {
+        margin-top: 12px;
+        padding-top: 8px;
+        border-top: 1px solid #eee;
+      }
+      .login-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .login-status {
+        font-size: 12px;
+        color: #555;
+      }
+      .login-status[data-state="logged-in"] {
+        color: #0a7d2c;
+      }
+      .login-status[data-state="logged-out"] {
+        color: #b0000;
+      }
+      .login-actions {
+        margin-top: 8px;
+        display: flex;
+        gap: 8px;
+      }
     </style>
   </head>
   <body>
@@ -64,6 +89,15 @@
       </div>
       <p data-testid="status">采集中…</p>
       <button type="button" data-testid="collect">重新采集</button>
+      <section class="login">
+        <div class="login-row">
+          <span class="login-status" data-testid="login-status" data-state="unknown">登录状态：未知</span>
+        </div>
+        <div class="login-actions">
+          <button type="button" data-testid="check-login">检查登录</button>
+          <button type="button" data-testid="open-bbdc" hidden>打开不背单词</button>
+        </div>
+      </section>
       <p data-testid="version"></p>
     </main>
     <script type="module" src="./popup.ts"></script>

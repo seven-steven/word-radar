@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import { createBackgroundListener } from "../src/lib/background-listener.js";
 import {
+  createBackgroundListener,
+  type BackgroundBbdcClient,
+  type ActionBadgeGateway,
+} from "../src/lib/background-listener.js";
+import {
+  CHECK_LOGIN,
   GET_COUNTS,
   MARK_PUSHED,
   WORDS_COLLECTED,
@@ -23,6 +28,21 @@ function fakeRepository(): BackgroundRepository & {
       total: 3,
       pending: 3 - lemmas.length,
     })),
+  };
+}
+
+function fakeBbdcClient(overrides: Partial<BackgroundBbdcClient> = {}): BackgroundBbdcClient {
+  return {
+    checkLogin: vi.fn(async () => ({ loggedIn: true, resultCode: 200 })),
+    ...overrides,
+  };
+}
+
+function fakeActionBadge(): ActionBadgeGateway & {
+  set: ReturnType<typeof vi.fn>;
+} {
+  return {
+    set: vi.fn(async () => undefined),
   };
 }
 
@@ -129,5 +149,91 @@ describe("createBackgroundListener", () => {
     expect(repository.mergeCollected).not.toHaveBeenCalled();
     expect(repository.markPushed).not.toHaveBeenCalled();
     expect(repository.getCounts).not.toHaveBeenCalled();
+  });
+});
+
+describe("createBackgroundListener CHECK_LOGIN（T09）", () => {
+  it("已登录 → 应答 {loggedIn:true} + 清除 badge", async () => {
+    const repository = fakeRepository();
+    const bbdcClient = fakeBbdcClient({
+      checkLogin: vi.fn(async () => ({ loggedIn: true, resultCode: 200 })),
+    });
+    const badge = fakeActionBadge();
+    const listener = createBackgroundListener({ repository, bbdcClient, actionBadge: badge });
+    const sendResponse = vi.fn();
+
+    const keepChannel = listener({ type: CHECK_LOGIN }, {}, sendResponse);
+
+    expect(keepChannel).toBe(true);
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    expect(bbdcClient.checkLogin).toHaveBeenCalledTimes(1);
+    expect(badge.set).toHaveBeenCalledWith(null);
+    expect(sendResponse).toHaveBeenCalledWith({ loggedIn: true });
+  });
+
+  it("check-login result_code 非 200 → 应答 {loggedIn:false} + 设 badge \"!\"", async () => {
+    const repository = fakeRepository();
+    const bbdcClient = fakeBbdcClient({
+      checkLogin: vi.fn(async () => ({ loggedIn: false, resultCode: 401 })),
+    });
+    const badge = fakeActionBadge();
+    const listener = createBackgroundListener({ repository, bbdcClient, actionBadge: badge });
+    const sendResponse = vi.fn();
+
+    listener({ type: CHECK_LOGIN }, {}, sendResponse);
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+    expect(badge.set).toHaveBeenCalledWith("!");
+    expect(sendResponse).toHaveBeenCalledWith({ loggedIn: false });
+  });
+
+  it("BbdcAuthError（HTTP 401/403）→ 保守视为未登录 + 设 badge \"!\"", async () => {
+    class FakeAuthError extends Error {}
+    const repository = fakeRepository();
+    const bbdcClient = fakeBbdcClient({
+      checkLogin: vi.fn(async () => {
+        throw new FakeAuthError("auth");
+      }),
+    });
+    const badge = fakeActionBadge();
+    const listener = createBackgroundListener({ repository, bbdcClient, actionBadge: badge });
+    const sendResponse = vi.fn();
+
+    listener({ type: CHECK_LOGIN }, {}, sendResponse);
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+    expect(badge.set).toHaveBeenCalledWith("!");
+    expect(sendResponse).toHaveBeenCalledWith({ loggedIn: false });
+  });
+
+  it("未知错误（解析/网络）也保守视为未登录", async () => {
+    const repository = fakeRepository();
+    const bbdcClient = fakeBbdcClient({
+      checkLogin: vi.fn(async () => {
+        throw new Error("network boom");
+      }),
+    });
+    const badge = fakeActionBadge();
+    const listener = createBackgroundListener({ repository, bbdcClient, actionBadge: badge });
+    const sendResponse = vi.fn();
+
+    listener({ type: CHECK_LOGIN }, {}, sendResponse);
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+    expect(badge.set).toHaveBeenCalledWith("!");
+    expect(sendResponse).toHaveBeenCalledWith({ loggedIn: false });
+  });
+
+  it("CHECK_LOGIN 异步：返回 true 持有消息通道", async () => {
+    const repository = fakeRepository();
+    const bbdcClient = fakeBbdcClient({
+      checkLogin: vi.fn(
+        async () => new Promise((resolve) => setTimeout(() => resolve({ loggedIn: true, resultCode: 200 }), 5)),
+      ),
+    });
+    const listener = createBackgroundListener({ repository, bbdcClient });
+    const sendResponse = vi.fn();
+
+    expect(listener({ type: CHECK_LOGIN }, {}, sendResponse)).toBe(true);
   });
 });

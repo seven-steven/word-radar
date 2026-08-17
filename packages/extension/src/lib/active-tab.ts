@@ -16,6 +16,8 @@ import {
 export interface TabsGateway {
   queryActiveTabId(): Promise<number | undefined>;
   sendToTab(tabId: number, message: CollectWordsMessage): Promise<unknown>;
+  /** 在新标签页打开 url（popup 内用于「打开不背单词」引导）。 */
+  openUrl(url: string): Promise<void>;
 }
 
 export const chromeTabsGateway: TabsGateway = {
@@ -25,6 +27,9 @@ export const chromeTabsGateway: TabsGateway = {
   },
   sendToTab(tabId, message) {
     return chrome.tabs.sendMessage(tabId, message);
+  },
+  async openUrl(url) {
+    await chrome.tabs.create({ url });
   },
 };
 
@@ -60,4 +65,18 @@ function narrowToOutcome(response: CollectResponse): CollectOutcome {
   return response.ok
     ? { ok: true, count: response.count }
     : { ok: false, error: response.error };
+}
+
+/**
+ * 「打开不背单词」入口：在新标签页打开目标 URL。
+ * 收成可注入函数，便于 popup 单测覆盖（避免直接依赖 chrome.tabs.create）。
+ *
+ * spec §扩展行为：打开 `https://bbdc.cn/`，不固化深层 login URL。
+ * URL 由 popup 决定，本函数只负责转发到网关。
+ */
+export async function openBbdcHome(
+  gateway: TabsGateway,
+  url: string,
+): Promise<void> {
+  await gateway.openUrl(url);
 }

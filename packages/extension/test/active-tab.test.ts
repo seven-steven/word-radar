@@ -1,11 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
-import { requestCollection, type TabsGateway } from "../src/lib/active-tab.js";
+import { openBbdcHome, requestCollection, type TabsGateway } from "../src/lib/active-tab.js";
 import { COLLECT_WORDS } from "../src/lib/messages.js";
 
 function fakeGateway(overrides: Partial<TabsGateway> = {}): TabsGateway {
   return {
     queryActiveTabId: vi.fn(async () => 42),
     sendToTab: vi.fn(async () => ({ ok: true, count: 5 })),
+    openUrl: vi.fn(async () => undefined),
     ...overrides,
   };
 }
@@ -64,5 +65,26 @@ describe("requestCollection（popup 侧）", () => {
     const outcome = await requestCollection(gateway);
 
     expect(outcome).toEqual({ ok: false, error: "extract boom" });
+  });
+});
+
+describe("openBbdcHome（popup 引导）", () => {
+  it("调用 gateway.openUrl 打开不背单词首页（不固化深层 login URL）", async () => {
+    const gateway = fakeGateway();
+
+    await openBbdcHome(gateway, "https://bbdc.cn/");
+
+    expect(gateway.openUrl).toHaveBeenCalledTimes(1);
+    expect(gateway.openUrl).toHaveBeenCalledWith("https://bbdc.cn/");
+  });
+
+  it("openUrl 抛错时原样向上抛（popup 可选择性降级）", async () => {
+    const gateway = fakeGateway({
+      openUrl: vi.fn(async () => {
+        throw new Error("tabs boom");
+      }),
+    });
+
+    await expect(openBbdcHome(gateway, "https://bbdc.cn/")).rejects.toThrow("tabs boom");
   });
 });

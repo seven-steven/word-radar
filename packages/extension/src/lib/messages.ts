@@ -17,6 +17,7 @@ export const COLLECT_WORDS = "COLLECT_WORDS" as const;
 export const WORDS_COLLECTED = "WORDS_COLLECTED" as const;
 export const GET_COUNTS = "GET_COUNTS" as const;
 export const MARK_PUSHED = "MARK_PUSHED" as const;
+export const CHECK_LOGIN = "CHECK_LOGIN" as const;
 
 export interface Counts {
   total: number;
@@ -45,11 +46,32 @@ export interface MarkPushedMessage {
   lemmas: string[];
 }
 
+/**
+ * popup → background：触发一次 `bbdc.cn/api/check-login`，
+ * 由 SW 唯一持有 HTTP（spec §扩展行为）。
+ * 应答：`CheckLoginResponse`（见下）。
+ */
+export interface CheckLoginMessage {
+  type: typeof CHECK_LOGIN;
+}
+
+/**
+ * service worker → popup 的登录检查应答：
+ * - `{loggedIn:true}` — 确认已登录
+ * - `{loggedIn:false}` — 未登录或接口非 200 result_code
+ * - `{ok:false, error}` — 网络/解析失败（auth 错误归一到 loggedIn:false，由 SW 兜底）
+ */
+export type CheckLoginResponse =
+  | { loggedIn: true }
+  | { loggedIn: false }
+  | { ok: false; error: string };
+
 export type ExtensionMessage =
   | CollectWordsMessage
   | WordsCollectedMessage
   | GetCountsMessage
-  | MarkPushedMessage;
+  | MarkPushedMessage
+  | CheckLoginMessage;
 
 /** content → popup 的同步应答。 */
 export type CollectResponse =
@@ -93,6 +115,20 @@ export function isMarkPushedMessage(
     Array.isArray(value.lemmas) &&
     value.lemmas.every((lemma) => typeof lemma === "string")
   );
+}
+
+export function isCheckLoginMessage(value: unknown): value is CheckLoginMessage {
+  return isObject(value) && value.type === CHECK_LOGIN;
+}
+
+export function isCheckLoginResponse(
+  value: unknown,
+): value is CheckLoginResponse {
+  if (!isObject(value)) return false;
+  if (value.loggedIn === true) return true;
+  if (value.loggedIn === false) return true;
+  if (value.ok === false) return typeof value.error === "string";
+  return false;
 }
 
 export function isCollectResponse(value: unknown): value is CollectResponse {
