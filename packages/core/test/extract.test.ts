@@ -62,7 +62,7 @@ describe("extractWordEntries", () => {
   it("recognizes don't and well-known as single words", () => {
     expect(lemmas("He said don't panic; it's a well-known fact.")).toEqual([
       "he",
-      "said",
+      "say",
       "don't",
       "panic",
       "it's",
@@ -97,7 +97,7 @@ describe("extractWordEntries", () => {
       expect(out).not.toContain(bad);
     }
     expect(out).toContain("visit");
-    expect(out).toContain("details");
+    expect(out).toContain("detail");
   });
 
   it("NFKC normalizes curly quotes and unicode hyphens", () => {
@@ -108,16 +108,14 @@ describe("extractWordEntries", () => {
     expect(curly.map((e) => e.lemma)).toContain("well-known");
   });
 
-  it("returns {lemma, flags:0} entries deduplicated by lowercase lemma", () => {
+  it("returns {lemma, flags:0} entries deduplicated by lemma", () => {
     const entries = extractWordEntries("Run run RUN Runs runs");
-    expect(entries).toEqual([
-      { lemma: "run", flags: 0 },
-      { lemma: "runs", flags: 0 },
-    ]);
+    expect(entries).toEqual([{ lemma: "run", flags: 0 }]);
   });
 
-  it("does no lemmatization in v1 (running vs runs stay separate)", () => {
-    expect(lemmas("running runs")).toEqual(["running", "runs"]);
+  it("lemmatizes verbs and aggregates by lemma (running/runs/ran → run)", () => {
+    expect(lemmas("Running ran runs")).toEqual(["run"]);
+    expect(lemmas("running runs")).toEqual(["run"]);
   });
 
   it("handles empty input", () => {
@@ -151,7 +149,7 @@ describe("extractWordEntries", () => {
     expect(words).toContain("the");
     expect(words).toContain("don't");
     expect(words).toContain("well-known");
-    expect(words).toContain("users");
+    expect(words).toContain("user");
     // all flags zero
     expect(out.every((e) => e.flags === 0)).toBe(true);
     // deduplicated

@@ -11,3 +11,4 @@ export {
   normalizeText,
   type ExtractOptions,
 } from "./extract.js";
+export { lemmatizeWord, isProperNoun } from "./lemma.js";

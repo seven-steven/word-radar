@@ -1,13 +1,15 @@
 import type { WordEntry } from "./types.js";
+import { isProperNoun, lemmatizeWord } from "./lemma.js";
 
 /**
  * extractWordEntries 的选项。
  *
- * 本工单（T02）尚未引入词形还原（T03）与专名排除，因此暂无可配置项；
- * 预留此接口以保持 API 前向兼容（T03 会加 excludeProperNouns 等）。
+ * - `excludeProperNouns`（默认 `true`）：用 compromise `#ProperNoun` 排除专名
+ *   （人名、地名、品牌名等）；关闭后专名按普通词收录。
  */
 export interface ExtractOptions {
-  // 预留：T03 词形还原 / 专名开关。
+  /** 排除专名，默认 true。 */
+  excludeProperNouns?: boolean;
 }
 
 /**
@@ -98,22 +100,25 @@ export function tokenize(text: string): string[] {
 }
 
 /**
- * 提取管线（v1，无词形还原）：
- * NFKC 规范化 → 候选分词 → 过滤非英文词 → 小写去重 → `{lemma, flags:0}[]`。
+ * 提取管线（v2，含词形还原与专名排除）：
+ * NFKC 规范化 → 候选分词 → 过滤非英文词（+ 可选专名排除）
+ * → 词形还原（lemma 聚合前）→ 按 lemma 去重 → `{lemma, flags:0}[]`。
  *
- * 纯函数、零依赖、不依赖 DOM/Node API，扩展与 Node 共用。
- * 本阶段不做词形还原：running 与 runs 仍是两行（T03 处理）。
+ * 词形还原：compromise（不规则动词表优先 + 保守后缀 fallback），详见 lemma.ts。
+ * 纯函数，仅依赖 compromise（纯 JS），扩展与 Node 共用。
  */
 export function extractWordEntries(
   text: string,
-  _options?: ExtractOptions,
+  options?: ExtractOptions,
 ): WordEntry[] {
+  const excludeProperNouns = options?.excludeProperNouns ?? true;
   const normalized = normalizeText(text);
   const seen = new Set<string>();
   const entries: WordEntry[] = [];
   for (const token of tokenize(normalized)) {
     if (!isEnglishWord(token)) continue;
-    const lemma = token.toLowerCase();
+    if (excludeProperNouns && isProperNoun(token)) continue;
+    const lemma = lemmatizeWord(token);
     if (seen.has(lemma)) continue;
     seen.add(lemma);
     entries.push({ lemma, flags: 0 });
