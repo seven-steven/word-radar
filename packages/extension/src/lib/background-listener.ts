@@ -107,19 +107,26 @@ export function createBackgroundListener(deps: BackgroundListenerDeps) {
     ) => void,
   ): boolean => {
     if (isWordsCollectedMessage(message)) {
-      void handleWordsCollected(message.entries, deps.repository, maybeStartPush).catch(() => undefined);
-      return false;
+      // 应答 ack（入库结果）并持有通道，保证 content 侧 sendResponse 不会
+      // 在 mergeCollected 之前返回 → popup 拉到的 counts 一定是最新的。
+      void handleWordsCollected(message.entries, deps.repository, maybeStartPush)
+        .then((counts) => sendResponse(counts), () =>
+          sendResponse({ ok: false, error: "merge-collected-failed" }))
+        .catch(() => undefined);
+      return true;
     }
     if (isGetCountsMessage(message)) {
       deps.repository
         .getCounts()
-        .then(sendResponse, () => sendResponse({ ok: false, error: "counts-failed" }));
+        .then(sendResponse, () => sendResponse({ ok: false, error: "counts-failed" }))
+        .catch(() => undefined);
       return true;
     }
     if (isMarkPushedMessage(message)) {
       deps.repository
         .markPushed(message.lemmas)
-        .then(sendResponse, () => sendResponse({ ok: false, error: "mark-failed" }));
+        .then(sendResponse, () => sendResponse({ ok: false, error: "mark-failed" }))
+        .catch(() => undefined);
       return true;
     }
     if (isRetryPushMessage(message)) {
@@ -132,17 +139,20 @@ export function createBackgroundListener(deps: BackgroundListenerDeps) {
     }
     if (isCheckLoginMessage(message)) {
       handleCheckLogin(bbdcClient, actionBadge, pushCoordinator)
-        .then(sendResponse, () => sendResponse({ ok: false, error: "check-login-failed" }));
+        .then(sendResponse, () => sendResponse({ ok: false, error: "check-login-failed" }))
+        .catch(() => undefined);
       return true;
     }
     if (isExportCsvMessage(message)) {
       handleExportCsv(deps.repository)
-        .then(sendResponse, () => sendResponse({ ok: false, error: "export-failed" }));
+        .then(sendResponse, () => sendResponse({ ok: false, error: "export-failed" }))
+        .catch(() => undefined);
       return true;
     }
     if (isImportCsvMessage(message)) {
       handleImportCsv(message.csvText, message.fileName, deps.repository, maybeStartPush)
-        .then(sendResponse, () => sendResponse({ ok: false, error: "import-failed" }));
+        .then(sendResponse, () => sendResponse({ ok: false, error: "import-failed" }))
+        .catch(() => undefined);
       return true;
     }
     return false;
@@ -153,9 +163,11 @@ async function handleWordsCollected(
   entries: WordEntry[],
   repository: BackgroundRepository,
   maybeStartPush: () => Promise<void>,
-): Promise<void> {
-  await repository.mergeCollected(entries);
-  await maybeStartPush();
+): Promise<Counts> {
+  const counts = await repository.mergeCollected(entries);
+  // 非阻塞触发推送：失败不影响应答（与 handleWordsCollected 一致）
+  await maybeStartPush().catch(() => undefined);
+  return counts;
 }
 
 /**
@@ -189,7 +201,8 @@ async function handleImportCsv(
     return { ok: false, error: `${fileName}: ${detail}` };
   }
   const counts = await repository.mergeCollected(entries);
-  await maybeStartPush();
+  // 非阻塞触发推送：失败不影响导入结果应答（已提交的合并不应被推送失败回滚）
+  await maybeStartPush().catch(() => undefined);
   return counts;
 }
 

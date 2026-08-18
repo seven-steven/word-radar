@@ -65,7 +65,16 @@
 - **`CsvParseError({line, column?, kind, message})`**：`packages/core/src/csv.ts` 的 typed error。`kind` 是 7 类字面量 union：`'too-few-columns'` / `'too-many-columns'` / `'nonnumeric-flags'` / `'negative-flags'` / `'fractional-flags'` / `'empty-lemma'` / `'invalid-flags'`。与 C4 `BbdcAuthError` / `BbdcHttpError` / `BbdcApiError` 同型模式 — typed error 替 string。
 - **`ImportCsvErrorResponse({ok:false, fileName, line, kind, error})`**：`handleImportCsv` catch `CsvParseError` 后响应 shape。顶层加 `fileName` / `line` / `kind` 字段（从 CsvParseError 透传）；与 C2 dispatch 错误的 `{ok:false, error}` 兼容（`error` 仍带 fileName 前缀字符串）。popup / 测试可读结构化字段。
 
-## 模块职责（C5 深化后）
+## 模块词汇（C6 采集→入库竞态修复）
+
+> C1–C5 是深模块化分层。C6 是**竞态修复**：修「采集数 N 但 total/pending 恒 0」的间歇性 bug。
+
+- **根因**：content script 的 `WORDS_COLLECTED` 是 fire-and-forget 广播，`COLLECT_WORDS` 应答（词数 N）不等待 SW `mergeCollected` 完成。popup 收到应答立刻 `refreshCounts()`，若 IndexedDB readonly 事务在 readwrite 提交之前读到旧快照 → counts=0，之后再不刷新。间歇性，时序不定。
+- **修复**：`broadcast` / `runCollection` / `createContentListener` 全链 async 化，持有消息通道（`return true`），`sendResponse` 延迟到 SW 入库完成之后。popup 拿到的 COLLECT_WORDS 应答意味着词已入库，`refreshCounts()` 自然读到新值。`handleWordsCollected` 返回 `Counts` 并作为 ack 通过 `sendResponse(counts)` 回传。`maybeStartPush` 失败静默（`.catch(() => undefined)`）不影响应答。
+- **模块职责不变量升级**：`RunCollectionDeps.broadcast` 签名 `void → Promise<unknown>`（必须 resolve 在 SW 入库完成后）；`createContentListener` 返回 `boolean`（`true` 持有通道）。
+- **验证**：`test/e2e/raw-pre.spec.ts` 新场景（pre 正文页 + 无脚本页），`test/run-collection.test.ts` / `test/content-listener.test.ts` / `test/background-listener.test.ts` 全链 async 改写；collect e2e 3 次连续跑全绿（之前间歇性失败）。
+
+## 模块职责（C6 深化后）
 
 | 模块                     | 职责                                                                    | 不持有                                              |
 | ------------------------ | ----------------------------------------------------------------------- | --------------------------------------------------- |

@@ -6,6 +6,8 @@ export default defineConfig({
   test: {
     // 默认 node 环境；DOM 提取测试在文件内用 @vitest-environment jsdom 声明。
     environment: "node",
+    // e2e 用例为 test/e2e/*.spec.ts，不匹配 include（*.test.ts），
+    // 由 Playwright 单独驱动（pnpm e2e），无需在此排除。
     include: ["test/**/*.test.ts"],
   },
 });

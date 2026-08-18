@@ -10,10 +10,10 @@ import { createContentListener } from "./lib/content-listener.js";
 import { runCollection } from "./lib/run-collection.js";
 import type { WordsCollectedMessage } from "./lib/messages.js";
 
-function broadcast(message: WordsCollectedMessage): void {
-  // background 是常驻接收方（MV3 下 sendMessage 会唤醒 service worker）；
-  // 采集结果不依赖回执，投递失败静默忽略。
-  void chrome.runtime.sendMessage(message).catch(() => undefined);
+function broadcast(message: WordsCollectedMessage): Promise<unknown> {
+  // 应答 ack（SW 入库完成）；content-listener 持有消息通道直到 ack 落地，
+  // 保证 popup 拿到的 COLLECT_WORDS 应答意味着词已入库（修 C6 竞态）。
+  return chrome.runtime.sendMessage(message);
 }
 
 const listener = createContentListener(() =>

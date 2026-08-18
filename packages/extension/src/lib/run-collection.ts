@@ -13,15 +13,16 @@ import {
  */
 export interface RunCollectionDeps {
   collectText: () => string;
-  broadcast: (message: WordsCollectedMessage) => void;
+  /** 广播采集结果给 SW；必须 resolve 在 SW 入库完成后（保证下游 counts 刷新一致）。 */
+  broadcast: (message: WordsCollectedMessage) => Promise<unknown>;
   /** 默认 core 的 extractWordEntries。 */
   extract?: (text: string) => WordEntry[];
 }
 
-export function runCollection(deps: RunCollectionDeps): CollectResponse {
+export async function runCollection(deps: RunCollectionDeps): Promise<CollectResponse> {
   const extract = deps.extract ?? extractWordEntries;
   const text = deps.collectText();
   const entries = extract(text);
-  deps.broadcast({ type: WORDS_COLLECTED, entries });
+  await deps.broadcast({ type: WORDS_COLLECTED, entries });
   return { ok: true, count: entries.length };
 }

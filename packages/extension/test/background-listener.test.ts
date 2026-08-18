@@ -87,7 +87,7 @@ function fakePushCoordinator(): PushCoordinator & {
 }
 
 describe("createBackgroundListener", () => {
-  it("收到 WORDS_COLLECTED 调 repository.mergeCollected；不持有通道", async () => {
+  it("收到 WORDS_COLLECTED 调 repository.mergeCollected 后应答新计数；持有通道", async () => {
     const repository = fakeRepository();
     const listener = createBackgroundListener({ repository });
     const sendResponse = vi.fn();
@@ -104,14 +104,15 @@ describe("createBackgroundListener", () => {
       sendResponse,
     );
 
-    expect(keepChannel).toBe(false);
-    // 等 microtask：合并是异步的
-    await new Promise<void>((resolve) => queueMicrotask(resolve));
+    expect(keepChannel).toBe(true); // 异步应答，持有消息通道
+    // 无 chrome 环境下 defaultSettingsStorage 走 fallback（readAutoPush
+    // 返回 true），整条链无真实 IO；一个 macrotask 足以排空全部 microtask。
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
     expect(repository.mergeCollected).toHaveBeenCalledWith([
       { lemma: "run", flags: 0 },
       { lemma: "serendipity", flags: 0 },
     ]);
-    expect(sendResponse).not.toHaveBeenCalled();
+    expect(sendResponse).toHaveBeenCalledWith({ total: 2, pending: 2 });
   });
 
   it("GET_COUNTS 异步应答当前计数；返回 true 持有通道", async () => {

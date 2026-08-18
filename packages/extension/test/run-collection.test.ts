@@ -3,13 +3,13 @@ import { runCollection } from "../src/lib/run-collection.js";
 import { WORDS_COLLECTED, type WordsCollectedMessage } from "../src/lib/messages.js";
 
 describe("runCollection 编排", () => {
-  it("收集文本 → core 提取 → 广播 WORDS_COLLECTED → 应答词数", () => {
+  it("收集文本 → core 提取 → 广播 WORDS_COLLECTED → 等 ack → 应答词数", async () => {
     const events: string[] = [];
-    const broadcast = vi.fn((message: WordsCollectedMessage) => {
-      events.push(`broadcast:${message.type}`);
+    const broadcast = vi.fn(async (_message: WordsCollectedMessage) => {
+      events.push("broadcast-ack");
     });
 
-    const response = runCollection({
+    const response = await runCollection({
       collectText: () => {
         events.push("collect");
         return "Running ran runs";
@@ -17,21 +17,19 @@ describe("runCollection 编排", () => {
       broadcast,
     });
 
-    // 真实 core 提取：running/runs/ran → lemma "run" 一行
     expect(response).toEqual({ ok: true, count: 1 });
     expect(broadcast).toHaveBeenCalledTimes(1);
     expect(broadcast).toHaveBeenCalledWith({
       type: WORDS_COLLECTED,
       entries: [{ lemma: "run", flags: 0 }],
     });
-    // 顺序锁定：先收集后广播
-    expect(events).toEqual(["collect", "broadcast:WORDS_COLLECTED"]);
+    expect(events).toEqual(["collect", "broadcast-ack"]);
   });
 
-  it("空文本提取出 0 词，仍广播空 entries", () => {
-    const broadcast = vi.fn();
+  it("空文本提取出 0 词，仍广播空 entries", async () => {
+    const broadcast = vi.fn(async () => undefined);
 
-    const response = runCollection({ collectText: () => "12345", broadcast });
+    const response = await runCollection({ collectText: () => "12345", broadcast });
 
     expect(response).toEqual({ ok: true, count: 0 });
     expect(broadcast).toHaveBeenCalledWith({
@@ -40,11 +38,11 @@ describe("runCollection 编排", () => {
     });
   });
 
-  it("可注入 extract 覆盖 core 默认实现", () => {
-    const broadcast = vi.fn();
+  it("可注入 extract 覆盖 core 默认实现", async () => {
+    const broadcast = vi.fn(async () => undefined);
     const extract = vi.fn(() => [{ lemma: "custom", flags: 0 }]);
 
-    const response = runCollection({
+    const response = await runCollection({
       collectText: () => "whatever",
       broadcast,
       extract,
@@ -56,5 +54,18 @@ describe("runCollection 编排", () => {
       type: WORDS_COLLECTED,
       entries: [{ lemma: "custom", flags: 0 }],
     });
+  });
+
+  it("broadcast 抛错时不吞掉", async () => {
+    const broadcast = vi.fn(async () => {
+      throw new Error("broadcast boom");
+    });
+
+    await expect(
+      runCollection({
+        collectText: () => "whatever",
+        broadcast,
+      }),
+    ).rejects.toThrow("broadcast boom");
   });
 });
