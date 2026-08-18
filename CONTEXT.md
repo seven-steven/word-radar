@@ -22,33 +22,45 @@
 - **`PushPacing`**：节奏策略端口。结构化对象 `{ lookupGapMs: number; addWordGapMs: number; wordGapMs: number }`。默认 `{ 100, 400, 400 }` — `lookupDefinition` 由 GET 路径 150 rps 实测取 60 倍富余；`addWord` 沿用 spec 防御默认（外部不可实测）。
 - **`RetryPolicy<TClient>`**：重试策略端口。泛型包装 `withRetry(client, policy)` 返回同名同形状但带重试的 client。重试间隔 `[0, 800, 2000]ms`，4xx 与 `BbdcAuthError` 不重试，其余重试 3 次。接有道 / 墨墨只换 client。
 - **`Retryable<BbdcClient>`**：`BbdcClient` 应用 `RetryPolicy<BbdcClient>` 后得到的实例。`PushCoordinator` 调它，不感知重试。
-- **`subscribe(handler)`**：`PushCoordinator` 的状态事件订阅。`onProgress` 回调从未被接上 — `subscribe` 替换它，让 popup 从轮询转为事件驱动（C3 的依赖）。
+- **`subscribe(handler)`**：`PushCoordinator` 的状态事件订阅。`onProgress` 回调从未被接上 — `subscribe` 替换它，让 popup 从轮询转为事件驱动（C3 的依赖）。**触发语义**：每次状态变化时回调一次（idle→running / running 中每词推送后 / running→idle），不只是 phase 转换边界 — 这样 popup 能看到 per-word 进度，彻底替代 500ms 轮询。
 
 ## 模块词汇（C2 深化引入）
 
 > C1 是「业务模块深模块化」（PushCoordinator / RetryPolicy / PushPacing）。C2 是「基础设施深模块化」 — 跨上下文消息的解析与分发收成一个接缝。
 
-- **`MessageBus`**：跨上下文消息的解析 + 分发 + 响应窄化深模块。`createMessageBus(deps)` 工厂返回 `{ parse, dispatch, parseResponse }`，闭包绑 5 个 deps（`repository` / `bbdcClient` / `pushCoordinator` / `actionBadge` / `settingsStorage`）。`background-listener.ts` 从 227 行缩成 ~10 行 transport wiring。
+- **`MessageBus`**：跨上下文消息的解析 + 分发 + 响应窄化深模块。`createMessageBus(deps)` 工厂返回 `{ parse, dispatch, parseResponse, onPushStatus }`（**4 方法**，C3 加 `onPushStatus`），闭包绑 5 个 deps（`repository` / `bbdcClient` / `pushCoordinator` / `actionBadge` / `settingsStorage`）。`background-listener.ts` 从 227 行缩成 ~10 行 transport wiring。
 - **`parseExtensionMessage(raw: unknown)`**：入站窄化入口。OR 13 个 `isXxx` guard（来自 `messages.ts`），返回 `ExtensionMessage | null`。`null` 让 listener 早返回 `false`（chrome 关 channel）。
 - **`dispatch(message: ExtensionMessage): Promise<unknown>`**：入站分发。switch on `message.type`，调 4 个 internal handler（`handleWordsCollected` / `handleExportCsv` / `handleImportCsv` / `handleCheckLogin`）。throw 内部 catch 包成 `{ok:false, error: err.message}`；handler 返回值原样透传（线协议不变）。
-- **`parseResponse(raw: unknown, type: ResponseType): unknown`**：出站响应窄化。`type` 显式参数（`'checkLogin'` / `'exportCsv'` / `'importCsv'` / `'collect'` / `'counts'` / `'pushStatus'`）；内部 switch 到 `isXxxResponse` / 新加 `isCounts` / 新加 `isPushStatus`。`sw-channel.ts` 的 5 处散落窄化全部收成 `bus.parseResponse(raw, 'checkLogin')` 一行调用。
+- **`parseResponse(raw: unknown, type: ResponseType): unknown`**：出站响应窄化。`type` 显式参数（`'checkLogin'` / `'exportCsv'` / `'importCsv'` / `'collect'` / `'counts'` / `'pushStatus'`）；内部 switch 到 `isXxxResponse` / 新加 `isCounts` / 新加 `isPushStatus`。`sw-channel.ts` 的 5 处散落窄化全部收成 `bus.parseResponse(raw, 'checkLogin')` 一行调用（经 `createSwChannel(bus)` 工厂封装）。
 
-## 模块职责（C2 深化后）
+## 模块词汇（C3 深化引入）
 
-| 模块                   | 职责                                                                    | 不持有                        |
-| ---------------------- | ----------------------------------------------------------------------- | ----------------------------- |
-| `PushCoordinator`      | 队列 + 状态机 + 单例守卫                                                | 重试策略、节奏策略            |
-| `RetryPolicy<TClient>` | 重试间隔 + 错误分类                                                     | 队列、状态                    |
-| `PushPacing`           | lookup / addWord / word 节奏常量                                        | 重试、队列                    |
-| `BbdcClient`           | HTTP + 错误类型化（`BbdcAuthError` / `BbdcHttpError` / `BbdcApiError`） | 重试、节奏                    |
-| `WordRepository`       | IndexedDB 持久化                                                        | HTTP、推送                    |
-| **`MessageBus`** (C2)  | 消息解析 + 分发 + 响应窄化；4 个 internal handler                       | transport、类型定义、具体业务 |
+> C1 是业务模块深模块化，C2 是基础设施深模块化。C3 是 **UI 层净化** — 把 popup.ts 里的"渲染 + 控制器 + 常量 + 轮询"四件事拆开，把零测试的 UI 局部变成可测的纯函数视图 + 事件驱动控制器。
+
+- **`popup-views.ts`**：4 个 render 纯函数（`renderCounts` / `renderLogin` / `renderPushStatus` / `renderSyncStatus`）。接收 `elements` 对象 + `data`，DOM 更新是唯一副作用。零 chrome API 依赖，零状态，零异步 — happy-dom 可单测。`popup.ts` 271 → ~150 行（减 121 行），4 个 render 迁出。
+- **`createSwChannel(bus)` 工厂**：`sw-channel.ts` 改造点。返回 6 个方法（`fetchCounts` / `fetchLoginStatus` / `fetchPushStatus` / `fetchExportCsv` / `importCsv` / `retryPush`），每方法 1 行 `chromeSwChannel.X().then(raw => bus.parseResponse(raw, 'X'))`。原 5 处 inline narrowers 全部消失（依赖 C2 的 `parseResponse`）。popup 调用点零变化（`swChannel.fetchCounts()` 仍是原签名）。
+- **`bus.onPushStatus(handler)`**：C3 新加的 MessageBus 第 4 方法，委派 `pushCoordinator.subscribe(handler)`。popup 通过 `bus.onPushStatus((status) => renderPushStatus(els, status))` 替换 13 行 `setTimeout` 递归轮询；handler 拿新 `PushStatus` 直接调 render。
+- **`csvExportFileName(now: Date = new Date())`**：从 popup.ts 迁 `lib/csv-file.ts`。纯函数，输入 `Date` 输出 `word-radar-YYYYMMDD-HHmm.csv`（local timezone）。`csv-file.ts` 已有（CSV 解析与生成），自然归位。
+- **`BBDC_HOME_URL`**：从 popup.ts 迁 `lib/bbdc-client.ts` 的 `BBDC_ORIGIN` 旁。`bbdc-client.ts` 已有 `BBDC_ORIGIN = "https://bbdc.cn"` 常量；`BBDC_HOME_URL` 是同源不同义（首页路径 vs API origin），并存。
+
+## 模块职责（C3 深化后）
+
+| 模块                   | 职责                                                                    | 不持有                                              |
+| ---------------------- | ----------------------------------------------------------------------- | --------------------------------------------------- |
+| `PushCoordinator`      | 队列 + 状态机 + 单例守卫 + 状态事件广播                                 | 重试策略、节奏策略                                  |
+| `RetryPolicy<TClient>` | 重试间隔 + 错误分类                                                     | 队列、状态                                          |
+| `PushPacing`           | lookup / addWord / word 节奏常量                                        | 重试、队列                                          |
+| `BbdcClient`           | HTTP + 错误类型化（`BbdcAuthError` / `BbdcHttpError` / `BbdcApiError`） | 重试、节奏；含 `BBDC_ORIGIN` / `BBDC_HOME_URL` 常量 |
+| `WordRepository`       | IndexedDB 持久化                                                        | HTTP、推送                                          |
+| `MessageBus` (C2/C3)   | 消息解析 + 分发 + 响应窄化 + `onPushStatus` 委派；4 个 internal handler | transport、类型定义、具体业务                       |
+| **`popup-views`** (C3) | 4 个 render 纯函数（counts / login / push / sync）                      | 状态、异步、chrome API                              |
+| `createSwChannel` (C3) | popup → SW 的 send + parse 包装工厂                                     | 解析（用 bus）、transport（用 chromeSwChannel）     |
 
 ## API 不变量（C1 深化后）
 
 - `PushCoordinator.start()`：并发 1，已运行返回同一 promise。
 - `PushCoordinator.getStatus()`：返回 `PushProgress` 快照。
-- `PushCoordinator.subscribe(handler)`：handler 在 phase 转换时各回调一次；handler 抛错不影响队列。
+- `PushCoordinator.subscribe(handler)`：**每次状态变化时**各回调一次（idle→running / running 中每词推送后 / running→idle），不只是 phase 转换边界（C3 升级前是"phase 转换时"，被 C3 替换以彻底替代 popup 轮询）；handler 抛错不影响队列。
 - `RetryPolicy<TClient>.withRetry(client, policy)`：不修改 client 类型；保持同名同形状。
 
 ## API 不变量（C2 深化后）
@@ -57,6 +69,14 @@
 - `bus.dispatch(message)`：永不 throw 外泄；handler 抛错被内部 catch 包成 `{ok:false, error: err.message}`；handler 返回值原样 resolve（线协议不变）。
 - `bus.parseResponse(raw, type)`：`type` 是 `'checkLogin'` / `'exportCsv'` / `'importCsv'` / `'collect'` / `'counts'` / `'pushStatus'` 之一；返回 `unknown`（已窄化但 caller 需自行 cast 或 narrow）。
 - `createMessageBus(deps)`：5 个 deps 全闭包；不修改 deps；多次调用产生独立 bus 实例。
+
+## API 不变量（C3 深化后）
+
+- `bus.onPushStatus(handler)`：**C3 新加**第 4 方法，委派 `pushCoordinator.subscribe(handler)`。handler 在每次状态变化时各回调一次；返回 unsubscribe 函数。
+- `createSwChannel(bus)`：返回 6 方法，每方法 1 行 `chromeSwChannel.X().then(raw => bus.parseResponse(raw, 'X'))`；`retryPush` 无响应窄化（chromeSwChannel 自带）；不持有 transport 或 parse — 只组合两者。
+- `popup-views` 4 个 render 函数：纯函数，签名 `(elements, data) => void`；无返回值、无异步、无 chrome API；DOM 是唯一副作用。
+- `popup.ts` 8 个 async wrapper：每个 ~10 行，紧凑于其触发的按钮；调 `swChannel.X()`（依赖 C3 `createSwChannel` 工厂），调 `renderX(els, data)`（依赖 `popup-views`），catch 错误 → render `sync-status` 错误文本。
+- `bus.onPushStatus` 与 popup 轮询互斥：落地后 popup.ts 不再有 `setTimeout` 递归；启动时 `bus.onPushStatus((status) => renderPushStatus(els, status))` 一行接好。
 
 ## 测试不变量（C1 深化后）
 
@@ -85,6 +105,14 @@
   - delta=0（不入库，无残留）— BBDC 对非浏览器客户端拒绝
   - 实际限频必须从真浏览器测量；深化后默认 `400ms` 保留为防御值
 
+## 测试不变量（C3 深化后）
+
+- `popup-views.test.ts`（新）测 4 个 render 函数：每函数给 mock elements（`{ totalEl, pendingEl, ... }` 用 happy-dom `HTMLElement`）+ data，断言 `textContent` / `dataset` / `hidden` 等 DOM 输出。9 点 / 跨日 / 跨月 / 闰秒类边缘 case 走 csvExportFileName（移入 csv-file.ts 后）。
+- `message-bus.test.ts`（C3 加）增 `onPushStatus` 委派测试 — 断言 bus.onPushStatus(h) → pushCoordinator.subscribe(h)；handler 抛错不影响委派链。
+- `sw-channel.test.ts`（C3 改）mock `createSwChannel(bus)` 工厂，6 方法各测 happy / sad / throw path；`bus.parseResponse` mock 返回各 type 的预期窄化结果。
+- `csv-file.test.ts`（C3 加）`csvExportFileName(now)` 边缘 case：9 点 → `HHmm` 正确；跨日 → 日期 +1；跨月 → 月 +1；闰秒 → 用 `Date.now()` 走默认参数（不验证闰秒，因为依赖宿主时钟）。
+- `popup.test.ts` **不新增** — popup.ts 仍是"DOM lookup + handlers + boot"胶水层，UI glue 零测试惯例（依赖 chrome 扩展生态）。C5 提测试夹具整合时如果 popup 仍未测，留作"已知未覆盖"。
+
 ## 不在范围内（避免重新提案）
 
 - 多端自动同步（WebDAV / Gist / 后端）：第一版仅手动 CSV 导入导出。
@@ -92,6 +120,9 @@
 - YouTube 字幕 / GitHub markdown 专项采集：第一版只做网页正文。
 - 推送历史 / 失败原因审计 / 可恢复任务队列：第一版不做。
 - 把不背单词 cookie 读出 / 转发 / 上传：永不做（安全边界）。
-- **`MessageBus` 不管 transport**（`chrome.runtime.onMessage` wiring）— 那是 `background.ts` 的事；MessageBus 只暴露 3 个方法，listener 自己写。
+- **`MessageBus` 不管 transport**（`chrome.runtime.onMessage` wiring）— 那是 `background.ts` 的事；MessageBus 只暴露 4 个方法，listener 自己写。
 - **`MessageBus` 不动态注册新 type** — 编译时 `ExtensionMessage` union 已定；加 type 必须改 `messages.ts`（C5 提案未走前不要尝试自动发现）。
 - **offscreen / external sender 第一版不存在** — 如果未来加，MessageBus 加新分支即可；现在不要为不存在的 sender 预留接口。
+- **`popup.ts` 8 个 async wrapper 不提取到 popup-controllers.ts** — 与按钮耦合紧密，提取会增加间接（参）而不增可测性。
+- **`popup.ts` 不引入 wireAction 声明式 helper** — boilerplate 减少得不偿失，调试路径更复杂。
+- **`bus.onPushStatus` 不暴露通用 subscribe** — 只委派 pushCoordinator.subscribe；其他子系统（settingsStorage 变化等）若有事件订阅需求，再独立添加。
