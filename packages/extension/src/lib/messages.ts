@@ -8,9 +8,11 @@ import type { WordEntry } from "@word-radar/core";
  * - content → popup：sendResponse 回 `CollectResponse`（同步应答，携带词数）
  * - content → background：`WORDS_COLLECTED`（runtime.sendMessage，携带词条）
  * - popup → background：`GET_COUNTS`（查 total/pending）+ `MARK_PUSHED`（标记已推）
+ * - popup → background（T11）：`EXPORT_CSV`（导出词库为 CSV 文本）
+ *   + `IMPORT_CSV`（CSV 文本与词库合并，flags 按位或）
  *
- * background 是 WORDS_COLLECTED / GET_COUNTS / MARK_PUSHED 的唯一接收方
- * （独占 IndexedDB 写入 + 推送调度 + 所有 HTTP）。
+ * background 是 WORDS_COLLECTED / GET_COUNTS / MARK_PUSHED / EXPORT_CSV /
+ * IMPORT_CSV 的唯一接收方（独占 IndexedDB 写入 + 推送调度 + 所有 HTTP）。
  */
 
 export const COLLECT_WORDS = "COLLECT_WORDS" as const;
@@ -20,6 +22,8 @@ export const MARK_PUSHED = "MARK_PUSHED" as const;
 export const CHECK_LOGIN = "CHECK_LOGIN" as const;
 export const RETRY_PUSH = "RETRY_PUSH" as const;
 export const GET_PUSH_STATUS = "GET_PUSH_STATUS" as const;
+export const EXPORT_CSV = "EXPORT_CSV" as const;
+export const IMPORT_CSV = "IMPORT_CSV" as const;
 
 export interface Counts {
   total: number;
@@ -73,6 +77,36 @@ export interface CheckLoginMessage {
 }
 
 /**
+ * popup → background（T11）：导出整个词库为 `lemma,flags` CSV 文本。
+ * 编解码复用 core 的 stringifyWordListCsv，与 CLI merge 同源。
+ * 应答：`ExportCsvResponse`。
+ */
+export interface ExportCsvMessage {
+  type: typeof EXPORT_CSV;
+}
+
+/**
+ * popup → background（T11）：导入一份 CSV 文本，与现有词库同词合并、
+ * flags 按位或（已推词不会被洗回待推；新词按 CSV 自带 flags 值进库）。
+ * 解析失败时不产生任何写入，应答 {ok:false,error}（含文件名与行号）。
+ * 应答：成功返回最新 `Counts`，失败返回 `{ok:false,error}`。
+ */
+export interface ImportCsvMessage {
+  type: typeof IMPORT_CSV;
+  csvText: string;
+  /** 源文件名，仅用于错误提示包装。 */
+  fileName: string;
+}
+
+/** service worker → popup 的导出应答。 */
+export type ExportCsvResponse =
+  | { ok: true; csv: string }
+  | { ok: false; error: string };
+
+/** service worker → popup 的导入应答：成功为最新计数，失败为错误。 */
+export type ImportCsvResponse = Counts | { ok: false; error: string };
+
+/**
  * service worker → popup 的登录检查应答：
  * - `{loggedIn:true}` — 确认已登录
  * - `{loggedIn:false}` — 未登录或接口非 200 result_code
@@ -90,7 +124,9 @@ export type ExtensionMessage =
   | MarkPushedMessage
   | CheckLoginMessage
   | RetryPushMessage
-  | GetPushStatusMessage;
+  | GetPushStatusMessage
+  | ExportCsvMessage
+  | ImportCsvMessage;
 
 /** content → popup 的同步应答。 */
 export type CollectResponse =
@@ -146,6 +182,28 @@ export function isRetryPushMessage(value: unknown): value is RetryPushMessage {
 
 export function isGetPushStatusMessage(value: unknown): value is GetPushStatusMessage {
   return isObject(value) && value.type === GET_PUSH_STATUS;
+}
+
+export function isExportCsvMessage(value: unknown): value is ExportCsvMessage {
+  return isObject(value) && value.type === EXPORT_CSV;
+}
+
+export function isImportCsvMessage(
+  value: unknown,
+): value is ImportCsvMessage {
+  return (
+    isObject(value) &&
+    value.type === IMPORT_CSV &&
+    typeof value.csvText === "string" &&
+    typeof value.fileName === "string"
+  );
+}
+
+export function isExportCsvResponse(value: unknown): value is ExportCsvResponse {
+  if (!isObject(value)) return false;
+  if (value.ok === true) return typeof value.csv === "string";
+  if (value.ok === false) return typeof value.error === "string";
+  return false;
 }
 
   export function isCheckLoginResponse(value: unknown): value is CheckLoginResponse {

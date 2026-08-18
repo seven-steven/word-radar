@@ -81,6 +81,25 @@
         display: flex;
         gap: 8px;
       }
+      .sync {
+        margin-top: 12px;
+        padding-top: 8px;
+        border-top: 1px solid #eee;
+      }
+      .sync-actions {
+        display: flex;
+        gap: 8px;
+      }
+      .sync-actions button {
+        margin-top: 0;
+      }
+      .sync-status {
+        margin: 4px 0 0;
+        color: #555;
+        font-size: 12px;
+        min-height: 1em;
+        word-break: break-all;
+      }
     </style>
   </head>
   <body>
@@ -106,6 +125,13 @@
           失败 <span data-testid="push-failed">0</span>
         </div>
         <button type="button" data-testid="retry-push">重试待推</button>
+      </section>
+      <section class="sync">
+        <div class="sync-actions">
+          <button type="button" data-testid="export-csv">导出 CSV</button>
+          <button type="button" data-testid="import-csv">导入 CSV</button>
+        </div>
+        <p class="sync-status" data-testid="sync-status"></p>
       </section>
       <section class="login">
         <div class="login-row">

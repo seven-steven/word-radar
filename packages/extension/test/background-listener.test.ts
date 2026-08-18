@@ -6,7 +6,9 @@ import {
 } from "../src/lib/background-listener.js";
 import {
   CHECK_LOGIN,
+  EXPORT_CSV,
   GET_COUNTS,
+  IMPORT_CSV,
   MARK_PUSHED,
   RETRY_PUSH,
   GET_PUSH_STATUS,
@@ -20,6 +22,8 @@ function fakeRepository(): BackgroundRepository & {
   mergeCollected: ReturnType<typeof vi.fn>;
   getCounts: ReturnType<typeof vi.fn>;
   markPushed: ReturnType<typeof vi.fn>;
+  getAll: ReturnType<typeof vi.fn>;
+  listPending: ReturnType<typeof vi.fn>;
 } {
   return {
     mergeCollected: vi.fn(async (entries: WordEntry[]) => ({
@@ -31,6 +35,13 @@ function fakeRepository(): BackgroundRepository & {
       total: 3,
       pending: 3 - lemmas.length,
     })),
+    getAll: vi.fn(async (): Promise<WordEntry[]> => [
+      { lemma: "garden", flags: 0 },
+      { lemma: "run", flags: 1 },
+    ]),
+    listPending: vi.fn(async (): Promise<WordEntry[]> => [
+      { lemma: "garden", flags: 0 },
+    ]),
   };
 }
 
@@ -364,5 +375,122 @@ describe("createBackgroundListener T10 push 消息", () => {
       pending: 3,
       current: "garden",
     });
+  });
+});
+
+describe("createBackgroundListener T11 CSV 导入/导出", () => {
+  it("EXPORT_CSV：getAll → stringify 应答 {ok:true,csv}（含已推位）；持有通道", async () => {
+    const repository = fakeRepository();
+    const listener = createBackgroundListener({ repository });
+    const sendResponse = vi.fn();
+
+    const keepChannel = listener({ type: EXPORT_CSV }, {}, sendResponse);
+
+    expect(keepChannel).toBe(true);
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    expect(repository.getAll).toHaveBeenCalledTimes(1);
+    expect(sendResponse).toHaveBeenCalledWith({
+      ok: true,
+      csv: "lemma,flags\ngarden,0\nrun,1\n",
+    });
+  });
+
+  it("EXPORT_CSV 仓库失败时应答 {ok:false,error}", async () => {
+    const repository = fakeRepository();
+    repository.getAll = vi.fn(async () => {
+      throw new Error("db boom");
+    });
+    const listener = createBackgroundListener({ repository });
+    const sendResponse = vi.fn();
+
+    listener({ type: EXPORT_CSV }, {}, sendResponse);
+
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    expect(sendResponse).toHaveBeenCalledWith({ ok: false, error: "export-failed" });
+  });
+
+  it("IMPORT_CSV：解析后调 mergeCollected（flags 按 CSV 值传入）并应答新计数；非阻塞触发推送", async () => {
+    const repository = fakeRepository();
+    const push = fakePushCoordinator();
+    const listener = createBackgroundListener({ repository, pushCoordinator: push });
+    const sendResponse = vi.fn();
+
+    const keepChannel = listener(
+      { type: IMPORT_CSV, csvText: "lemma,flags\nrun,0\nother,1\n", fileName: "in.csv" },
+      {},
+      sendResponse,
+    );
+
+    expect(keepChannel).toBe(true);
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    expect(repository.mergeCollected).toHaveBeenCalledWith([
+      { lemma: "run", flags: 0 },
+      { lemma: "other", flags: 1 },
+    ]);
+    expect(sendResponse).toHaveBeenCalledWith({ total: 2, pending: 2 });
+    expect(push.start).toHaveBeenCalledTimes(1);
+  });
+
+  it("IMPORT_CSV 坏 CSV：应答 {ok:false} 且错误含文件名与行号；不产生任何写入", async () => {
+    const repository = fakeRepository();
+    const push = fakePushCoordinator();
+    const listener = createBackgroundListener({ repository, pushCoordinator: push });
+    const sendResponse = vi.fn();
+
+    listener(
+      {
+        type: IMPORT_CSV,
+        csvText: "lemma,flags\nrun,0\n,oops\n",
+        fileName: "broken.csv",
+      },
+      {},
+      sendResponse,
+    );
+
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    const response = sendResponse.mock.calls[0]?.[0] as {
+      ok: false;
+      error: string;
+    };
+    expect(response.ok).toBe(false);
+    expect(response.error).toContain("broken.csv");
+    expect(response.error).toContain("line 3");
+    expect(repository.mergeCollected).not.toHaveBeenCalled();
+    expect(push.start).not.toHaveBeenCalled();
+  });
+
+  it("IMPORT_CSV 空 CSV（仅表头）：按空列表合并，不报错", async () => {
+    const repository = fakeRepository();
+    const push = fakePushCoordinator();
+    const listener = createBackgroundListener({ repository, pushCoordinator: push });
+    const sendResponse = vi.fn();
+
+    listener(
+      { type: IMPORT_CSV, csvText: "lemma,flags\n", fileName: "empty.csv" },
+      {},
+      sendResponse,
+    );
+
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    expect(repository.mergeCollected).toHaveBeenCalledWith([]);
+    expect(sendResponse).toHaveBeenCalledWith({ total: 0, pending: 0 });
+  });
+
+  it("IMPORT_CSV 仓库写入失败时应答 {ok:false,error}", async () => {
+    const repository = fakeRepository();
+    repository.mergeCollected = vi.fn(async () => {
+      throw new Error("db boom");
+    });
+    const listener = createBackgroundListener({ repository });
+    const sendResponse = vi.fn();
+
+    listener(
+      { type: IMPORT_CSV, csvText: "lemma,flags\nrun,0\n", fileName: "a.csv" },
+      {},
+      sendResponse,
+    );
+
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    expect(sendResponse).toHaveBeenCalledWith({ ok: false, error: "import-failed" });
   });
 });

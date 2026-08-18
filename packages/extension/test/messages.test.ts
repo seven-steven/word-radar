@@ -2,14 +2,19 @@ import { describe, expect, it } from "vitest";
 import {
   CHECK_LOGIN,
   COLLECT_WORDS,
+  EXPORT_CSV,
   GET_COUNTS,
+  IMPORT_CSV,
   MARK_PUSHED,
   WORDS_COLLECTED,
   isCheckLoginMessage,
   isCheckLoginResponse,
   isCollectResponse,
   isCollectWordsMessage,
+  isExportCsvMessage,
+  isExportCsvResponse,
   isGetCountsMessage,
+  isImportCsvMessage,
   isMarkPushedMessage,
   isWordsCollectedMessage,
 } from "../src/lib/messages.js";
@@ -140,5 +145,63 @@ describe("isCheckLoginResponse", () => {
     expect(isCheckLoginResponse({ loggedIn: "yes" })).toBe(false);
     expect(isCheckLoginResponse({ ok: false })).toBe(false);
     expect(isCheckLoginResponse({ ok: true })).toBe(false);
+  });
+});
+
+describe("T11 导入/导出消息协议", () => {
+  it("锁定 type 字段字面值", () => {
+    expect(EXPORT_CSV).toBe("EXPORT_CSV");
+    expect(IMPORT_CSV).toBe("IMPORT_CSV");
+  });
+});
+
+describe("isExportCsvMessage", () => {
+  it("接受合法消息", () => {
+    expect(isExportCsvMessage({ type: "EXPORT_CSV" })).toBe(true);
+  });
+
+  it("拒绝其他 type 与畸形值", () => {
+    expect(isExportCsvMessage({ type: "IMPORT_CSV" })).toBe(false);
+    expect(isExportCsvMessage(null)).toBe(false);
+    expect(isExportCsvMessage("EXPORT_CSV")).toBe(false);
+    expect(isExportCsvMessage(42)).toBe(false);
+  });
+});
+
+describe("isImportCsvMessage", () => {
+  it("接受合法消息（含空 csvText）", () => {
+    expect(
+      isImportCsvMessage({ type: "IMPORT_CSV", csvText: "lemma,flags\n", fileName: "a.csv" }),
+    ).toBe(true);
+    expect(
+      isImportCsvMessage({ type: "IMPORT_CSV", csvText: "", fileName: "a.csv" }),
+    ).toBe(true);
+  });
+
+  it("拒绝缺字段、非字符串 csvText / fileName 与畸形值", () => {
+    expect(isImportCsvMessage({ type: "IMPORT_CSV" })).toBe(false);
+    expect(isImportCsvMessage({ type: "IMPORT_CSV", csvText: "x" })).toBe(false);
+    expect(
+      isImportCsvMessage({ type: "IMPORT_CSV", csvText: 1, fileName: "a.csv" }),
+    ).toBe(false);
+    expect(
+      isImportCsvMessage({ type: "IMPORT_CSV", csvText: "x", fileName: 42 }),
+    ).toBe(false);
+    expect(isImportCsvMessage(null)).toBe(false);
+  });
+});
+
+describe("isExportCsvResponse", () => {
+  it("接受 {ok:true,csv} 与 {ok:false,error}", () => {
+    expect(isExportCsvResponse({ ok: true, csv: "lemma,flags\n" })).toBe(true);
+    expect(isExportCsvResponse({ ok: false, error: "boom" })).toBe(true);
+  });
+
+  it("拒绝畸形应答", () => {
+    expect(isExportCsvResponse(null)).toBe(false);
+    expect(isExportCsvResponse({ ok: true })).toBe(false);
+    expect(isExportCsvResponse({ ok: true, csv: 1 })).toBe(false);
+    expect(isExportCsvResponse({ ok: false })).toBe(false);
+    expect(isExportCsvResponse("csv")).toBe(false);
   });
 });

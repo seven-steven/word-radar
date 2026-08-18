@@ -4,10 +4,15 @@ import {
   CHECK_LOGIN,
   GET_PUSH_STATUS,
   RETRY_PUSH,
+  EXPORT_CSV,
+  IMPORT_CSV,
+  isExportCsvResponse,
   type CheckLoginResponse,
   type Counts,
   type PushStatus,
+  type ExportCsvMessage,
   type GetCountsMessage,
+  type ImportCsvMessage,
   type MarkPushedMessage,
   type CheckLoginMessage,
 } from "./messages.js";
@@ -18,8 +23,8 @@ import {
  * 把 `chrome.runtime.sendMessage` 收在这一个小模块，便于单测与未来切到
  * `chrome.runtime.connect` 长连接时不影响上层。
  *
- * GET_COUNTS / MARK_PUSHED / CHECK_LOGIN 是异步应答，sendMessage 返回的
- * Promise 在 SW 调用 sendResponse 时 resolve。
+ * GET_COUNTS / MARK_PUSHED / CHECK_LOGIN / EXPORT_CSV / IMPORT_CSV 是异步应答，
+ * sendMessage 返回的 Promise 在 SW 调用 sendResponse 时 resolve。
  */
 export interface SwChannel {
   getCounts(): Promise<unknown>;
@@ -27,6 +32,10 @@ export interface SwChannel {
   checkLogin(): Promise<unknown>;
   getPushStatus(): Promise<unknown>;
   retryPush(): Promise<unknown>;
+  /** T11：请求 SW 导出整个词库为 CSV 文本。 */
+  exportCsv(): Promise<unknown>;
+  /** T11：把本地 CSV 文本交给 SW 与词库合并。 */
+  importCsv(csvText: string, fileName: string): Promise<unknown>;
 }
 
 export const chromeSwChannel: SwChannel = {
@@ -47,6 +56,14 @@ export const chromeSwChannel: SwChannel = {
   },
   retryPush() {
     return chrome.runtime.sendMessage({ type: RETRY_PUSH });
+  },
+  exportCsv() {
+    const message: ExportCsvMessage = { type: EXPORT_CSV };
+    return chrome.runtime.sendMessage(message);
+  },
+  importCsv(csvText: string, fileName: string) {
+    const message: ImportCsvMessage = { type: IMPORT_CSV, csvText, fileName };
+    return chrome.runtime.sendMessage(message);
   },
 };
 
@@ -109,6 +126,61 @@ export async function fetchPushStatus(channel: SwChannel): Promise<PushStatus | 
 
 export async function retryPush(channel: SwChannel): Promise<void> {
   await channel.retryPush();
+}
+
+/** T11 导出应答（popup 侧收窄后的形态）。 */
+export type ExportCsvOutcome =
+  | { ok: true; csv: string }
+  | { ok: false; error: string };
+
+/**
+ * T11 导出收窄：
+ * - SW 报 `{ok:true,csv}` / `{ok:false,error}` → 原样透传
+ * - 任何其他应答 / 抛错 → `{ok:false}`（popup 只负责展示失败）
+ */
+export async function fetchExportCsv(
+  channel: SwChannel,
+): Promise<ExportCsvOutcome> {
+  try {
+    const raw = await channel.exportCsv();
+    if (isExportCsvResponse(raw)) return raw;
+    return { ok: false, error: "export-unavailable" };
+  } catch {
+    return { ok: false, error: "export-unavailable" };
+  }
+}
+
+/** T11 导入应答（popup 侧收窄后的形态）。 */
+export type ImportCsvOutcome =
+  | { ok: true; counts: Counts }
+  | { ok: false; error: string };
+
+/**
+ * T11 导入收窄：
+ * - SW 返回 Counts（导入成功）→ `{ok:true,counts}`
+ * - SW 返回 `{ok:false,error}`（坏 CSV：含文件名 + 行号）→ 原样透传
+ * - 任何其他应答 / 抛错 → `{ok:false}`
+ */
+export async function importCsv(
+  channel: SwChannel,
+  csvText: string,
+  fileName: string,
+): Promise<ImportCsvOutcome> {
+  try {
+    const raw = await channel.importCsv(csvText, fileName);
+    if (isCounts(raw)) return { ok: true, counts: raw };
+    if (
+      typeof raw === "object" &&
+      raw !== null &&
+      (raw as { ok?: unknown }).ok === false &&
+      typeof (raw as { error?: unknown }).error === "string"
+    ) {
+      return { ok: false, error: (raw as { error: string }).error };
+    }
+    return { ok: false, error: "import-unavailable" };
+  } catch {
+    return { ok: false, error: "import-unavailable" };
+  }
 }
 
 function isPushStatus(value: unknown): value is PushStatus {
