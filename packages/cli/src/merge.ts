@@ -10,6 +10,14 @@ import { readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
 /**
+ * 标记错误已经由本模块打印到 stderr，避免 index.ts 的 catch 再次打印。
+ */
+function markPrinted(err: Error): Error {
+  (err as Error & { alreadyPrinted?: boolean }).alreadyPrinted = true;
+  return err;
+}
+
+/**
  * 合并多份 CSV 词表文件。
  *
  * @param files - 输入 CSV 文件路径数组（至少 2 个）
@@ -23,7 +31,7 @@ export async function mergeFiles(
   if (files.length < 2) {
     const message = "Error: merge requires at least 2 input files";
     process.stderr.write(`word-radar: ${message}\n`);
-    throw new Error(message);
+    throw markPrinted(new Error(message));
   }
 
   // 读取并解析所有输入文件
@@ -39,7 +47,7 @@ export async function mergeFiles(
           ? `Error: File not found: ${filePath}`
           : `Error: Cannot read ${filePath}: ${error instanceof Error ? error.message : String(error)}`;
       process.stderr.write(`word-radar: ${message}\n`);
-      throw new Error(message);
+      throw markPrinted(new Error(message));
     }
 
     // Strip UTF-8 BOM
@@ -58,7 +66,7 @@ export async function mergeFiles(
       // core 报 "CSV parse error at line N: ..."，CLI 需包装文件名
       const message = `Error in ${filePath}: ${originalMessage}`;
       process.stderr.write(`word-radar: ${message}\n`);
-      throw new Error(message);
+      throw markPrinted(new Error(message));
     }
 
     allEntries.push(entries);

@@ -17,6 +17,14 @@ import { resolve, join, basename, dirname, extname } from "node:path";
 import { relative } from "node:path";
 
 /**
+ * 标记错误已经由本模块打印到 stderr，避免 index.ts 的 catch 再次打印。
+ */
+export function markPrinted(err: Error): Error {
+  (err as Error & { alreadyPrinted?: boolean }).alreadyPrinted = true;
+  return err;
+}
+
+/**
  * 处理单个输入路径（文件或目录）。
  */
 export async function processInput(
@@ -34,7 +42,7 @@ export async function processInput(
         ? `Error: Path does not exist: ${inputPath}`
         : `Error: Cannot access ${inputPath}: ${error instanceof Error ? error.message : String(error)}`;
     process.stderr.write(`word-radar: ${message}\n`);
-    throw new Error(message);
+    throw markPrinted(new Error(message));
   }
 
   if (stats.isFile()) {
@@ -44,13 +52,13 @@ export async function processInput(
       const message =
         "Error: Cannot use -o/--out when processing a directory. Output files will be placed alongside input files.";
       process.stderr.write(`word-radar: ${message}\n`);
-      throw new Error(message);
+      throw markPrinted(new Error(message));
     }
     await processDirectory(absolutePath);
   } else {
     const message = `Error: Not a file or directory: ${inputPath}`;
     process.stderr.write(`word-radar: ${message}\n`);
-    throw new Error(message);
+    throw markPrinted(new Error(message));
   }
 }
 

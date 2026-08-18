@@ -71,8 +71,17 @@ const invokedDirectly =
 
 if (invokedDirectly) {
   run(process.argv).catch((err: unknown) => {
-    const message = err instanceof Error ? err.message : String(err);
-    process.stderr.write(`word-radar: ${message}\n`);
+    // commander 自己已经打印过的错误（exitOverride 抛出的 CommanderError）
+    // 以及子模块里已经 stderr.write 过的错误，不再重复打印
+    const alreadyPrinted =
+      err instanceof Error &&
+      (err as Error & { alreadyPrinted?: boolean }).alreadyPrinted === true;
+    const isCommanderError =
+      err instanceof Error && err.name === "CommanderError";
+    if (!alreadyPrinted && !isCommanderError) {
+      const message = err instanceof Error ? err.message : String(err);
+      process.stderr.write(`word-radar: ${message}\n`);
+    }
     process.exitCode = 1;
   });
 }
