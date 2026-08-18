@@ -27,6 +27,7 @@ import {
   retryPush,
 } from "./lib/sw-channel.js";
 import { browserCsvFileGateway } from "./lib/csv-file.js";
+import { readAutoPush, writeAutoPush } from "./lib/settings.js";
 import type { PushStatus } from "./lib/messages.js";
 
 const BBDC_HOME_URL = "https://bbdc.cn/";
@@ -55,6 +56,17 @@ const pushFailedEl = document.querySelector<HTMLElement>('[data-testid="push-fai
 const exportCsvButton = document.querySelector<HTMLButtonElement>('[data-testid="export-csv"]');
 const importCsvButton = document.querySelector<HTMLButtonElement>('[data-testid="import-csv"]');
 const syncStatusEl = document.querySelector<HTMLElement>('[data-testid="sync-status"]');
+const autoPushCheckbox = document.querySelector<HTMLInputElement>('[data-testid="auto-push"]');
+
+if (autoPushCheckbox) {
+  // 初始状态从 chrome.storage.local 读取（未设置时默认开）
+  void readAutoPush().then((enabled) => {
+    autoPushCheckbox.checked = enabled;
+  });
+  autoPushCheckbox.addEventListener("change", () => {
+    void writeAutoPush(autoPushCheckbox.checked);
+  });
+}
 
 if (versionEl) {
   versionEl.textContent = `core ${CORE_VERSION}`;

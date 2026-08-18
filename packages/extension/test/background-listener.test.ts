@@ -494,3 +494,128 @@ describe("createBackgroundListener T11 CSV 导入/导出", () => {
     expect(sendResponse).toHaveBeenCalledWith({ ok: false, error: "import-failed" });
   });
 });
+describe("createBackgroundListener 自动推送开关", () => {
+  function makeSettingsStorage(autoPush: unknown) {
+    return {
+      getAutoPush: vi.fn(async () => autoPush),
+      setAutoPush: vi.fn(async () => undefined),
+    };
+  }
+
+  async function flush(): Promise<void> {
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  }
+
+  it("开关关：WORDS_COLLECTED 只合并不 start", async () => {
+    const repository = fakeRepository();
+    const coordinator = fakePushCoordinator();
+    const listener = createBackgroundListener({
+      repository,
+      pushCoordinator: coordinator,
+      settingsStorage: makeSettingsStorage(false),
+    });
+
+    listener(
+      { type: WORDS_COLLECTED, entries: [{ lemma: "run", flags: 0 }] },
+      {},
+      vi.fn(),
+    );
+    await flush();
+
+    expect(repository.mergeCollected).toHaveBeenCalledTimes(1);
+    expect(coordinator.start).not.toHaveBeenCalled();
+  });
+
+  it("开关开：WORDS_COLLECTED 合并后 start", async () => {
+    const repository = fakeRepository();
+    const coordinator = fakePushCoordinator();
+    const listener = createBackgroundListener({
+      repository,
+      pushCoordinator: coordinator,
+      settingsStorage: makeSettingsStorage(true),
+    });
+
+    listener(
+      { type: WORDS_COLLECTED, entries: [{ lemma: "run", flags: 0 }] },
+      {},
+      vi.fn(),
+    );
+    await flush();
+
+    expect(repository.mergeCollected).toHaveBeenCalledTimes(1);
+    expect(coordinator.start).toHaveBeenCalledTimes(1);
+  });
+
+  it("开关关：IMPORT_CSV 合并后不 start", async () => {
+    const repository = fakeRepository();
+    const coordinator = fakePushCoordinator();
+    const listener = createBackgroundListener({
+      repository,
+      pushCoordinator: coordinator,
+      settingsStorage: makeSettingsStorage(false),
+    });
+
+    const keep = listener(
+      { type: IMPORT_CSV, csvText: "lemma,flags\nrun,0\n", fileName: "a.csv" },
+      {},
+      vi.fn(),
+    );
+    expect(keep).toBe(true);
+    await flush();
+
+    expect(repository.mergeCollected).toHaveBeenCalledTimes(1);
+    expect(coordinator.start).not.toHaveBeenCalled();
+  });
+
+  it("开关开：IMPORT_CSV 合并后 start", async () => {
+    const repository = fakeRepository();
+    const coordinator = fakePushCoordinator();
+    const listener = createBackgroundListener({
+      repository,
+      pushCoordinator: coordinator,
+      settingsStorage: makeSettingsStorage(true),
+    });
+
+    listener(
+      { type: IMPORT_CSV, csvText: "lemma,flags\nrun,0\n", fileName: "a.csv" },
+      {},
+      vi.fn(),
+    );
+    await flush();
+
+    expect(coordinator.start).toHaveBeenCalledTimes(1);
+  });
+
+  it("RETRY_PUSH 不受开关影响：关闭时仍 start", async () => {
+    const repository = fakeRepository();
+    const coordinator = fakePushCoordinator();
+    const listener = createBackgroundListener({
+      repository,
+      pushCoordinator: coordinator,
+      settingsStorage: makeSettingsStorage(false),
+    });
+
+    listener({ type: RETRY_PUSH }, {}, vi.fn());
+    await flush();
+
+    expect(coordinator.start).toHaveBeenCalledTimes(1);
+  });
+
+  it("未注入 settingsStorage（无 chrome 环境）时按默认开 start", async () => {
+    const repository = fakeRepository();
+    const coordinator = fakePushCoordinator();
+    const listener = createBackgroundListener({
+      repository,
+      pushCoordinator: coordinator,
+    });
+
+    listener(
+      { type: WORDS_COLLECTED, entries: [{ lemma: "run", flags: 0 }] },
+      {},
+      vi.fn(),
+    );
+    await flush();
+
+    expect(coordinator.start).toHaveBeenCalledTimes(1);
+  });
+});

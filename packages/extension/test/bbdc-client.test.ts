@@ -13,6 +13,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   BbdcApiError,
   BbdcAuthError,
+  BbdcHttpError,
   createBbdcClient,
   type BbdcClient,
 } from "../src/lib/bbdc-client.js";
@@ -342,5 +343,35 @@ describe("BbdcClient 工厂默认 fetch", () => {
     } finally {
       globalThis.fetch = original;
     }
+  });
+});
+describe("BbdcClient 非 2xx HTTP 状态分流", () => {
+  it("HTTP 404 抛 BbdcHttpError，携带 status=404", async () => {
+    const { client } = makeClient(() => makeResponse(404, { result_code: 404 }));
+
+    await expect(client.checkLogin()).rejects.toBeInstanceOf(BbdcHttpError);
+    await expect(client.checkLogin()).rejects.toMatchObject({ status: 404 });
+  });
+
+  it("HTTP 429 抛 BbdcHttpError，携带 status=429", async () => {
+    const { client } = makeClient(() => makeResponse(429, "too many"));
+
+    await expect(client.addWord("run", "v. 跑")).rejects.toBeInstanceOf(BbdcHttpError);
+    await expect(client.addWord("run", "v. 跑")).rejects.toMatchObject({ status: 429 });
+  });
+
+  it("HTTP 500 抛 BbdcHttpError（非鉴权错），携带 status=500", async () => {
+    const { client } = makeClient(() => makeResponse(500, "boom"));
+
+    await expect(client.checkExisting("run")).rejects.toBeInstanceOf(BbdcHttpError);
+    await expect(client.checkExisting("run")).rejects.not.toBeInstanceOf(BbdcAuthError);
+    await expect(client.checkExisting("run")).rejects.toMatchObject({ status: 500 });
+  });
+
+  it("HTTP 401 仍抛 BbdcAuthError（不是 BbdcHttpError）", async () => {
+    const { client } = makeClient(() => makeResponse(401, "unauthorized"));
+
+    await expect(client.checkLogin()).rejects.toBeInstanceOf(BbdcAuthError);
+    await expect(client.checkLogin()).rejects.not.toBeInstanceOf(BbdcHttpError);
   });
 });

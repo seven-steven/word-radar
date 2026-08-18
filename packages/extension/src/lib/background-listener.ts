@@ -21,6 +21,7 @@ import {
 import { createBbdcClient, type BbdcClient } from "./bbdc-client.js";
 import { chromeActionBadge } from "./action-badge.js";
 import { PushCoordinator } from "./push-coordinator.js";
+import { defaultSettingsStorage, readAutoPush, type SettingsStorage } from "./settings.js";
 
 /** background 写入的 IndexedDB 仓储边界（service worker 独占）。 */
 export interface BackgroundRepository {
@@ -56,6 +57,8 @@ export interface BackgroundListenerDeps {
   /** 注入 action badge 网关（默认 lazy 创建 chromeActionBadge）。 */
   actionBadge?: ActionBadgeGateway;
   pushCoordinator?: PushCoordinator;
+  /** 注入配置存储（默认 chrome.storage.local 网关）。 */
+  settingsStorage?: SettingsStorage;
 }
 
 /**
@@ -81,6 +84,14 @@ export function createBackgroundListener(deps: BackgroundListenerDeps) {
     client: bbdcClient,
     repository: deps.repository,
   });
+  const settingsStorage = deps.settingsStorage ?? defaultSettingsStorage();
+
+  /** 自动合并后是否自动启动推送（受「自动推送」开关控制，默认开）。 */
+  const maybeStartPush = async (): Promise<void> => {
+    if (await readAutoPush(settingsStorage)) {
+      void pushCoordinator.start();
+    }
+  };
 
   return (
     message: unknown,
@@ -96,7 +107,7 @@ export function createBackgroundListener(deps: BackgroundListenerDeps) {
     ) => void,
   ): boolean => {
     if (isWordsCollectedMessage(message)) {
-      void handleWordsCollected(message.entries, deps.repository, pushCoordinator).catch(() => undefined);
+      void handleWordsCollected(message.entries, deps.repository, maybeStartPush).catch(() => undefined);
       return false;
     }
     if (isGetCountsMessage(message)) {
@@ -130,7 +141,7 @@ export function createBackgroundListener(deps: BackgroundListenerDeps) {
       return true;
     }
     if (isImportCsvMessage(message)) {
-      handleImportCsv(message.csvText, message.fileName, deps.repository, pushCoordinator)
+      handleImportCsv(message.csvText, message.fileName, deps.repository, maybeStartPush)
         .then(sendResponse, () => sendResponse({ ok: false, error: "import-failed" }));
       return true;
     }
@@ -141,10 +152,10 @@ export function createBackgroundListener(deps: BackgroundListenerDeps) {
 async function handleWordsCollected(
   entries: WordEntry[],
   repository: BackgroundRepository,
-  pushCoordinator: PushCoordinator,
+  maybeStartPush: () => Promise<void>,
 ): Promise<void> {
   await repository.mergeCollected(entries);
-  void pushCoordinator.start();
+  await maybeStartPush();
 }
 
 /**
@@ -168,7 +179,7 @@ async function handleImportCsv(
   csvText: string,
   fileName: string,
   repository: BackgroundRepository,
-  pushCoordinator: PushCoordinator,
+  maybeStartPush: () => Promise<void>,
 ): Promise<ImportCsvResponse> {
   let entries: WordEntry[];
   try {
@@ -178,7 +189,7 @@ async function handleImportCsv(
     return { ok: false, error: `${fileName}: ${detail}` };
   }
   const counts = await repository.mergeCollected(entries);
-  void pushCoordinator.start();
+  await maybeStartPush();
   return counts;
 }
 

@@ -46,6 +46,19 @@ export class BbdcApiError extends Error {
   }
 }
 
+/**
+ * HTTP 层失败：非 2xx 且非 401/403 的响应（如 404/429/500）。
+ * 携带 `status`（HTTP 状态码），供推送编排器按 4xx 不重试分流。
+ */
+export class BbdcHttpError extends Error {
+  readonly status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "BbdcHttpError";
+    this.status = status;
+  }
+}
+
 export interface CheckLoginResult {
   loggedIn: boolean;
   resultCode: number;
@@ -117,7 +130,7 @@ export function createBbdcClient(options: BbdcClientOptions = {}): BbdcClient {
         `${BBDC_ORIGIN}/api/check-login`,
         { method: "GET", credentials: "include" },
       );
-      assertNotAuthFailure(response);
+      assertAcceptableStatus(response);
       const body = await parseJson(response);
       const resultCode = readResultCode(body);
       if (resultCode !== 200) {
@@ -136,7 +149,7 @@ export function createBbdcClient(options: BbdcClientOptions = {}): BbdcClient {
         url,
         { method: "GET", credentials: "include" },
       );
-      assertNotAuthFailure(response);
+      assertAcceptableStatus(response);
       const body = await parseJson(response);
       const interpret = readFirstInterpret(body);
       return interpret === null ? null : { interpret };
@@ -149,7 +162,7 @@ export function createBbdcClient(options: BbdcClientOptions = {}): BbdcClient {
         url,
         { method: "GET", credentials: "include" },
       );
-      assertNotAuthFailure(response);
+      assertAcceptableStatus(response);
       const body = await parseJson(response);
       const list = readDataBodyList(body);
       return { exists: Array.isArray(list) && list.length > 0 };
@@ -179,7 +192,7 @@ export function createBbdcClient(options: BbdcClientOptions = {}): BbdcClient {
           // 不手动设 Content-Type，让浏览器带 multipart boundary。
         },
       );
-      assertNotAuthFailure(response);
+      assertAcceptableStatus(response);
       const body = await parseJson(response);
       const resultCode = readResultCode(body);
       if (resultCode !== 200) {
@@ -197,7 +210,7 @@ export function createBbdcClient(options: BbdcClientOptions = {}): BbdcClient {
         url,
         { method: "GET", credentials: "include" },
       );
-      assertNotAuthFailure(response);
+      assertAcceptableStatus(response);
       return (await parseJson(response)) as BbdcResponseBody;
     },
 
@@ -213,7 +226,7 @@ export function createBbdcClient(options: BbdcClientOptions = {}): BbdcClient {
           body: form,
         },
       );
-      assertNotAuthFailure(response);
+      assertAcceptableStatus(response);
       const body = await parseJson(response);
       const resultCode = readResultCode(body);
       if (resultCode !== 200) {
@@ -246,13 +259,15 @@ async function send(
   return fetchImpl(url, init);
 }
 
-function assertNotAuthFailure(response: Response): void {
+function assertAcceptableStatus(response: Response): void {
+  if (response.ok) return;
   if (response.status === 401 || response.status === 403) {
     throw new BbdcAuthError(`bbdc HTTP ${String(response.status)}`, {
       kind: "http",
       status: response.status,
     });
   }
+  throw new BbdcHttpError(`bbdc HTTP ${String(response.status)}`, response.status);
 }
 
 async function parseJson(response: Response): Promise<unknown> {

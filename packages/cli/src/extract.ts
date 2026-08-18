@@ -7,7 +7,6 @@ import {
   type ExtractOptions,
 } from "@word-radar/core";
 import {
-  readFile,
   writeFile,
   stat,
   readdir,
@@ -15,14 +14,7 @@ import {
 } from "node:fs/promises";
 import { resolve, join, basename, dirname, extname } from "node:path";
 import { relative } from "node:path";
-
-/**
- * 标记错误已经由本模块打印到 stderr，避免 index.ts 的 catch 再次打印。
- */
-export function markPrinted(err: Error): Error {
-  (err as Error & { alreadyPrinted?: boolean }).alreadyPrinted = true;
-  return err;
-}
+import { markPrinted, readTextWithoutBom } from "./lib/cli-util.js";
 
 /**
  * 处理单个输入路径（文件或目录）。
@@ -66,12 +58,8 @@ export async function processInput(
  * 处理单个文件。
  */
 async function processFile(filePath: string, outPath?: string): Promise<void> {
-  // 读取文件内容并 strip BOM
-  const buffer = await readFile(filePath);
-  let content = buffer.toString("utf-8");
-  if (content.charCodeAt(0) === 0xfeff) {
-    content = content.slice(1);
-  }
+  // 读取文件内容（自动 strip BOM）
+  const content = await readTextWithoutBom(filePath);
 
   // 提取词条
   const entries = extractWordEntries(content);

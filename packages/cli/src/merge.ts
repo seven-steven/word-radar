@@ -6,16 +6,9 @@ import {
   parseWordListCsv,
   stringifyWordListCsv,
 } from "@word-radar/core";
-import { readFile, writeFile } from "node:fs/promises";
+import { writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
-
-/**
- * 标记错误已经由本模块打印到 stderr，避免 index.ts 的 catch 再次打印。
- */
-function markPrinted(err: Error): Error {
-  (err as Error & { alreadyPrinted?: boolean }).alreadyPrinted = true;
-  return err;
-}
+import { markPrinted, readTextWithoutBom } from "./lib/cli-util.js";
 
 /**
  * 合并多份 CSV 词表文件。
@@ -38,9 +31,10 @@ export async function mergeFiles(
   const allEntries = [];
   for (const filePath of files) {
     const absolutePath = resolve(filePath);
-    let buffer: Buffer;
+    let content: string;
     try {
-      buffer = await readFile(absolutePath);
+      // 读取（自动剥离 UTF-8 BOM）
+      content = await readTextWithoutBom(absolutePath);
     } catch (error) {
       const message =
         error instanceof Error && "code" in error && error.code === "ENOENT"
@@ -48,12 +42,6 @@ export async function mergeFiles(
           : `Error: Cannot read ${filePath}: ${error instanceof Error ? error.message : String(error)}`;
       process.stderr.write(`word-radar: ${message}\n`);
       throw markPrinted(new Error(message));
-    }
-
-    // Strip UTF-8 BOM
-    let content = buffer.toString("utf-8");
-    if (content.charCodeAt(0) === 0xfeff) {
-      content = content.slice(1);
     }
 
     // 解析 CSV，包装坏行错误以包含文件名

@@ -18,11 +18,8 @@
  * - pending = flags === 0 的词数（待推：还没被任何背单词 APP 标记成功）
  * - flags 是位掩码；bit0=不背单词已推（推送成功后置位，恢复待推请清零位）。
  */
-import { mergeWordEntries, type WordEntry } from "@word-radar/core";
+import { BBDC_PUSHED_FLAG, mergeWordEntries, type WordEntry } from "@word-radar/core";
 import { openDB, type DBSchema, type IDBPDatabase } from "idb";
-
-/** bit0 = 不背单词已成功推送（来自 core BBDC_PUSHED_FLAG）。 */
-const BBDC_PUSHED_FLAG = 1 << 0;
 
 /** 默认数据库名 / 版本 / 对象仓库名（导出供测试与未来迁移脚本引用）。 */
 export const DB_NAME = "word-radar";

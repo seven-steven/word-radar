@@ -1,4 +1,11 @@
 import type { WordEntry } from "@word-radar/core";
+import type { Counts } from "./word-repository.js";
+
+/**
+ * 词库计数。唯一定义在 word-repository（数据层），此处 re-export 供
+ * 消息协议使用方免于直连仓储模块。
+ */
+export type { Counts };
 
 /**
  * 扩展内部消息协议。
@@ -24,11 +31,6 @@ export const RETRY_PUSH = "RETRY_PUSH" as const;
 export const GET_PUSH_STATUS = "GET_PUSH_STATUS" as const;
 export const EXPORT_CSV = "EXPORT_CSV" as const;
 export const IMPORT_CSV = "IMPORT_CSV" as const;
-
-export interface Counts {
-  total: number;
-  pending: number;
-}
 
 export interface PushStatus {
   phase: "idle" | "running" | "paused" | "completed";

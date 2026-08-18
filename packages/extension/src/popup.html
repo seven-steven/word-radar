@@ -57,9 +57,16 @@
         font-size: 12px;
         line-height: 1.6;
       }
-        margin-top: 12px;
-        padding-top: 8px;
-        border-top: 1px solid #eee;
+      .auto-push-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin-top: 6px;
+        color: #555;
+        font-size: 12px;
+      }
+      .auto-push-row input {
+        margin: 0;
       }
       .login-row {
         display: flex;
@@ -74,7 +81,7 @@
         color: #0a7d2c;
       }
       .login-status[data-state="logged-out"] {
-        color: #b0000;
+        color: #b00000;
       }
       .login-actions {
         margin-top: 8px;
@@ -124,6 +131,10 @@
           已存在 <span data-testid="push-existing">0</span> ·
           失败 <span data-testid="push-failed">0</span>
         </div>
+        <label class="auto-push-row">
+          <input type="checkbox" data-testid="auto-push" checked />
+          自动推送
+        </label>
         <button type="button" data-testid="retry-push">重试待推</button>
       </section>
       <section class="sync">

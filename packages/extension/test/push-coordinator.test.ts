@@ -5,7 +5,7 @@
  * 所有外部依赖（client / repository / 时钟）都通过构造注入，避免假睡眠与真实 IndexedDB。
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { BbdcAuthError } from "../src/lib/bbdc-client.js";
+import { BbdcAuthError, BbdcHttpError } from "../src/lib/bbdc-client.js";
 import { PushCoordinator } from "../src/lib/push-coordinator.js";
 
 interface FakeEntry {
@@ -368,4 +368,60 @@ describe("PushCoordinator 初始 getStatus", () => {
 
 beforeEach(() => {
   vi.clearAllMocks();
+});
+describe("PushCoordinator HTTP 4xx 状态码分流", () => {
+  it("HTTP 404（带 status 的 BbdcHttpError）不重试，计 failed 并继续下一词", async () => {
+    const client = makeClient({
+      checkExisting: vi.fn(async () => {
+        throw new BbdcHttpError("bbdc HTTP 404", 404);
+      }),
+    });
+    const repository = makeRepository([makeEntry("run"), makeEntry("garden")]);
+    const { sleep, calls } = makeSleep();
+    const coordinator = new PushCoordinator({ client, repository, sleep });
+
+    const result = await coordinator.start();
+
+    // 每词只尝试 1 次（无 800/2000 重试延迟），只有词间 400ms 间隔
+    expect(client.checkExisting).toHaveBeenCalledTimes(2);
+    expect(calls).toEqual([400]);
+    expect(result.failed).toBe(2);
+    expect(result.phase).toBe("completed");
+    expect(repository.markPushed).not.toHaveBeenCalled();
+  });
+
+  it("HTTP 429（带 status 的错误）不重试，立即失败计数", async () => {
+    const client = makeClient({
+      addWord: vi.fn(async () => {
+        throw new BbdcHttpError("bbdc HTTP 429", 429);
+      }),
+    });
+    const repository = makeRepository([makeEntry("run")]);
+    const { sleep, calls } = makeSleep();
+    const coordinator = new PushCoordinator({ client, repository, sleep });
+
+    const result = await coordinator.start();
+
+    expect(client.addWord).toHaveBeenCalledTimes(1);
+    expect(calls).toEqual([]);
+    expect(result.failed).toBe(1);
+  });
+
+  it("HTTP 401（BbdcAuthError）暂停推送而非计入 failed", async () => {
+    const client = makeClient({
+      checkExisting: vi.fn(async () => {
+        throw new BbdcAuthError("bbdc HTTP 401", { kind: "http", status: 401 });
+      }),
+    });
+    const repository = makeRepository([makeEntry("run"), makeEntry("garden")]);
+    const { sleep, calls } = makeSleep();
+    const coordinator = new PushCoordinator({ client, repository, sleep });
+
+    const result = await coordinator.start();
+
+    expect(result.phase).toBe("paused");
+    expect(result.failed).toBe(0);
+    expect(calls).toEqual([]);
+    expect(repository.markPushed).not.toHaveBeenCalled();
+  });
 });
