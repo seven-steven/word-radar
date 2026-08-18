@@ -24,15 +24,25 @@
 - **`Retryable<BbdcClient>`**：`BbdcClient` 应用 `RetryPolicy<BbdcClient>` 后得到的实例。`PushCoordinator` 调它，不感知重试。
 - **`subscribe(handler)`**：`PushCoordinator` 的状态事件订阅。`onProgress` 回调从未被接上 — `subscribe` 替换它，让 popup 从轮询转为事件驱动（C3 的依赖）。
 
-## 模块职责（C1 深化后）
+## 模块词汇（C2 深化引入）
 
-| 模块                   | 职责                                                                    | 不持有             |
-| ---------------------- | ----------------------------------------------------------------------- | ------------------ |
-| `PushCoordinator`      | 队列 + 状态机 + 单例守卫                                                | 重试策略、节奏策略 |
-| `RetryPolicy<TClient>` | 重试间隔 + 错误分类                                                     | 队列、状态         |
-| `PushPacing`           | lookup / addWord / word 节奏常量                                        | 重试、队列         |
-| `BbdcClient`           | HTTP + 错误类型化（`BbdcAuthError` / `BbdcHttpError` / `BbdcApiError`） | 重试、节奏         |
-| `WordRepository`       | IndexedDB 持久化                                                        | HTTP、推送         |
+> C1 是「业务模块深模块化」（PushCoordinator / RetryPolicy / PushPacing）。C2 是「基础设施深模块化」 — 跨上下文消息的解析与分发收成一个接缝。
+
+- **`MessageBus`**：跨上下文消息的解析 + 分发 + 响应窄化深模块。`createMessageBus(deps)` 工厂返回 `{ parse, dispatch, parseResponse }`，闭包绑 5 个 deps（`repository` / `bbdcClient` / `pushCoordinator` / `actionBadge` / `settingsStorage`）。`background-listener.ts` 从 227 行缩成 ~10 行 transport wiring。
+- **`parseExtensionMessage(raw: unknown)`**：入站窄化入口。OR 13 个 `isXxx` guard（来自 `messages.ts`），返回 `ExtensionMessage | null`。`null` 让 listener 早返回 `false`（chrome 关 channel）。
+- **`dispatch(message: ExtensionMessage): Promise<unknown>`**：入站分发。switch on `message.type`，调 4 个 internal handler（`handleWordsCollected` / `handleExportCsv` / `handleImportCsv` / `handleCheckLogin`）。throw 内部 catch 包成 `{ok:false, error: err.message}`；handler 返回值原样透传（线协议不变）。
+- **`parseResponse(raw: unknown, type: ResponseType): unknown`**：出站响应窄化。`type` 显式参数（`'checkLogin'` / `'exportCsv'` / `'importCsv'` / `'collect'` / `'counts'` / `'pushStatus'`）；内部 switch 到 `isXxxResponse` / 新加 `isCounts` / 新加 `isPushStatus`。`sw-channel.ts` 的 5 处散落窄化全部收成 `bus.parseResponse(raw, 'checkLogin')` 一行调用。
+
+## 模块职责（C2 深化后）
+
+| 模块                   | 职责                                                                    | 不持有                        |
+| ---------------------- | ----------------------------------------------------------------------- | ----------------------------- |
+| `PushCoordinator`      | 队列 + 状态机 + 单例守卫                                                | 重试策略、节奏策略            |
+| `RetryPolicy<TClient>` | 重试间隔 + 错误分类                                                     | 队列、状态                    |
+| `PushPacing`           | lookup / addWord / word 节奏常量                                        | 重试、队列                    |
+| `BbdcClient`           | HTTP + 错误类型化（`BbdcAuthError` / `BbdcHttpError` / `BbdcApiError`） | 重试、节奏                    |
+| `WordRepository`       | IndexedDB 持久化                                                        | HTTP、推送                    |
+| **`MessageBus`** (C2)  | 消息解析 + 分发 + 响应窄化；4 个 internal handler                       | transport、类型定义、具体业务 |
 
 ## API 不变量（C1 深化后）
 
@@ -41,6 +51,13 @@
 - `PushCoordinator.subscribe(handler)`：handler 在 phase 转换时各回调一次；handler 抛错不影响队列。
 - `RetryPolicy<TClient>.withRetry(client, policy)`：不修改 client 类型；保持同名同形状。
 
+## API 不变量（C2 深化后）
+
+- `bus.parse(raw)`：未知输入 → `ExtensionMessage | null`。`null` 表示不是任何已知消息类型，listener 早返回 `false` 关 channel。
+- `bus.dispatch(message)`：永不 throw 外泄；handler 抛错被内部 catch 包成 `{ok:false, error: err.message}`；handler 返回值原样 resolve（线协议不变）。
+- `bus.parseResponse(raw, type)`：`type` 是 `'checkLogin'` / `'exportCsv'` / `'importCsv'` / `'collect'` / `'counts'` / `'pushStatus'` 之一；返回 `unknown`（已窄化但 caller 需自行 cast 或 narrow）。
+- `createMessageBus(deps)`：5 个 deps 全闭包；不修改 deps；多次调用产生独立 bus 实例。
+
 ## 测试不变量（C1 深化后）
 
 - 每个模块独立测试文件（"接口是测试表面"）。
@@ -48,6 +65,14 @@
 - `retry-policy.test.ts` 测 `RetryPolicy<TClient>`。
 - `push-pacing.test.ts` 测 `PushPacing` 端口契约。
 - 现有 `push-coordinator.test.ts` 的 7 个 describe 块会按职责拆分到对应新文件（基本编排 / 状态分类 / 暂停续推 / 单例守卫 / getStatus 留在 push-coordinator；重试策略 / 4xx 分流移到 retry-policy；节奏移到 push-pacing；进度回调改为 subscribe 测试）。
+
+## 测试不变量（C2 深化后）
+
+- `messages.test.ts`（206 行）保留不动 — 13 guard 单测的"接口是测试表面"在 guard 层级。
+- `message-bus.test.ts`（新）测 `parse` / `dispatch` / `parseResponse` 三方法：parse happy/sad path、dispatch 各 handler happy/sad + 错误包成 `{ok:false, error}`、parseResponse 各 type 的 happy/sad。
+- `sw-channel.test.ts`（改）测 `bus.parseResponse(raw, 'checkLogin')` 等调用，mock `SwChannel` 接口。
+- `background-listener.test.ts`（621 行）删除 — 内容已迁 `message-bus.test.ts`；listener 缩到 ~10 行后无独立测试价值。
+- 4 个 handler 没有独立测试文件 — 它们是 MessageBus 的 internal 细节，外部只能通过 `bus.dispatch(message)` 触达。
 
 ## 实测数据（C1 深化时同步）
 
@@ -67,3 +92,6 @@
 - YouTube 字幕 / GitHub markdown 专项采集：第一版只做网页正文。
 - 推送历史 / 失败原因审计 / 可恢复任务队列：第一版不做。
 - 把不背单词 cookie 读出 / 转发 / 上传：永不做（安全边界）。
+- **`MessageBus` 不管 transport**（`chrome.runtime.onMessage` wiring）— 那是 `background.ts` 的事；MessageBus 只暴露 3 个方法，listener 自己写。
+- **`MessageBus` 不动态注册新 type** — 编译时 `ExtensionMessage` union 已定；加 type 必须改 `messages.ts`（C5 提案未走前不要尝试自动发现）。
+- **offscreen / external sender 第一版不存在** — 如果未来加，MessageBus 加新分支即可；现在不要为不存在的 sender 预留接口。
