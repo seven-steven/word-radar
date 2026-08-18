@@ -15,6 +15,7 @@ import {
   WORDS_COLLECTED,
 } from "../src/lib/messages.js";
 import type { BackgroundRepository } from "../src/lib/background-listener.js";
+import type { PushStatus } from "../src/lib/messages.js";
 import type { PushCoordinator } from "../src/lib/push-coordinator.js";
 import type { WordEntry } from "@word-radar/core";
 
@@ -46,10 +47,17 @@ function fakeRepository(): BackgroundRepository & {
 }
 
 function fakeBbdcClient(overrides: Partial<BackgroundBbdcClient> = {}): BackgroundBbdcClient {
-  return {
+  // 先给出全部方法的默认实现（满足 BackgroundBbdcClient 的必选面），
+  // 再摊开 overrides；否则 Partial 展开后其余属性是 `| undefined`，
+  // 与必选签名不兼容（TS2322）。
+  const defaults: BackgroundBbdcClient = {
     checkLogin: vi.fn(async () => ({ loggedIn: true, resultCode: 200 })),
-    ...overrides,
+    listNewWords: vi.fn(async () => ({ result_code: 0, data_body: {} })),
+    checkExisting: vi.fn(async () => ({ exists: false })),
+    lookupDefinition: vi.fn(async () => null),
+    addWord: vi.fn(async () => undefined),
   };
+  return { ...defaults, ...overrides };
 }
 
 function fakeActionBadge(): ActionBadgeGateway & {
@@ -64,25 +72,23 @@ function fakePushCoordinator(): PushCoordinator & {
   start: ReturnType<typeof vi.fn>;
   getStatus: ReturnType<typeof vi.fn>;
 } {
+  const idle: PushStatus = {
+    phase: "idle",
+    total: 0,
+    processed: 0,
+    succeeded: 0,
+    existing: 0,
+    failed: 0,
+    pending: 0,
+  };
+  // listener 只消费 start/getStatus；类其余成员（client/repository 等私有
+  // 状态）不在依赖面内，故以结构化 mock + 单点 as 断言收窄，避免伪造整套类。
   return {
-    start: vi.fn(async () => ({
-      phase: "idle" as const,
-      total: 0,
-      processed: 0,
-      succeeded: 0,
-      existing: 0,
-      failed: 0,
-      pending: 0,
-    })),
-    getStatus: vi.fn(() => ({
-      phase: "idle" as const,
-      total: 0,
-      processed: 0,
-      succeeded: 0,
-      existing: 0,
-      failed: 0,
-      pending: 0,
-    })),
+    start: vi.fn(async () => idle),
+    getStatus: vi.fn(() => idle),
+  } as unknown as PushCoordinator & {
+    start: ReturnType<typeof vi.fn>;
+    getStatus: ReturnType<typeof vi.fn>;
   };
 }
 
@@ -297,7 +303,8 @@ describe("createBackgroundListener CHECK_LOGIN（T09 + T10）", () => {
     const repository = fakeRepository();
     const bbdcClient = fakeBbdcClient({
       checkLogin: vi.fn(
-        async () => new Promise((resolve) => setTimeout(() => resolve({ loggedIn: true, resultCode: 200 }), 5)),
+        async (): Promise<{ loggedIn: boolean; resultCode: number }> =>
+          new Promise((resolve) => setTimeout(() => resolve({ loggedIn: true, resultCode: 200 }), 5)),
       ),
     });
     const push = fakePushCoordinator();
