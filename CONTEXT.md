@@ -43,23 +43,33 @@
 - **`csvExportFileName(now: Date = new Date())`**：从 popup.ts 迁 `lib/csv-file.ts`。纯函数，输入 `Date` 输出 `word-radar-YYYYMMDD-HHmm.csv`（local timezone）。`csv-file.ts` 已有（CSV 解析与生成），自然归位。
 - **`BBDC_HOME_URL`**：从 popup.ts 迁 `lib/bbdc-client.ts` 的 `BBDC_ORIGIN` 旁。`bbdc-client.ts` 已有 `BBDC_ORIGIN = "https://bbdc.cn"` 常量；`BBDC_HOME_URL` 是同源不同义（首页路径 vs API origin），并存。
 
-## 模块职责（C3 深化后）
+## 模块词汇（C4 深化引入）
 
-| 模块                   | 职责                                                                    | 不持有                                              |
-| ---------------------- | ----------------------------------------------------------------------- | --------------------------------------------------- |
-| `PushCoordinator`      | 队列 + 状态机 + 单例守卫 + 状态事件广播                                 | 重试策略、节奏策略                                  |
-| `RetryPolicy<TClient>` | 重试间隔 + 错误分类                                                     | 队列、状态                                          |
-| `PushPacing`           | lookup / addWord / word 节奏常量                                        | 重试、队列                                          |
-| `BbdcClient`           | HTTP + 错误类型化（`BbdcAuthError` / `BbdcHttpError` / `BbdcApiError`） | 重试、节奏；含 `BBDC_ORIGIN` / `BBDC_HOME_URL` 常量 |
-| `WordRepository`       | IndexedDB 持久化                                                        | HTTP、推送                                          |
-| `MessageBus` (C2/C3)   | 消息解析 + 分发 + 响应窄化 + `onPushStatus` 委派；4 个 internal handler | transport、类型定义、具体业务                       |
-| **`popup-views`** (C3) | 4 个 render 纯函数（counts / login / push / sync）                      | 状态、异步、chrome API                              |
-| `createSwChannel` (C3) | popup → SW 的 send + parse 包装工厂                                     | 解析（用 bus）、transport（用 chromeSwChannel）     |
+> C1 / C2 / C3 是「业务 + 基础设施 + UI」三层深模块化。C4 是 **错误信任** — 把已经类型化（`BbdcAuthError` / `BbdcHttpError` / `BbdcApiError`）的错误信号从运行时 re-sniff 转为类型断言；把窄接口 / 双名重复 / helper 内联全部清理。
+
+- **`errorMessage(err: unknown): string`**：C4 提为 `lib/error-message.ts` 共享 helper。`err instanceof Error` → `err.message`；否则 `String(err)`。替换 7 处内联重复（background-listener / content-listener / push-coordinator / bbdc-client / cli/src/extract / cli/src/merge × 2 / cli/src/index）。cli 跨包不重定向（cli 保留内联或后续走 `@word-radar/core`）。
+- **`auth-expired` badge state**：C4 新加的 ActionBadge 取值。`handleCheckLogin` catch 内部用 `instanceof BbdcAuthError` 分支 — `BbdcAuthError` → badge `"auth-expired"`（session 过期明确提示）；其他错误 → badge `"!"`（网络 / 未知）。不再 bare `catch {}` 一律 `"!"`。
+- **`Pick<BbdcClient, ...>`**：`PushCoordinatorOptions.client` 的 port 声明（C1 设计）。C4 保留 — 这是深模块的合理窄接口（producer 只声明它真正用的方法），与已删除的 `BackgroundBbdcClient`（背景侧 dep 形状冗余）不同。`BackgroundBbdcClient` / `BackgroundRepository` 在 C4 删除。
+- **`PushStatus`（合并后唯一名）**：`messages.ts:35` 定义；`push-coordinator.ts:13–23` 旧 `PushProgress` 与 `PushPhase` 在 C4 删除，7 处 push-coordinator 引用改 import `PushStatus`。wire / internal 共用一名。
+
+## 模块职责（C4 深化后）
+
+| 模块                    | 职责                                                                    | 不持有                                              |
+| ----------------------- | ----------------------------------------------------------------------- | --------------------------------------------------- |
+| `PushCoordinator`       | 队列 + 状态机 + 单例守卫 + 状态事件广播                                 | 重试策略、节奏策略                                  |
+| `RetryPolicy<TClient>`  | 重试间隔 + 错误分类                                                     | 队列、状态                                          |
+| `PushPacing`            | lookup / addWord / word 节奏常量                                        | 重试、队列                                          |
+| `BbdcClient`            | HTTP + 错误类型化（`BbdcAuthError` / `BbdcHttpError` / `BbdcApiError`） | 重试、节奏；含 `BBDC_ORIGIN` / `BBDC_HOME_URL` 常量 |
+| `WordRepository`        | IndexedDB 持久化                                                        | HTTP、推送                                          |
+| `MessageBus` (C2/C3)    | 消息解析 + 分发 + 响应窄化 + `onPushStatus` 委派；4 个 internal handler | transport、类型定义、具体业务                       |
+| `popup-views` (C3)      | 4 个 render 纯函数（counts / login / push / sync）                      | 状态、异步、chrome API                              |
+| `createSwChannel` (C3)  | popup → SW 的 send + parse 包装工厂                                     | 解析（用 bus）、transport（用 chromeSwChannel）     |
+| **`errorMessage`** (C4) | 跨包 `unknown → string` 工具（`lib/error-message.ts`）                  | 任何领域、任何上下文                                |
 
 ## API 不变量（C1 深化后）
 
 - `PushCoordinator.start()`：并发 1，已运行返回同一 promise。
-- `PushCoordinator.getStatus()`：返回 `PushProgress` 快照。
+- `PushCoordinator.getStatus()`：返回 `PushStatus` 快照（C4 合并后；旧名 `PushProgress` 已删）。
 - `PushCoordinator.subscribe(handler)`：**每次状态变化时**各回调一次（idle→running / running 中每词推送后 / running→idle），不只是 phase 转换边界（C3 升级前是"phase 转换时"，被 C3 替换以彻底替代 popup 轮询）；handler 抛错不影响队列。
 - `RetryPolicy<TClient>.withRetry(client, policy)`：不修改 client 类型；保持同名同形状。
 
@@ -77,6 +87,15 @@
 - `popup-views` 4 个 render 函数：纯函数，签名 `(elements, data) => void`；无返回值、无异步、无 chrome API；DOM 是唯一副作用。
 - `popup.ts` 8 个 async wrapper：每个 ~10 行，紧凑于其触发的按钮；调 `swChannel.X()`（依赖 C3 `createSwChannel` 工厂），调 `renderX(els, data)`（依赖 `popup-views`），catch 错误 → render `sync-status` 错误文本。
 - `bus.onPushStatus` 与 popup 轮询互斥：落地后 popup.ts 不再有 `setTimeout` 递归；启动时 `bus.onPushStatus((status) => renderPushStatus(els, status))` 一行接好。
+
+## API 不变量（C4 深化后）
+
+- **`errorMessage(err: unknown): string`**：纯函数；不修改入参；返回 `Error.message` 或 `String(err)`。零副作用，零依赖 — 任何上下文可用。
+- **`push-coordinator` 信任 `BbdcHttpError` / `BbdcAuthError` 类型**：删 `isFourHundredError`（runtime status sniff）；4xx 不重试的判定改为 `error instanceof BbdcHttpError && error.status < 500`（类型断言）。
+- **`push-coordinator.isAuthError` 简化**：删 `name === "BbdcAuthError"` fallback；只用 `error instanceof BbdcAuthError`（源头全是 `new BbdcAuthError(...)`，name fallback 是死分支）。
+- **`handleCheckLogin` catch 内部用类型分支**：`BbdcAuthError` → `actionBadge.set('auth-expired')`；其他错误 → `actionBadge.set('!')`。不再 bare `catch {}` 一律 `"!"`。
+- **`BbdcClient.parseJson` 保留 `cause`**：`throw new Error(msg, { cause })` 把原始 `response.json()` 失败对象链到新 Error 上；消费者可读 `error.cause`。
+- **`BbdcClient.readResultCode` 不返 NaN**：invalid body（缺 `result_code` 或非数字）时 `throw BbdcHttpError('invalid bbdc response: missing result_code', 502)`。callers (`checkLogin` / `addWord`) 仍 `resultCode !== 200`，逻辑不变；NaN 从类型路径上消除。
 
 ## 测试不变量（C1 深化后）
 
@@ -113,6 +132,14 @@
 - `csv-file.test.ts`（C3 加）`csvExportFileName(now)` 边缘 case：9 点 → `HHmm` 正确；跨日 → 日期 +1；跨月 → 月 +1；闰秒 → 用 `Date.now()` 走默认参数（不验证闰秒，因为依赖宿主时钟）。
 - `popup.test.ts` **不新增** — popup.ts 仍是"DOM lookup + handlers + boot"胶水层，UI glue 零测试惯例（依赖 chrome 扩展生态）。C5 提测试夹具整合时如果 popup 仍未测，留作"已知未覆盖"。
 
+## 测试不变量（C4 深化后）
+
+- `error-message.test.ts`（新）测 `errorMessage(err)` 5 个 case：`Error` → `.message`；`string` → 原字符串；`{ code: 'ENOENT' }` → `'[object Object]'`；`undefined` → `'undefined'`；`new Error('outer', { cause: new Error('inner') })` → `.message` 是 `'outer'`（不递归 cause，errorMessage 只看表层）。
+- `push-coordinator.test.ts`（C4 改）4xx-retry 用例改用 `new BbdcHttpError('...', 404)` / `new BbdcHttpError('...', 429)` 直接构造；isAuthError 走 Pause 用例改用 `new BbdcAuthError('...', { kind: 'http', status: 401 })` 直接构造；删 `isFourHundredError` / `isAuthError` 单独的 describe 块（已删除函数）。
+- `bbdc-client.test.ts`（C4 改）加 `parseJson` `{cause}` chaining 测试：mock `response.json()` throw → 抛出的 Error `cause` 字段引用原 throw；加 `readResultCode` throw 测试：缺 `result_code` body → throw `BbdcHttpError('invalid bbdc response: missing result_code', 502)`。
+- `message-bus.test.ts`（C4 改，待 C2 落地后）`handleCheckLogin` 测试扩为分支断言：`BbdcAuthError` 实例 → mock badge 收到 `'auth-expired'`；其他 Error → mock badge 收到 `'!'`。
+- `messages.test.ts` / `sw-channel.test.ts` / `popup-views.test.ts` / `csv-file.test.ts` 不变。
+
 ## 不在范围内（避免重新提案）
 
 - 多端自动同步（WebDAV / Gist / 后端）：第一版仅手动 CSV 导入导出。
@@ -126,3 +153,6 @@
 - **`popup.ts` 8 个 async wrapper 不提取到 popup-controllers.ts** — 与按钮耦合紧密，提取会增加间接（参）而不增可测性。
 - **`popup.ts` 不引入 wireAction 声明式 helper** — boilerplate 减少得不偿失，调试路径更复杂。
 - **`bus.onPushStatus` 不暴露通用 subscribe** — 只委派 pushCoordinator.subscribe；其他子系统（settingsStorage 变化等）若有事件订阅需求，再独立添加。
+- **`errorMessage` 不放 `@word-radar/core`** — 第一版只在 `lib/error-message.ts`；cli 跨包 import 工作量大于 dedup 收益；后续真要 dedup 走独立 issue。
+- **`BbdcAuthError.kind` discriminator 不展开使用** — `kind: 'http' | 'check-login'` 字段已存在但当前无 consumer 分支；C4 不主动加新分支（避免越界到下游 UX 决策）。
+- **`isPushStatus` runtime phase-list 不删** — 是 wire boundary narrowing 的合法用法（防 `unknown` 输入），不是 trust gap。
