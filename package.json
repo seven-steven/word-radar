@@ -12,7 +12,8 @@
     "test": "pnpm -r --filter=./packages/* test",
     "typecheck": "pnpm -r --filter=./packages/* typecheck",
     "clean": "pnpm -r --filter=./packages/* clean",
-    "package": "node scripts/package.mjs"
+    "package": "node scripts/package.mjs",
+    "e2e": "node scripts/e2e/run-e2e.mjs"
   },
   "devDependencies": {
     "typescript": "5.9.3"
