@@ -111,7 +111,13 @@ function renderPushStatus(status: PushStatus): void {
 
 async function refreshPushStatus(): Promise<void> {
   const status = await fetchPushStatus(chromeSwChannel);
-  if (status) renderPushStatus(status);
+  if (status) {
+    renderPushStatus(status);
+    // 任何一次刷新发现 running 就自启轮询：boot 时轮询会因 phase=idle 自行
+    // 停止，之后手动 retry-push / 采集触发的自动推送必须重新拉起，否则
+    // 推送状态永久冻结在最后一次渲染（e2e 发现的产品 bug）。
+    if (status.phase === "running") startPushStatusPolling();
+  }
 }
 
 async function requestRetryPush(): Promise<void> {
@@ -258,6 +264,9 @@ function startPushStatusPolling(): void {
       pushStatusTimer = window.setTimeout(tick, 500);
     } else {
       pushStatusTimer = undefined;
+      // 推送结束（completed/paused）：词库 pending 已被 SW 改写，拉一次最新计数，
+      // 否则「待推 N」冻结在推送前的值（e2e 发现的产品 bug）。
+      await refreshCounts();
     }
   };
   pushStatusTimer = window.setTimeout(tick, 0);
