@@ -112,6 +112,11 @@ export function createVisibilityChecker(win: Window): VisibilityChecker {
 
 export interface CollectOptions {
   isVisible?: VisibilityChecker;
+  /**
+   * 排除标签集合覆盖;默认 EXCLUDED_TAGS。
+   * pre 回退路径用它放开 PRE 排除。
+   */
+  excludedTags?: ReadonlySet<string>;
 }
 
 /**
@@ -129,6 +134,7 @@ export function collectVisibleText(
   options: CollectOptions = {},
 ): string {
   const isVisible = options.isVisible ?? createVisibilityChecker(win);
+  const excludedTags = options.excludedTags ?? EXCLUDED_TAGS;
   const doc = root.ownerDocument;
   const walker = doc.createTreeWalker(
     root,
@@ -148,7 +154,7 @@ export function collectVisibleText(
           el !== null;
           el = el.parentElement
         ) {
-          if (EXCLUDED_TAGS.has(tagOf(el))) return NodeFilter.FILTER_REJECT;
+          if (excludedTags.has(tagOf(el))) return NodeFilter.FILTER_REJECT;
           if (!isVisible(el)) return NodeFilter.FILTER_REJECT;
         }
         return NodeFilter.FILTER_ACCEPT;
@@ -199,5 +205,15 @@ export function collectPageText(
   if (body === null) {
     return { text: "", source: "body" };
   }
-  return { text: collectVisibleText(body, win, options), source: "body" };
+  const result = collectVisibleText(body, win, options);
+  if (result.trim().length > 0) {
+    return { text: result, source: "body" };
+  }
+  // 回退:正文整体在 <pre> 里的纯文本页(如 raw.githubusercontent.com)。
+  // 正常路径采集为空才走这里,因此普通网页的代码块不受影响;
+  // 可见性检查仍然生效(隐藏的 pre 不进结果)。
+  const withoutPre = new Set(EXCLUDED_TAGS);
+  withoutPre.delete("PRE");
+  const preText = collectVisibleText(body, win, { ...options, excludedTags: withoutPre });
+  return { text: preText, source: "body" };
 }

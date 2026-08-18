@@ -52,6 +52,8 @@
 - **`Pick<BbdcClient, ...>`**：`PushCoordinatorOptions.client` 的 port 声明（C1 设计）。C4 保留 — 这是深模块的合理窄接口（producer 只声明它真正用的方法），与已删除的 `BackgroundBbdcClient`（背景侧 dep 形状冗余）不同。`BackgroundBbdcClient` / `BackgroundRepository` 在 C4 删除。
 - **`PushStatus`（合并后唯一名）**：`messages.ts:35` 定义；`push-coordinator.ts:13–23` 旧 `PushProgress` 与 `PushPhase` 在 C4 删除，7 处 push-coordinator 引用改 import `PushStatus`。wire / internal 共用一名。
 
+- **`CollectOptions.excludedTags` + pre 回退**：`collect.ts` 的排除标签集合改为可注入(`excludedTags`);`collectPageText` 在 body 正常路径采集为空时,回退用去掉 `PRE` 的排除集重采 — 覆盖正文整体在 `<pre>` 的纯文本页(raw.githubusercontent.com / pastebin)。普通网页正文非空不走回退,代码块照旧排除;可见性检查在回退中仍生效。
+
 ## 模块词汇（C5 深化引入）
 
 > C1–C4 是「业务 + 基础设施 + UI + 错误」四层深模块化。C5 是 **测试夹具整合** — 把跨文件 inline 重复的 fake / data / CSV fixture 收成单文件 `test/fakes.ts`；把 core CSV 错误类型化为 `CsvParseError`，让 9 处 toMatchObject 断言替换 regex / 字符串断言。
