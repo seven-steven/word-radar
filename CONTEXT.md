@@ -52,19 +52,31 @@
 - **`Pick<BbdcClient, ...>`**：`PushCoordinatorOptions.client` 的 port 声明（C1 设计）。C4 保留 — 这是深模块的合理窄接口（producer 只声明它真正用的方法），与已删除的 `BackgroundBbdcClient`（背景侧 dep 形状冗余）不同。`BackgroundBbdcClient` / `BackgroundRepository` 在 C4 删除。
 - **`PushStatus`（合并后唯一名）**：`messages.ts:35` 定义；`push-coordinator.ts:13–23` 旧 `PushProgress` 与 `PushPhase` 在 C4 删除，7 处 push-coordinator 引用改 import `PushStatus`。wire / internal 共用一名。
 
-## 模块职责（C4 深化后）
+## 模块词汇（C5 深化引入）
 
-| 模块                    | 职责                                                                    | 不持有                                              |
-| ----------------------- | ----------------------------------------------------------------------- | --------------------------------------------------- |
-| `PushCoordinator`       | 队列 + 状态机 + 单例守卫 + 状态事件广播                                 | 重试策略、节奏策略                                  |
-| `RetryPolicy<TClient>`  | 重试间隔 + 错误分类                                                     | 队列、状态                                          |
-| `PushPacing`            | lookup / addWord / word 节奏常量                                        | 重试、队列                                          |
-| `BbdcClient`            | HTTP + 错误类型化（`BbdcAuthError` / `BbdcHttpError` / `BbdcApiError`） | 重试、节奏；含 `BBDC_ORIGIN` / `BBDC_HOME_URL` 常量 |
-| `WordRepository`        | IndexedDB 持久化                                                        | HTTP、推送                                          |
-| `MessageBus` (C2/C3)    | 消息解析 + 分发 + 响应窄化 + `onPushStatus` 委派；4 个 internal handler | transport、类型定义、具体业务                       |
-| `popup-views` (C3)      | 4 个 render 纯函数（counts / login / push / sync）                      | 状态、异步、chrome API                              |
-| `createSwChannel` (C3)  | popup → SW 的 send + parse 包装工厂                                     | 解析（用 bus）、transport（用 chromeSwChannel）     |
-| **`errorMessage`** (C4) | 跨包 `unknown → string` 工具（`lib/error-message.ts`）                  | 任何领域、任何上下文                                |
+> C1–C4 是「业务 + 基础设施 + UI + 错误」四层深模块化。C5 是 **测试夹具整合** — 把跨文件 inline 重复的 fake / data / CSV fixture 收成单文件 `test/fakes.ts`；把 core CSV 错误类型化为 `CsvParseError`，让 9 处 toMatchObject 断言替换 regex / 字符串断言。
+
+- **`test/fakes.ts`**：`packages/extension/test/fakes.ts` 单文件，~230 行；分 deps / data / csv 三区域：
+  - deps：`fakePushCoordinator` / `fakeSettingsStorage` / `fakeRepository` / `fakeBbdcClient` / `resetDatabase`（5 处 dedup，原跨 5 文件）
+  - data：`FakeEntry` / `makeEntry(lemma)` / `WordEntry` helpers（push-coordinator 等共享）
+  - csv：`CSV_HEADER` / `CSV_BASIC_RUN` / `CSV_INVALID_LINE_THREE` 等常量（原 10+ 处内联重复）
+- **`CsvParseError({line, column?, kind, message})`**：`packages/core/src/csv.ts` 的 typed error。`kind` 是 7 类字面量 union：`'too-few-columns'` / `'too-many-columns'` / `'nonnumeric-flags'` / `'negative-flags'` / `'fractional-flags'` / `'empty-lemma'` / `'invalid-flags'`。与 C4 `BbdcAuthError` / `BbdcHttpError` / `BbdcApiError` 同型模式 — typed error 替 string。
+- **`ImportCsvErrorResponse({ok:false, fileName, line, kind, error})`**：`handleImportCsv` catch `CsvParseError` 后响应 shape。顶层加 `fileName` / `line` / `kind` 字段（从 CsvParseError 透传）；与 C2 dispatch 错误的 `{ok:false, error}` 兼容（`error` 仍带 fileName 前缀字符串）。popup / 测试可读结构化字段。
+
+## 模块职责（C5 深化后）
+
+| 模块                     | 职责                                                                    | 不持有                                              |
+| ------------------------ | ----------------------------------------------------------------------- | --------------------------------------------------- |
+| `PushCoordinator`        | 队列 + 状态机 + 单例守卫 + 状态事件广播                                 | 重试策略、节奏策略                                  |
+| `RetryPolicy<TClient>`   | 重试间隔 + 错误分类                                                     | 队列、状态                                          |
+| `PushPacing`             | lookup / addWord / word 节奏常量                                        | 重试、队列                                          |
+| `BbdcClient`             | HTTP + 错误类型化（`BbdcAuthError` / `BbdcHttpError` / `BbdcApiError`） | 重试、节奏；含 `BBDC_ORIGIN` / `BBDC_HOME_URL` 常量 |
+| `WordRepository`         | IndexedDB 持久化                                                        | HTTP、推送                                          |
+| `MessageBus` (C2/C3)     | 消息解析 + 分发 + 响应窄化 + `onPushStatus` 委派；4 个 internal handler | transport、类型定义、具体业务                       |
+| `popup-views` (C3)       | 4 个 render 纯函数（counts / login / push / sync）                      | 状态、异步、chrome API                              |
+| `createSwChannel` (C3)   | popup → SW 的 send + parse 包装工厂                                     | 解析（用 bus）、transport（用 chromeSwChannel）     |
+| `errorMessage` (C4)      | 跨包 `unknown → string` 工具（`lib/error-message.ts`）                  | 任何领域、任何上下文                                |
+| **`test/fakes.ts`** (C5) | extension 测试共享夹具（deps / data / csv 三区域）                      | production code；任何领域逻辑                       |
 
 ## API 不变量（C1 深化后）
 
@@ -96,6 +108,13 @@
 - **`handleCheckLogin` catch 内部用类型分支**：`BbdcAuthError` → `actionBadge.set('auth-expired')`；其他错误 → `actionBadge.set('!')`。不再 bare `catch {}` 一律 `"!"`。
 - **`BbdcClient.parseJson` 保留 `cause`**：`throw new Error(msg, { cause })` 把原始 `response.json()` 失败对象链到新 Error 上；消费者可读 `error.cause`。
 - **`BbdcClient.readResultCode` 不返 NaN**：invalid body（缺 `result_code` 或非数字）时 `throw BbdcHttpError('invalid bbdc response: missing result_code', 502)`。callers (`checkLogin` / `addWord`) 仍 `resultCode !== 200`，逻辑不变；NaN 从类型路径上消除。
+
+## API 不变量（C5 深化后）
+
+- **`test/fakes.ts` 单文件原则**：所有 extension 测试共享 fake / data / CSV fixture 在此一处声明；不出现跨文件复制。修改一处，全 test 生效。
+- **`CsvParseError` 7 类 `kind` 字面量 union**：`'too-few-columns'` / `'too-many-columns'` / `'nonnumeric-flags'` / `'negative-flags'` / `'fractional-flags'` / `'empty-lemma'` / `'invalid-flags'`。新增错误类型必须扩 union（编译时强制）；不允许 `'other'` / `string` 等开放字符串。
+- **`handleImportCsv` catch 分支语义**：`CsvParseError` 实例 → 响应 `{ ok: false, fileName, line, kind, error }`（fileName/line/kind 顶层）；其他 Error → 响应 `{ ok: false, error: errorMessage(err) }`（仅错误字符串）。两条路径互斥，由 `error instanceof CsvParseError` 区分。
+- **`toMatchObject` 断言契约**：CSV 错误统一用 `.toMatchObject({fileName, line, kind})` 断言结构化字段；generic 错误保留 `.toEqual({ok:false, error: 'string'})`。两条断言形式不混用。
 
 ## 测试不变量（C1 深化后）
 
@@ -140,6 +159,15 @@
 - `message-bus.test.ts`（C4 改，待 C2 落地后）`handleCheckLogin` 测试扩为分支断言：`BbdcAuthError` 实例 → mock badge 收到 `'auth-expired'`；其他 Error → mock badge 收到 `'!'`。
 - `messages.test.ts` / `sw-channel.test.ts` / `popup-views.test.ts` / `csv-file.test.ts` 不变。
 
+## 测试不变量（C5 深化后）
+
+- `test/fakes.ts`（新）单文件 ~230 行；所有 extension 测试从此 import，不允许 inline 定义 fake。deps / data / csv 三区域用注释分隔；导出 `fakePushCoordinator` / `fakeSettingsStorage` / `fakeRepository` / `fakeBbdcClient` / `resetDatabase` / `FakeEntry` / `makeEntry` / `CSV_HEADER` / `CSV_BASIC_RUN` / `CSV_INVALID_LINE_THREE` 等。
+- 6 处 core CSV 解析测试改 `.toMatchObject({line, kind})`：`packages/core/test/merge-csv.test.ts:158-186`（too-few / too-many / nonnumeric / negative / fractional / empty-lemma）。
+- 3 处 extension CSV 错误响应改 `.toMatchObject({fileName, line, kind})`：`background-listener.test.ts:439` / `sw-channel.test.ts:168` / `csv-sync.test.ts:149`。
+- generic `{ok:false, error:'string'}` 断言（export-failed / mark-failed / counts-failed 等）保留 `.toEqual`；不强制 toMatchObject（无类型化价值）。
+- cli 测试、`active-tab` / `content-listener` / `collect` / `run-collection` / `csv-file` / `smoke` / core 其他测试：fakes 不重复，不动 import。
+- vitest.config.ts 不变（per Q5 决策）；per-file `// @vitest-environment jsdom` 注释保留。
+
 ## 不在范围内（避免重新提案）
 
 - 多端自动同步（WebDAV / Gist / 后端）：第一版仅手动 CSV 导入导出。
@@ -156,3 +184,8 @@
 - **`errorMessage` 不放 `@word-radar/core`** — 第一版只在 `lib/error-message.ts`；cli 跨包 import 工作量大于 dedup 收益；后续真要 dedup 走独立 issue。
 - **`BbdcAuthError.kind` discriminator 不展开使用** — `kind: 'http' | 'check-login'` 字段已存在但当前无 consumer 分支；C4 不主动加新分支（避免越界到下游 UX 决策）。
 - **`isPushStatus` runtime phase-list 不删** — 是 wire boundary narrowing 的合法用法（防 `unknown` 输入），不是 trust gap。
+- **`test/fakes.ts` 不拆为多文件** — 230 行单文件可管理；拆目录增加 import 路径长度，收益有限。
+- **`test/fakes.ts` 不放 workspace root (`packages/test/`)** — cli / core 测试不需要 fake（只测真代码），多余抽象层。
+- **`CsvParseError.fileName` 不在 core 源头** — core 解析器无文件信息；fileName 在 `handleImportCsv` 响应顶层字段加，避免 core API 加可选参数污染。
+- **vitest.config.ts 不加 setupFiles** — fake-indexeddb/auto 在 word-repository.test.ts:6 / csv-sync.test.ts:9 各 import 一行即可；setupFiles 增加间接不抵收益。
+- **`test/fakes.ts` 不为 cli / core 共享** — cli / core 测试不重复 fake；workspace 跨包 fake 抽象是过度设计。
