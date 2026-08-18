@@ -98,6 +98,7 @@ export const test = base.extend<E2eTestFixtures, E2eWorkerFixtures>({
   swConsole: [async ({ extContext }, use) => {
     const state = { lines: [] as string[] };
     const attach = (sw: import("@playwright/test").Worker): void => {
+      state.lines.push(`[sw] registered: ${sw.url()}`);
       sw.on("console", (msg) => {
         state.lines.push(`[sw] ${msg.type()}: ${msg.text()}`);
       });
@@ -108,7 +109,11 @@ export const test = base.extend<E2eTestFixtures, E2eWorkerFixtures>({
     await use(state);
   }, { scope: "worker" }],
 
-  mockBbdc: [async ({ extContext }, use) => {
+  mockBbdc: [async ({ extContext, swConsole }, use) => {
+    // 依赖 swConsole：mockBbdc 被所有 spec 消费，可保证 console 监听在测试
+    // 开始前就已挂上（否则 worker fixture 惰性实例化会让 afterEach 才开始抓，
+    // sw-console 附件恒为空）。
+    void swConsole;
     const requests: MockBbdc["requests"] = [];
     let addWordResult = 200;
     let checkLoginResult = 200;

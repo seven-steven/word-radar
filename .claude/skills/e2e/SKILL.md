@@ -53,7 +53,8 @@ pnpm --filter @word-radar/extension exec playwright install chromium
 - **必须 `channel: 'chromium'`**（fixtures 已内置）：Playwright 默认 headless-shell 不支持 `--load-extension`。`context.route` 拦截 SW 发起的 fetch（含 POST FormData）实测可用。
 - **popup 标签页必须 `bringToFront()`** 才能采集目标页（popup 自身是活动标签时显示「content script 未注入」）；push 观察期间也必须前台——后台标签 setTimeout 节流会冻结 500ms 轮询。
 - **autoPush 默认开**：push 层测试先点掉 auto-push 复选框，避免自动推送与手动 retry-push 竞态。
-- **疑似产品 bug（e2e 基座发现，待修）**：① 采集成功但词库 total=0（WORDS_COLLECTED 写入间歇丢失）；② 空队列 retry-push 永久卡 `running 0/0`。修复前 push/collect 层 3 个用例红。
+- **sw-console 依赖链**：`mockBbdc` fixture 依赖 `swConsole`（worker fixture 惰性实例化，必须让所有 spec 间接触发，否则失败附件恒为空）。
+- ~~疑似产品 bug~~（已修）：① 采集丢写入（C6 ack 化）；② retry-push 后状态冻结 `running 0/0`——根因是 popup 轮询在 boot 时因 idle 自停、手动推送无人重启轮询（`refreshPushStatus` 现 observing running 即自启）；③ 推送完成后 pending 计数不刷新（轮询结束时补拉 counts）。
 - 真实 Chrome 验证：`pnpm e2e -- --channel=chrome`。
 - 有头观察模式：环境变量 `E2E_HEADED=1`。
 - CI 接入时：用 Playwright 官方 docker 镜像或装 xvfb 依赖；new headless 已支持扩展加载，无需 headed。

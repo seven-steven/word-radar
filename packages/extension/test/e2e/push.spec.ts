@@ -69,13 +69,12 @@ test("push pipeline pushes collected words to mocked bbdc and completes", async 
   expect(firstRaw).toContain("opcode");
   expect(firstRaw).toContain("infoidx");
 
-  // 5) 最终计数一致：succeeded + existing + failed === total（词级不丢不重）
+  // 5) 最终计数一致：本轮推送的 succeeded + existing + failed === retry-push 前的
+  //    待推数（completed 文案「推送完成」不含 N/N，不能用状态文本反解 total）。
   const succeeded = Number(await popup.getByTestId("push-succeeded").textContent());
   const existing = Number(await popup.getByTestId("push-existing").textContent());
   const failed = Number(await popup.getByTestId("push-failed").textContent());
-  const statusText = (await popup.getByTestId("push-status").textContent()) ?? "";
-  const totalInStatus = Number(/(\d+)\/(\d+)/.exec(statusText)?.[2] ?? "0");
-  expect(succeeded + existing + failed).toBe(totalInStatus);
+  expect(succeeded + existing + failed).toBe(pending);
 
   // 6) 待推清零（全部成功推走）
   await expect(popup.getByTestId("pending")).toHaveText("0");
