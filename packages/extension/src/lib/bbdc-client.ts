@@ -254,9 +254,21 @@ async function send(
   url: string,
   init: RequestInit,
 ): Promise<Response> {
-  // 故意不设 headers：让浏览器自行加 Content-Type（multipart/form-data 含 boundary）。
+  // 故意不设 Content-Type：让浏览器自行加（multipart/form-data 含 boundary）。
   // 这是 spec §不背单词对接 对加词端点的硬性要求。
-  return fetchImpl(url, init);
+  //
+  // `X-Requested-With: XMLHttpRequest` 显式设上 — BBDC 用它区分 AJAX 与 form-submit
+  // 路径（无此头时 POST 走非 XHR 分支 → server-side `exception_handler` 返回 20000
+  // "未知错误"，与 curl 复现一致）。
+  const headers: Record<string, string> = {
+    "X-Requested-With": "XMLHttpRequest",
+  };
+  if (init.method === "POST") {
+    // Chrome 不会给跨 origin / extension → bbdc.cn 自动加 Referer；
+    // BBDC 后端若做同源校验需要显式补上。
+    headers["Referer"] = `${new URL(url).origin}/`;
+  }
+  return fetchImpl(url, { ...init, headers });
 }
 
 function assertAcceptableStatus(response: Response): void {
