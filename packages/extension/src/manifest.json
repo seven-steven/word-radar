@@ -20,5 +20,5 @@
     }
   ],
   "host_permissions": ["https://bbdc.cn/*", "https://langeasy.com.cn/*"],
-  "permissions": ["storage"]
+  "permissions": ["storage", "activeTab", "scripting"]
 }

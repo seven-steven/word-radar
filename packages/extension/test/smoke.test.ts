@@ -9,14 +9,19 @@ describe("@word-radar/extension", () => {
   });
 
   it("requests only minimal permissions", () => {
-    // 第一版权限锁定为 ["storage"]（spec §Out of Scope）：
-    // 不申请 cookies/notifications/tabs/activeTab 等敏感权限。
-    // popup 采集只靠 chrome.tabs.query({active}) + tabs.sendMessage，无需额外权限。
-    expect(manifest.permissions).toEqual(["storage"]);
+    // 权限锁定（spec §Out of Scope 基础上的一处扩权，2026-08-19 用户拍板）：
+    // storage + activeTab/scripting —— 后两者用于「旧标签未注入时 executeScript 补注入」
+    // （popup 打开即用户手势，activeTab 只作用于当前标签，无 <all_urls> host 权限）。
+    // 仍不申请 cookies/notifications/tabs 等敏感权限。
+    expect(manifest.permissions).toEqual(["storage", "activeTab", "scripting"]);
     const perms = manifest.permissions ?? [];
-    for (const forbidden of ["cookies", "notifications", "tabs", "activeTab"]) {
+    for (const forbidden of ["cookies", "notifications", "tabs"]) {
       expect(perms).not.toContain(forbidden);
     }
+    expect(manifest.host_permissions).toEqual([
+      "https://bbdc.cn/*",
+      "https://langeasy.com.cn/*",
+    ]);
   });
 
   it("declares the bbdc host permission", () => {

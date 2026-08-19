@@ -6,6 +6,7 @@ function fakeGateway(overrides: Partial<TabsGateway> = {}): TabsGateway {
   return {
     queryActiveTabId: vi.fn(async () => 42),
     sendToTab: vi.fn(async () => ({ ok: true, count: 5 })),
+    injectIntoTab: vi.fn(async () => undefined),
     openUrl: vi.fn(async () => undefined),
     ...overrides,
   };
@@ -34,17 +35,36 @@ describe("requestCollection（popup 侧）", () => {
     if (!outcome.ok) expect(outcome.error).toContain("活动标签页");
   });
 
-  it("content script 未注入（sendMessage 抛错）时归一为错误", async () => {
+  it("sendMessage 抛错时先补注入再重试，重试成功则采集成功", async () => {
+    // 场景：扩展（重）加载后旧标签无 content script
+    const sendToTab = vi
+      .fn<() => Promise<unknown>>()
+      .mockRejectedValueOnce(new Error("Could not establish connection"))
+      .mockResolvedValueOnce({ ok: true, count: 3 });
+    const injectIntoTab = vi.fn(async () => undefined);
+    const gateway = fakeGateway({ sendToTab, injectIntoTab });
+
+    const outcome = await requestCollection(gateway);
+
+    expect(injectIntoTab).toHaveBeenCalledWith(42);
+    expect(sendToTab).toHaveBeenCalledTimes(2);
+    expect(outcome).toEqual({ ok: true, count: 3 });
+  });
+
+  it("补注入也失败（chrome:// 等不可注入页）时归一为错误", async () => {
     const gateway = fakeGateway({
       sendToTab: vi.fn(async () => {
         throw new Error("Could not establish connection");
+      }),
+      injectIntoTab: vi.fn(async () => {
+        throw new Error("cannot access contents of the page");
       }),
     });
 
     const outcome = await requestCollection(gateway);
 
     expect(outcome.ok).toBe(false);
-    if (!outcome.ok) expect(outcome.error).toContain("无法采集");
+    if (!outcome.ok) expect(outcome.error).toContain("请刷新页面后重试");
   });
 
   it("应答形态非法时归一为错误", async () => {

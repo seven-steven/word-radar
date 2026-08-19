@@ -47,7 +47,7 @@ test("shows 未注入 error when active tab has no content script", async ({
   const popup = await extContext.newPage();
   await popup.goto(popupUrl);
   await expect(popup.getByTestId("status")).toHaveText(
-    /此页面无法采集（content script 未注入）/,
+    /此页面无法采集.*请刷新页面后重试/s,
     { timeout: 15_000 },
   );
   await popup.close();
