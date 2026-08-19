@@ -6,7 +6,7 @@
 
 ## 领域概念（核心，来自 spec.md / README.md）
 
-- **采集（collect）**：从网页正文里提取英文词条。content script 负责；不写 DB、不发 HTTP。
+- **采集（collect）**：从网页正文里提取英文词条。content script 负责；不写 DB、不发 HTTP。页面有选区时优先采选区（`selection`），否则按正文→main→body→`<pre>` 纯文本回退（覆盖 raw.githubusercontent.com 等直链页）。旧标签未注入时由 popup 侧 `TabsGateway.injectIntoTab` 补注入（见下）。
 - **词形还原（lemmatization）**：把 running / runs / ran 折回 run。`@word-radar/core` 的 `lemma.ts` + compromise + 不规则动词表。
 - **推送（push）**：把词库里的待推词逐个写入「不背单词」生词本。
 - **词库（vocabulary / repository）**：扩展 IndexedDB 存储。`WordRepository`，lemma 主键，flags 位掩码。
@@ -53,6 +53,7 @@
 - **`PushStatus`（合并后唯一名）**：`messages.ts:35` 定义；`push-coordinator.ts:13–23` 旧 `PushProgress` 与 `PushPhase` 在 C4 删除，7 处 push-coordinator 引用改 import `PushStatus`。wire / internal 共用一名。
 
 - **`CollectOptions.excludedTags` + pre 回退**：`collect.ts` 的排除标签集合改为可注入(`excludedTags`);`collectPageText` 在 body 正常路径采集为空时,回退用去掉 `PRE` 的排除集重采 — 覆盖正文整体在 `<pre>` 的纯文本页(raw.githubusercontent.com / pastebin)。普通网页正文非空不走回退,代码块照旧排除;可见性检查在回退中仍生效。
+- **`TabsGateway.injectIntoTab(tabId)`**：`active-tab.ts` 2026-08-19 新增端口。`requestCollection` 首次 `sendMessage` 失败时（扩展重载后旧标签无 declarative content script），用 `chrome.scripting.executeScript` 从自身 manifest `content_scripts[].js` 读路径补注入并重试一次；再失败（`chrome://` 等不可注入页）才归一错误文案「请刷新页面后重试」。manifest 相应扩权 `activeTab`+`scripting`（无新增 host 权限）。相关教训：raw.githubusercontent.com 的 CSP `sandbox` 头**不**阻断 content script（早先相反结论是 e2e 标签顺序假阳性）。
 
 ## 模块词汇（C5 深化引入）
 

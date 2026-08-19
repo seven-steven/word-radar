@@ -38,7 +38,7 @@
 17. 作为命令行用户,我想用 `word-radar merge <a.csv> <b.csv>` 合并多份词表并去重,以便汇总不同来源的词。
 18. 作为多设备用户,我想词库能在不同设备间同步(第一版靠手动 CSV 导入导出,后续可配 WebDAV/Gist),以便在多台机器上使用。
 19. 作为注重隐私的用户,我想扩展不读取或上传我的不背单词 cookie,完全只在本地浏览器内使用,以便我的登录凭证不外泄。
-20. 作为注重隐私的用户,我想扩展只申请最小必要权限(不申请 cookies/activeTab/notifications),以便减少权限顾虑。
+20. 作为注重隐私的用户,我想扩展只申请最小必要权限(不申请 cookies/notifications/tabs;2026-08-19 增补 activeTab+scripting 用于旧标签补注入,详见 README 权限表),以便减少权限顾虑。
 21. 作为扩展用户,我想工具在 Chrome 和 Edge 上都能用,以便在不同浏览器上使用。
 22. 作为未来用户,我想后续能扩展到有道、墨墨等其他背单词 APP,以便选择自己喜欢的 APP(第一版不做,但架构预留)。
 23. 作为未来用户,我想后续能采集 YouTube 字幕、GitHub markdown(第一版不做),以便覆盖更多来源。
@@ -139,7 +139,7 @@ run,1
 - 其他背单词 APP(有道/百词斩/墨墨):第一版只做不背单词;但数据模型 flags 位已预留。
 - YouTube 字幕、GitHub markdown 专项采集:第一版只做网页正文。
 - 网页全文持久化、学习进度、推送历史、失败原因审计、可恢复任务队列:第一版不做。
-- 申请 cookies/notifications 等权限:第一版不申请,用最小权限。
+- 申请 cookies/notifications/tabs 等权限:第一版不申请,用最小权限(activeTab+scripting 为 2026-08-19 增补,仅用于旧标签补注入,见 README)。
 - 不背单词「自制词书」批量上传子系统(lexis):第一版不用(用逐词加生词本接口)。
 - 把不背单词 cookie 读出/转发/上传:永不做(安全边界)。
 - **单词熟悉度/记忆状态获取**(0-100 连续指标,或生/模糊/熟悉离散态):技术不可行 —— 不背单词网页端 API 全集(7 个端点:`/api/{user-new-word, remove-user-new-word, check-login, check-new-word}` + `/lexis/book/{list,coolcode,file/submit,save,delete}`)无一返回熟悉度;官方查词插件源码也无任何熟悉度/记忆强度字段;生词列表响应只有 `word/ukpron/uspron/updatetime`。算法记忆状态(FSRS-like)只存 APP/服务端,网页端零暴露。能用 `check-new-word` 做的二值「在/不在生词本」过滤已在第一版计划内,等价于「还没开始学」的最粗糙近似,**不等于熟悉度**。

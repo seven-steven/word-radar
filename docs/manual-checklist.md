@@ -34,7 +34,17 @@
 
 ---
 
-## 2. Edge 同样走查
+## 2. 采集场景专项（整页 / 选区 / 纯文本页 / 旧标签补注入）
+
+- [ ] **纯文本页整页采集**：打开 raw.githubusercontent.com 的任意 `.md` 直链（如 `https://raw.githubusercontent.com/mattpocock/skills/refs/heads/main/skills/productivity/grilling/SKILL.md`），点采集 → 「本次采集 N 词」（N ≥ 1）。该页带 CSP `sandbox` 响应头，已验证不影响 content script。
+- [ ] **纯文本页选区采集**：同一页选中一段含英文单词的文本，点采集 → 只统计选区内词（计数明显小于整页）。
+- [ ] **普通网页选区采集**：英文文章页选中一段 → 点采集 → 只采选区。
+- [ ] **旧标签补注入**：在 `chrome://extensions/` 里点扩展「重新加载」，**不刷新**已打开的英文文章页，直接点采集 → 应正常出「本次采集 N 词」（executeScript 补注入生效）。
+- [ ] **特殊页兜底**：在 `chrome://settings/` 页点采集 → 显示「此页面无法采集：请刷新页面后重试（chrome:// 等特殊页不支持采集）」。
+
+---
+
+## 3. Edge 同样走查
 
 - [ ] 打开 `edge://extensions/`，开启「开发人员模式」。
 - [ ] 点「加载解压缩的扩展」，选择同一 `dist` 目录。
@@ -43,12 +53,13 @@
   - [ ] 英文文章页采集 → 计数递增。
   - [ ] 推送状态流转正常。
   - [ ] 生词本页能看到对应词。
+- [ ] 抽查第 2 节的「纯文本页整页采集」与「选区采集」两项。
 
 ---
 
-## 3. 推送中断恢复
+## 4. 推送中断恢复
 
-### 3.a 登出触发暂停
+### 4.a 登出触发暂停
 
 - [ ] 在扩展推送进行中（状态为「推送中 M/N」），新标签页打开 <https://bbdc.cn/> 并**登出**不背单词。
 - [ ] 等推送协调器下一次请求失败：
@@ -61,7 +72,7 @@
   - [ ] 剩余待推词陆续成功推送。
   - [ ] 最终状态「推送完成」。
 
-### 3.b 断网触发暂停
+### 4.b 断网触发暂停
 
 - [ ] 推送进行中，断开网络（飞行模式或拔网线）。
 - [ ] 等推送协调器 3 次重试耗尽：
@@ -72,7 +83,7 @@
 
 ---
 
-## 4. 重复采集去重
+## 5. 重复采集去重
 
 - [ ] 在同一个英文文章页，点 WordRadar 图标第一次采集，记录「累计采集 N」。
 - [ ] 关闭 popup，再点一次（或点「重新采集」按钮）：
@@ -83,7 +94,7 @@
 
 ---
 
-## 5. CSV 导出 → CLI merge → 导入往返
+## 6. CSV 导出 → CLI merge → 导入往返
 
 - [ ] 扩展里累积一些词之后，popup 点「导出 CSV」：
   - [ ] 浏览器下载一个 `word-radar-YYYYMMDD-HHmm.csv` 文件。
@@ -109,9 +120,9 @@
 
 ---
 
-## 6. CLI extract / merge 在真实文件上跑通
+## 7. CLI extract / merge 在真实文件上跑通
 
-### 6.a extract 单文件
+### 7.a extract 单文件
 
 - [ ] 准备一份真实英文文章文本，保存为 `/tmp/wr-test.md`。
 - [ ] 运行：
@@ -125,7 +136,7 @@
   - [ ] CSV 表头为 `lemma,flags`，每行一个词，全部 `flags=0`。
   - [ ] 词形还原正确：文章里 `running` / `runs` / `ran` 在 CSV 里只有一条 `run`。
 
-### 6.b extract 单文件 + `-o`
+### 7.b extract 单文件 + `-o`
 
 - [ ] 运行：
 
@@ -135,7 +146,7 @@
 
   - [ ] 输出写入 `/tmp/custom.csv`，不存在 `/tmp/wr-test.words.csv`（被覆盖或跳过）。
 
-### 6.c extract 目录
+### 7.c extract 目录
 
 - [ ] 准备目录 `/tmp/wr-dir/`，包含 `a.md`、`b.txt`、`sub/c.md`、`.hidden.md`、`skip.json`。
 - [ ] 运行：
@@ -148,7 +159,7 @@
   - [ ] `.hidden.md` 被忽略（隐藏文件）。
   - [ ] `skip.json` 被忽略（非 `.md` / `.txt`）。
 
-### 6.d extract 错误路径（错误只打印一次）
+### 7.d extract 错误路径（错误只打印一次）
 
 - [ ] 运行 `node packages/cli/dist/index.js extract /nonexistent`：
   - [ ] stderr 输出**一行**错误 `word-radar: Error: Path does not exist: /nonexistent`。
@@ -162,9 +173,9 @@
   - [ ] stderr 输出**一行** `word-radar: Error: merge requires at least 2 input files`。
   - [ ] 不重复打印。
 
-### 6.e merge 真实文件
+### 7.e merge 真实文件
 
-- [ ] 用 6.a 生成的 CSV + 另一份 CSV，跑：
+- [ ] 用 7.a 生成的 CSV + 另一份 CSV，跑：
 
   ```bash
   node packages/cli/dist/index.js merge file1.words.csv file2.words.csv -o merged.csv
@@ -181,7 +192,7 @@
 
   - [ ] stdout 是合法 CSV，可被扩展「导入 CSV」读取。
 
-### 6.f merge 坏行错误
+### 7.f merge 坏行错误
 
 - [ ] 手工准备一个坏 CSV `bad.csv`（某行缺字段 / 格式错）：
   - [ ] 运行 `merge good.csv bad.csv`。
@@ -194,10 +205,10 @@
 ## 验收签字
 
 - [ ] Chrome 全流程（§1）通过。
-- [ ] Edge 全流程（§2）通过。
-- [ ] 推送中断恢复（§3）通过。
-- [ ] 重复采集去重（§4）通过。
-- [ ] CSV 往返（§5）通过。
-- [ ] CLI extract / merge 真实文件（§6）通过。
+- [ ] Edge 全流程（§3）通过 + 采集场景专项（§2）通过。
+- [ ] 推送中断恢复（§4）通过。
+- [ ] 重复采集去重（§5）通过。
+- [ ] CSV 往返（§6）通过。
+- [ ] CLI extract / merge 真实文件（§7）通过。
 
-验收人 / 日期：********\_\_\_\_********
+验收人 / 日期：**\*\*\*\***\_\_\_\_**\*\*\*\***
