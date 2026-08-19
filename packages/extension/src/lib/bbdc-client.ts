@@ -169,17 +169,18 @@ export function createBbdcClient(options: BbdcClientOptions = {}): BbdcClient {
     },
 
     async addWord(word: string, info: string): Promise<void> {
-      const newWordList = JSON.stringify([
-        {
-          word,
-          info,
-          course: "*",
-          wordidx: "*",
-          infoidx: "100",
-          selection: "*",
-          opcode: "1",
-        },
-      ]);
+      // 官方查词插件（Chrome Web Store: 不背单词查词 v1.2.1）实测形态：
+      // newwordlist = JSON.stringify(对象)——不是数组。BBDC 后端对数组走
+      // exception_handler 返回 result_code 20000「未知错误」。
+      const newWordList = JSON.stringify({
+        word,
+        info,
+        course: "*",
+        wordidx: "*",
+        infoidx: "100",
+        selection: "*",
+        opcode: "1",
+      });
       const form = new FormData();
       form.set("newwordlist", newWordList);
       const response = await send(
@@ -254,21 +255,10 @@ async function send(
   url: string,
   init: RequestInit,
 ): Promise<Response> {
-  // 故意不设 Content-Type：让浏览器自行加（multipart/form-data 含 boundary）。
-  // 这是 spec §不背单词对接 对加词端点的硬性要求。
-  //
-  // `X-Requested-With: XMLHttpRequest` 显式设上 — BBDC 用它区分 AJAX 与 form-submit
-  // 路径（无此头时 POST 走非 XHR 分支 → server-side `exception_handler` 返回 20000
-  // "未知错误"，与 curl 复现一致）。
-  const headers: Record<string, string> = {
-    "X-Requested-With": "XMLHttpRequest",
-  };
-  if (init.method === "POST") {
-    // Chrome 不会给跨 origin / extension → bbdc.cn 自动加 Referer；
-    // BBDC 后端若做同源校验需要显式补上。
-    headers["Referer"] = `${new URL(url).origin}/`;
-  }
-  return fetchImpl(url, { ...init, headers });
+  // 故意不设 headers：让浏览器自行加 Content-Type（multipart/form-data 含 boundary）。
+  // 这是 spec §不背单词对接 对加词端点的硬性要求；官方查词插件同样零自定义头
+  // （无 X-Requested-With / 无 Referer），保持与其完全一致最稳。
+  return fetchImpl(url, init);
 }
 
 function assertAcceptableStatus(response: Response): void {

@@ -86,7 +86,7 @@ run,1
 - 登录检查:`GET https://bbdc.cn/api/check-login`(result_code 200 = 已登录)。
 - 查词释义:`GET https://langeasy.com.cn/loadLexisList.action?strict=1&word=<w>`(取 wordlist[0].interpret)。
 - 查重:`GET https://bbdc.cn/api/check-new-word?word=<w>&infoidx=100`(data_body.list 非空 = 已存在)。
-- 加词:`POST https://bbdc.cn/api/user-new-word`,FormData 字段 `newwordlist` = JSON `{word, info(释义), course:"*", wordidx:"*", infoidx:"100", selection:"*", opcode:"1"}`。不手动设 Content-Type(让浏览器带 multipart boundary)。result_code 200 = 成功。
+- 加词:`POST https://bbdc.cn/api/user-new-word`,FormData 字段 `newwordlist` = JSON **对象**(裸对象,严禁数组包对象——数组会触发 BBDC exception_handler 返回 result_code 20000「未知错误」,2026-08 排查确认) `{word, info(释义), course:"*", wordidx:"*", infoidx:"100", selection:"*", opcode:"1"}`。不手动设 Content-Type(让浏览器带 multipart boundary),也不加任何自定义头(官方查词插件 v1.2.1 同款零自定义头)。result_code 200 = 成功。
 - 生词列表:`GET https://bbdc.cn/api/user-new-word?page=<N>`(分页)。
 - 删词:`POST https://bbdc.cn/api/remove-user-new-word`(newwordlist=逗号分隔词串)。
 - 这些接口(尤其逐词加生词本的 POST)是通过逆向不背单词官方查词插件发现的(网页 UI 只暴露批量建词书,不暴露逐词加);已在用户账号真实加/删词验证。

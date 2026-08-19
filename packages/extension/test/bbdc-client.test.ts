@@ -194,7 +194,7 @@ describe("BbdcClient.checkExisting", () => {
 });
 
 describe("BbdcClient.addWord（关键契约：不手动设 Content-Type）", () => {
-  it("FormData 字段 newwordlist 为 JSON 串，含 spec 全部字段", async () => {
+  it("FormData 字段 newwordlist 为 JSON 串（对象非数组），含官方插件全部字段", async () => {
     const { client, fetchMock } = makeClient(() => makeResponse(200, { result_code: 200 }));
 
     await client.addWord("serendipity", "n. 意外发现珍宝的运气");
@@ -206,17 +206,18 @@ describe("BbdcClient.addWord（关键契约：不手动设 Content-Type）", () 
     const { isFormData, fields } = await normalizeBody(init.body);
     expect(isFormData).toBe(true);
     const parsed = JSON.parse(fields.newwordlist);
-    expect(parsed).toEqual([
-      {
-        word: "serendipity",
-        info: "n. 意外发现珍宝的运气",
-        course: "*",
-        wordidx: "*",
-        infoidx: "100",
-        selection: "*",
-        opcode: "1",
-      },
-    ]);
+    // 官方查词插件（v1.2.1）形态：JSON.stringify(对象)；数组会触发 BBDC
+    // exception_handler → result_code 20000「未知错误」。
+    expect(Array.isArray(parsed)).toBe(false);
+    expect(parsed).toEqual({
+      word: "serendipity",
+      info: "n. 意外发现珍宝的运气",
+      course: "*",
+      wordidx: "*",
+      infoidx: "100",
+      selection: "*",
+      opcode: "1",
+    });
   });
 
   it("**不**手动设置 Content-Type（spec 硬要求：让浏览器带 boundary）", async () => {

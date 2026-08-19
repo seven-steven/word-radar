@@ -149,10 +149,12 @@
   - ramp `1 / 2 / 5 / 10 / 15 / 20 / 30 / 50 / 100 / 150` rps × `30–50` reqs，**共 ~9000 个请求，0 个 429**
   - 平均 `110–130ms`，p95 `120–175ms`（rps=1 冷启 p95 3.4s，之后稳定）
   - 相对 spec 的 2.5 rps 有 **60 倍富余**
-- POST `https://bbdc.cn/api/user-new-word` 外部不可测：
-  - 三种 body 变体（URL-encoded / multipart+XHR / multipart 无 Referer）一律 `result_code=20000` / `data_kind=exception_handler` / `info=未知错误`
-  - delta=0（不入库，无残留）— BBDC 对非浏览器客户端拒绝
-  - 实际限频必须从真浏览器测量；深化后默认 `400ms` 保留为防御值
+- POST `https://bbdc.cn/api/user-new-word`（2026-08-19 修正——早前"外部不可测 / BBDC bot 拒绝"的结论是**误判**）：
+  - 早前外部 curl 三种 body 变体一律 `result_code=20000`，曾被解读为"BBDC 对非浏览器客户端拒绝"
+  - 真正根因：请求体形状错误 — `newwordlist` 必须是 `JSON.stringify(对象)`，数组包对象（实现期走样）一律 20000 / `data_kind=exception_handler` / "未知错误"
+  - 权威参照：官方查词插件（Chrome Web Store ID `cklfipcjofdnmdolnfngpmokdaejidim` v1.2.1）— 对象形态、零自定义头、无 host_permissions
+  - 2026-08-19 修正后真机验证：逐词加词成功，推送全链路通
+  - 限频阈值仍未实测（外部 curl 形状错误时测不出限频）；`400ms` 防御默认保留
 
 ## 测试不变量（C3 深化后）
 
