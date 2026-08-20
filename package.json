@@ -14,6 +14,7 @@
     "clean": "pnpm -r --filter=./packages/* clean",
     "package": "node scripts/package.mjs",
     "e2e": "node scripts/e2e/run-e2e.mjs",
+    "screenshot": "node scripts/e2e/run-screenshots.mjs",
     "verify:changelog": "node scripts/verify-changelog.mjs",
     "verify:manifest": "node scripts/verify-manifest.mjs",
     "verify:zip": "node scripts/verify-zip.mjs",
