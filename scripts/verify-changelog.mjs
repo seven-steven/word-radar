@@ -6,7 +6,7 @@
  * CLI 入口读仓库根 CHANGELOG.md 与 package.json，缺失即非零退出。
  */
 import { readFileSync, existsSync } from "node:fs";
-import { resolve, dirname } from "node:path";
+import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
