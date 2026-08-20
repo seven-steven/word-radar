@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
+import { existsSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import manifest from "../src/manifest.json" with { type: "json" };
+
+const here = dirname(fileURLToPath(import.meta.url));
+const ICON_SIZES = [16, 48, 128] as const;
+const iconPath = (n: number) => `src/assets/icons/icon-${n}.png`;
 
 describe("@word-radar/extension", () => {
   it("ships a valid MV3 manifest", () => {
@@ -40,5 +47,17 @@ describe("@word-radar/extension", () => {
     expect(manifest.background?.service_worker).toBeTypeOf("string");
     expect(manifest.background?.type).toBe("module");
     expect(manifest.action?.default_popup).toBeTypeOf("string");
+  });
+
+  it("declares radar placeholder icons in 16/48/128 (issue #15)", () => {
+    for (const n of ICON_SIZES) {
+      expect(manifest.icons?.[String(n)]).toBe(iconPath(n));
+      expect(manifest.action?.default_icon?.[String(n)]).toBe(iconPath(n));
+      // 源文件必须存在（crxjs 构建时按 manifest 引用拷贝进 dist）
+      expect(
+        existsSync(resolve(here, "../src/assets/icons", `icon-${n}.png`)),
+        `src icon ${n} missing`,
+      ).toBe(true);
+    }
   });
 });

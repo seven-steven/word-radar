@@ -4,9 +4,19 @@
   "version": "0.1.0",
   "description": "把网页里的英文生词一键提取出来，自动加到「不背单词」生词本。",
   "minimum_chrome_version": "114",
+  "icons": {
+    "16": "src/assets/icons/icon-16.png",
+    "48": "src/assets/icons/icon-48.png",
+    "128": "src/assets/icons/icon-128.png"
+  },
   "action": {
     "default_title": "WordRadar",
-    "default_popup": "src/popup.html"
+    "default_popup": "src/popup.html",
+    "default_icon": {
+      "16": "src/assets/icons/icon-16.png",
+      "48": "src/assets/icons/icon-48.png",
+      "128": "src/assets/icons/icon-128.png"
+    }
   },
   "background": {
     "service_worker": "src/background.ts",
