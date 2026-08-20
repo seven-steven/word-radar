@@ -10,7 +10,7 @@
  *
  * 保证：zip 内 manifest.json 位于根层级，解压后可直接作为「已解压的扩展」加载。
  */
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { mkdir, rm, readdir, stat, readFile, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { resolve, relative, join, sep } from "node:path";
@@ -21,7 +21,15 @@ const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const REPO_ROOT = resolve(__dirname, "..");
 const EXTENSION_DIST = resolve(REPO_ROOT, "packages/extension/dist");
 const OUT_DIR = resolve(REPO_ROOT, "dist");
-const OUT_ZIP = resolve(OUT_DIR, "word-radar-extension.zip");
+
+/** 版本号取根 package.json，产物名 word-radar-<version>-chrome.zip。 */
+function versionedZipName() {
+  const pkg = JSON.parse(readFileSync(resolve(REPO_ROOT, "package.json"), "utf8"));
+  if (typeof pkg.version !== "string" || pkg.version.length === 0) {
+    throw new Error("root package.json has no version");
+  }
+  return `word-radar-${pkg.version}-chrome.zip`;
+}
 
 async function collectFiles(rootDir) {
   const results = [];
@@ -161,6 +169,13 @@ async function main() {
   }
 
   await mkdir(OUT_DIR, { recursive: true });
+  // 清理旧版本 zip，保证 dist/ 下唯一版本化产物
+  for (const name of await readdir(OUT_DIR)) {
+    if (/^word-radar-.*-chrome\.zip$/.test(name) || name === "word-radar-extension.zip") {
+      await rm(resolve(OUT_DIR, name));
+    }
+  }
+  const OUT_ZIP = resolve(OUT_DIR, versionedZipName());
   if (existsSync(OUT_ZIP)) await rm(OUT_ZIP);
 
   const files = await collectFiles(EXTENSION_DIST);
