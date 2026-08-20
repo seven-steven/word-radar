@@ -14,7 +14,8 @@
     "clean": "pnpm -r --filter=./packages/* clean",
     "package": "node scripts/package.mjs",
     "e2e": "node scripts/e2e/run-e2e.mjs",
-    "verify:changelog": "node scripts/verify-changelog.mjs"
+    "verify:changelog": "node scripts/verify-changelog.mjs",
+    "verify:claims": "node scripts/verify-claims.mjs"
   },
   "devDependencies": {
     "typescript": "5.9.3"
