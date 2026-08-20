@@ -1,8 +1,8 @@
 /**
  * raw.githubusercontent.com 等价场景:
  * 1. 正文整体在 <pre> 的 fixture 页 → popup 采集计数 ≥ 1(pre 回退修复的 e2e 锁)
- * 2. 活动页无 content script(扩展自身页面)→ popup 显示「content script 未注入」
- *    (用户截图症状的机制复现:tab 在扩展(重)加载前打开 / 不可注入页)
+ * 2. 活动页为扩展自身页面(不可注入)→ popup 显示「此页面无法采集」
+ *    (不可注入页的机制复现:chrome:// / chrome-extension:// 等页面)
  */
 import { test, expect } from "./fixtures.js";
 
@@ -31,15 +31,13 @@ test("collects words from a raw-like pre-only page", async ({
   await raw.close();
 });
 
-test("shows 未注入 error when active tab has no content script", async ({
+test("shows 不可注入 error when active tab is an extension page", async ({
   extContext,
   popupUrl,
 }) => {
-  // popup 自身作为活动页:chrome-extension:// 页面无 content script,
-  // sendMessage 必然 throw → 与用户截图完全相同的错误文案路径。
-  // 注意 workers=1 + 持久 context:先开这个"活动页",再开真 popup,
-  // 真 popup 的 boot 采集应落到此页面上。真实活动标签取 currentWindow,
-  // 所以这里需要让无脚本页成为活动页 —— 用 bringToFront 保证。
+  // popup 自身作为活动页:chrome-extension:// 页面不可注入(executeScript 无
+  // 对应 host 权限,activeTab 也不覆盖扩展自身页面)→ 注入 reject,归一为
+  // 「此页面无法采集」文案(issue #14 后注入是主路径,失败即整体失败)。
   const noScriptPage = await extContext.newPage();
   await noScriptPage.goto(popupUrl);
   await noScriptPage.bringToFront();
@@ -47,7 +45,7 @@ test("shows 未注入 error when active tab has no content script", async ({
   const popup = await extContext.newPage();
   await popup.goto(popupUrl);
   await expect(popup.getByTestId("status")).toHaveText(
-    /此页面无法采集.*请刷新页面后重试/s,
+    /此页面无法采集.*特殊页不支持注入/s,
     { timeout: 15_000 },
   );
   await popup.close();

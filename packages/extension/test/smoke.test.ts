@@ -29,11 +29,11 @@ describe("@word-radar/extension", () => {
     expect(hosts.some((h) => h.startsWith("https://bbdc.cn"))).toBe(true);
   });
 
-  it("declares exactly one content script entry on all urls", () => {
-    expect(manifest.content_scripts).toHaveLength(1);
-    const [cs] = manifest.content_scripts;
-    expect(cs?.matches).toContain("<all_urls>");
-    expect(cs?.js).toHaveLength(1);
+  it("declares no declarative content scripts (activeTab 瘦身, issue #14)", () => {
+    // declarative content_scripts（<all_urls>）已移除：采集主路径是 popup 打开时
+    // 的 chrome.scripting.executeScript 注入（activeTab + scripting），
+    // 安装时权限提示不再包含「读取和更改所有网站上的数据」。
+    expect(manifest.content_scripts).toBeUndefined();
   });
 
   it("uses an MV3 module service worker and a popup action", () => {

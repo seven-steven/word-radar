@@ -18,7 +18,7 @@
 import { test as base, expect, chromium } from "@playwright/test";
 import type { BrowserContext } from "@playwright/test";
 import { createServer, type Server } from "node:http";
-import { mkdtemp, readFile, stat } from "node:fs/promises";
+import { cp, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -26,6 +26,33 @@ import { fileURLToPath } from "node:url";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const EXTENSION_DIST = resolve(__dirname, "../../dist");
 const PAGES_DIR = join(__dirname, "pages");
+
+/**
+ * e2e 专用扩展目录：复制 dist 并给 host_permissions 加上 fixture 服务与
+ * raw.githubusercontent.com（issue #14 后采集主路径是 executeScript；真实
+ * 使用中 popup 由 action 点击打开，activeTab 即刻授权，但 e2e 把 popup 当
+ * 普通标签页打开 —— 无用户手势 → activeTab 不可用。host permission 是本
+ * harness 的测试期替代授权，**只存在于临时副本**，产物 manifest 不受影响）。
+ */
+const TEST_ONLY_HOST_PERMISSIONS = [
+  "http://127.0.0.1/*",
+  "https://raw.githubusercontent.com/*",
+];
+
+async function makeE2eExtensionDir(): Promise<string> {
+  const dir = await mkdtemp(join(tmpdir(), "word-radar-e2e-ext-"));
+  await cp(EXTENSION_DIST, join(dir, "dist"), { recursive: true });
+  const manifestPath = join(dir, "dist/manifest.json");
+  const raw = JSON.parse(await readFile(manifestPath, "utf8")) as {
+    host_permissions?: string[];
+  };
+  raw.host_permissions = [
+    ...(raw.host_permissions ?? []),
+    ...TEST_ONLY_HOST_PERMISSIONS,
+  ];
+  await writeFile(manifestPath, `${JSON.stringify(raw, null, 2)}\n`);
+  return join(dir, "dist");
+}
 
 const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -60,6 +87,7 @@ interface E2eWorkerFixtures {
 export const test = base.extend<E2eTestFixtures, E2eWorkerFixtures>({
   extContext: [async ({ }, use) => {
     const userDataDir = await mkdtemp(join(tmpdir(), "word-radar-e2e-"));
+    const extensionDir = await makeE2eExtensionDir();
     // channel 'chromium'：完整 Chromium 的 new headless。默认 headless-shell
     // 不支持 --load-extension（本轮 spike 实测结论）。
     const launchOptions = {
@@ -69,8 +97,8 @@ export const test = base.extend<E2eTestFixtures, E2eWorkerFixtures>({
     const context = await chromium.launchPersistentContext(userDataDir, {      ...launchOptions,
       // MV3 扩展加载（new headless 支持；老 headless 不支持）
       args: [
-        `--disable-extensions-except=${EXTENSION_DIST}`,
-        `--load-extension=${EXTENSION_DIST}`,
+        `--disable-extensions-except=${extensionDir}`,
+        `--load-extension=${extensionDir}`,
         "--no-sandbox",
       ],
       viewport: { width: 1280, height: 800 },

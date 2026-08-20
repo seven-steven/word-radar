@@ -53,7 +53,7 @@
 - **`PushStatus`（合并后唯一名）**：`messages.ts:35` 定义；`push-coordinator.ts:13–23` 旧 `PushProgress` 与 `PushPhase` 在 C4 删除，7 处 push-coordinator 引用改 import `PushStatus`。wire / internal 共用一名。
 
 - **`CollectOptions.excludedTags` + pre 回退**：`collect.ts` 的排除标签集合改为可注入(`excludedTags`);`collectPageText` 在 body 正常路径采集为空时,回退用去掉 `PRE` 的排除集重采 — 覆盖正文整体在 `<pre>` 的纯文本页(raw.githubusercontent.com / pastebin)。普通网页正文非空不走回退,代码块照旧排除;可见性检查在回退中仍生效。
-- **`TabsGateway.injectIntoTab(tabId)`**：`active-tab.ts` 2026-08-19 新增端口。`requestCollection` 首次 `sendMessage` 失败时（扩展重载后旧标签无 declarative content script），用 `chrome.scripting.executeScript` 从自身 manifest `content_scripts[].js` 读路径补注入并重试一次；再失败（`chrome://` 等不可注入页）才归一错误文案「请刷新页面后重试」。manifest 相应扩权 `activeTab`+`scripting`（无新增 host 权限）。相关教训：raw.githubusercontent.com 的 CSP `sandbox` 头**不**阻断 content script（早先相反结论是 e2e 标签顺序假阳性）。
+- **`TabsGateway.injectIntoTab(tabId)`**：`active-tab.ts` 2026-08-19 新增端口，2026-08-20（issue #14）转正为**采集主路径**。manifest 已移除 declarative content_scripts（activeTab 瘦身），`requestCollection` 每次「先 `chrome.scripting.executeScript` 注入再 `sendMessage`」；内容脚本由 vite 插件 `buildContentScript` 用 esbuild 独立打包为**单文件 IIFE**，落到稳定路径 `assets/content-script.js`（`CONTENT_SCRIPT_FILES` 常量指向它；不用 crxjs 的 content_scripts seam —— 其 loader 动态 import 哈希 bundle，listener 注册异步落在 executeScript resolve 之后，紧随的 sendMessage 竞态性失败，e2e 实测复现）。`content.ts` 有幂等守卫（isolated world 全局标志）防重复 listener。注入或消息失败（`chrome://` 等不可注入页）归一错误文案「此页面无法采集：chrome:// 等特殊页不支持注入」。e2e harness 无法产生真实用户手势（popup 以标签页模拟，activeTab 不授权），fixtures 以临时副本 + 测试期 host_permissions 替代授权。相关教训：raw.githubusercontent.com 的 CSP `sandbox` 头**不**阻断 content script（早先相反结论是 e2e 标签顺序假阳性）。
 
 ## 模块词汇（C5 深化引入）
 

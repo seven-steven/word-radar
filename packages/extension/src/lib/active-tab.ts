@@ -18,20 +18,25 @@ export interface TabsGateway {
   queryActiveTabId(): Promise<number | undefined>;
   sendToTab(tabId: number, message: CollectWordsMessage): Promise<unknown>;
   /**
-   * 程序化补注入 content script（chrome.scripting.executeScript）。
-   * 场景：扩展（重）加载后已打开的旧标签不会补注入 declarative content script，
-   * popup 点开时 activeTab 已授权，executeScript 可补上后再重试一次。
+   * 程序化注入 content script（chrome.scripting.executeScript）— 采集主路径。
+   * manifest 已无 declarative content script；popup 打开即视为用户手势，
+   * activeTab 已授权，每次采集都先注入（content.ts 幂等，重复注入无副作用）。
    */
   injectIntoTab(tabId: number): Promise<void>;
   /** 在新标签页打开 url（popup 内用于「打开不背单词」引导）。 */
   openUrl(url: string): Promise<void>;
 }
 
-/** 从自身 manifest 读 declarative content script 的产物路径，供 executeScript 补注入。 */
-function contentScriptFiles(): string[] {
-  const scripts = chrome.runtime.getManifest().content_scripts ?? [];
-  return scripts.flatMap((entry) => entry.js ?? []);
-}
+/**
+ * 程序化注入的 content script 产物路径。
+ * 构建约定：manifest 已不再声明 declarative content_scripts（activeTab 瘦身，
+ * issue #14）。vite.config.ts 的 buildContentScript 插件把 src/content.ts
+ * 独立打包为单文件 IIFE，落到稳定路径 assets/content-script.js（不随内容
+ * 哈希变化，同步执行 —— crxjs loader 的动态 import 会让紧随的 sendMessage
+ * 竞态失败，故不用）。
+ * content.ts 侧有幂等守卫，重复注入不会注册重复 listener。
+ */
+const CONTENT_SCRIPT_FILES = ["assets/content-script.js"];
 
 export const chromeTabsGateway: TabsGateway = {
   async queryActiveTabId() {
@@ -44,7 +49,7 @@ export const chromeTabsGateway: TabsGateway = {
   async injectIntoTab(tabId) {
     await chrome.scripting.executeScript({
       target: { tabId },
-      files: contentScriptFiles(),
+      files: CONTENT_SCRIPT_FILES,
     });
   },
   async openUrl(url) {
@@ -58,8 +63,9 @@ export type CollectOutcome =
 
 /**
  * 向当前活动标签页请求一次采集：
- * 首次 sendMessage 失败（旧标签未注入 / 特殊页）先尝试 executeScript 补注入并重试一次；
- * 仍失败（chrome:// 等不可注入页）才归一为 {ok:false}，popup 只负责展示。
+ * 主路径是先 executeScript 注入再 sendMessage（declarative content script 已移除，
+ * activeTab 授权下注入即为正门）；注入或消息任一失败（chrome:// 等不可注入页）
+ * 统一归一为 {ok:false}，popup 只负责展示。
  */
 export async function requestCollection(
   gateway: TabsGateway,
@@ -70,15 +76,10 @@ export async function requestCollection(
   }
   let raw: unknown;
   try {
+    await gateway.injectIntoTab(tabId);
     raw = await gateway.sendToTab(tabId, { type: COLLECT_WORDS });
   } catch {
-    // 补注入兜底：对 chrome:// 等不可注入页 executeScript 会 reject，同样落入兜底文案
-    try {
-      await gateway.injectIntoTab(tabId);
-      raw = await gateway.sendToTab(tabId, { type: COLLECT_WORDS });
-    } catch {
-      return { ok: false, error: "此页面无法采集：请刷新页面后重试（chrome:// 等特殊页不支持采集）" };
-    }
+    return { ok: false, error: "此页面无法采集：chrome:// 等特殊页不支持注入" };
   }
   if (!isCollectResponse(raw)) {
     return { ok: false, error: "content script 未返回有效结果" };

@@ -13,49 +13,43 @@ function fakeGateway(overrides: Partial<TabsGateway> = {}): TabsGateway {
 }
 
 describe("requestCollection（popup 侧）", () => {
-  it("向活动标签页发 COLLECT_WORDS 并透传词数", async () => {
+  it("注入为主路径：先 executeScript 再发 COLLECT_WORDS，透传词数", async () => {
     const gateway = fakeGateway();
+    const order: string[] = [];
+    gateway.injectIntoTab = vi.fn(async () => {
+      order.push("inject");
+    });
+    gateway.sendToTab = vi.fn(async () => {
+      order.push("send");
+      return { ok: true, count: 5 };
+    });
 
     const outcome = await requestCollection(gateway);
 
+    expect(order).toEqual(["inject", "send"]);
     expect(gateway.queryActiveTabId).toHaveBeenCalledTimes(1);
+    expect(gateway.injectIntoTab).toHaveBeenCalledWith(42);
     expect(gateway.sendToTab).toHaveBeenCalledWith(42, { type: COLLECT_WORDS });
     expect(outcome).toEqual({ ok: true, count: 5 });
   });
 
-  it("无活动标签页时不发消息，返回错误", async () => {
+  it("无活动标签页时不注入不发消息，返回错误", async () => {
     const gateway = fakeGateway({
       queryActiveTabId: vi.fn(async () => undefined),
     });
 
     const outcome = await requestCollection(gateway);
 
+    expect(gateway.injectIntoTab).not.toHaveBeenCalled();
     expect(gateway.sendToTab).not.toHaveBeenCalled();
     expect(outcome.ok).toBe(false);
     if (!outcome.ok) expect(outcome.error).toContain("活动标签页");
   });
 
-  it("sendMessage 抛错时先补注入再重试，重试成功则采集成功", async () => {
-    // 场景：扩展（重）加载后旧标签无 content script
-    const sendToTab = vi
-      .fn<() => Promise<unknown>>()
-      .mockRejectedValueOnce(new Error("Could not establish connection"))
-      .mockResolvedValueOnce({ ok: true, count: 3 });
-    const injectIntoTab = vi.fn(async () => undefined);
-    const gateway = fakeGateway({ sendToTab, injectIntoTab });
-
-    const outcome = await requestCollection(gateway);
-
-    expect(injectIntoTab).toHaveBeenCalledWith(42);
-    expect(sendToTab).toHaveBeenCalledTimes(2);
-    expect(outcome).toEqual({ ok: true, count: 3 });
-  });
-
-  it("补注入也失败（chrome:// 等不可注入页）时归一为错误", async () => {
+  it("注入失败（chrome:// 等不可注入页）时归一为友好错误，不再 sendMessage", async () => {
+    const sendToTab = vi.fn(async () => ({ ok: true, count: 1 }));
     const gateway = fakeGateway({
-      sendToTab: vi.fn(async () => {
-        throw new Error("Could not establish connection");
-      }),
+      sendToTab,
       injectIntoTab: vi.fn(async () => {
         throw new Error("cannot access contents of the page");
       }),
@@ -63,8 +57,22 @@ describe("requestCollection（popup 侧）", () => {
 
     const outcome = await requestCollection(gateway);
 
+    expect(sendToTab).not.toHaveBeenCalled();
     expect(outcome.ok).toBe(false);
-    if (!outcome.ok) expect(outcome.error).toContain("请刷新页面后重试");
+    if (!outcome.ok) expect(outcome.error).toContain("特殊页");
+  });
+
+  it("注入成功但 sendMessage 仍失败时归一为同一错误", async () => {
+    const gateway = fakeGateway({
+      sendToTab: vi.fn(async () => {
+        throw new Error("Could not establish connection");
+      }),
+    });
+
+    const outcome = await requestCollection(gateway);
+
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) expect(outcome.error).toContain("无法采集");
   });
 
   it("应答形态非法时归一为错误", async () => {

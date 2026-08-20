@@ -23,6 +23,12 @@ const listener = createContentListener(() =>
   }),
 );
 
-chrome.runtime.onMessage.addListener(listener);
+// 幂等守卫：executeScript 是采集主路径（activeTab 瘦身，issue #14），
+// 每次采集都会注入本脚本；同一页面的 isolated world 保留全局状态，
+// 已注册过 listener 就不再注册，避免重复采集 / 重复广播。
+if (!(globalThis as { __wordRadarInjected?: boolean }).__wordRadarInjected) {
+  (globalThis as { __wordRadarInjected?: boolean }).__wordRadarInjected = true;
+  chrome.runtime.onMessage.addListener(listener);
+}
 
 export {};
