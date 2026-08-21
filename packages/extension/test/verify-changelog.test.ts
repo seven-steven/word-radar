@@ -1,5 +1,19 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { assertVersionEntry } from "../../../scripts/verify-changelog.mjs";
+
+describe("verify-changelog: CLI 直跑守卫（import 不触发 main）", () => {
+  it("importing the module does not call process.exit", async () => {
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation((() => {
+      throw new Error("process.exit must not be called on import");
+    }) as never);
+    try {
+      await import("../../../scripts/verify-changelog.mjs");
+      expect(exitSpy).not.toHaveBeenCalled();
+    } finally {
+      exitSpy.mockRestore();
+    }
+  });
+});
 
 describe("verify-changelog: assertVersionEntry", () => {
   describe("success path", () => {

@@ -67,9 +67,12 @@ function main() {
   console.log(`verify-changelog: OK — CHANGELOG.md contains entry for v${version}`);
 }
 
-try {
-  main();
-} catch (err) {
-  console.error("verify-changelog:", err instanceof Error ? err.message : String(err));
-  process.exit(1);
+// 仅作为 CLI 直接执行时运行 main（被测试 import 时不执行）
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  try {
+    main();
+  } catch (err) {
+    console.error("verify-changelog:", err instanceof Error ? err.message : String(err));
+    process.exit(1);
+  }
 }

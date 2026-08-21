@@ -9,6 +9,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { inflateRawSync } from "node:zlib";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const REPO_ROOT = resolve(__dirname, "..");
@@ -76,22 +77,87 @@ export function listZipEntries(buf) {
   return names;
 }
 
-function main() {
-  if (!existsSync(OUT_DIR)) {
-    console.error("verify-zip: dist/ not found. Run 'pnpm build && pnpm package' first.");
-    process.exit(1);
+/**
+ * 从 zip 缓冲区提取指定条目的原始内容（支持 stored=0 / deflate=8）。
+ * 供 verify-manifest 提取 zip 内 manifest.json；条目不存在抛错。
+ *
+ * @param {Buffer} buf
+ * @param {string} name - 条目路径
+ * @returns {Buffer}
+ */
+export function readZipEntry(buf, name) {
+  // 复用 EOCD 定位逻辑
+  let eocd = -1;
+  const maxScan = Math.min(buf.length, 22 + 0xffff);
+  for (let i = buf.length - 22; i >= buf.length - maxScan && i >= 0; i--) {
+    if (buf.readUInt32LE(i) === 0x06054b50) {
+      eocd = i;
+      break;
+    }
   }
-  const zips = readdirSync(OUT_DIR).filter((n) => ZIP_NAME_RE.test(n));
+  if (eocd < 0) throw new Error("not a zip: end-of-central-directory signature not found");
+
+  const count = buf.readUInt16LE(eocd + 10);
+  let offset = buf.readUInt32LE(eocd + 16);
+  for (let i = 0; i < count; i++) {
+    if (buf.readUInt32LE(offset) !== 0x02014b50) {
+      throw new Error(`corrupt zip: bad central directory header at entry ${i}`);
+    }
+    const nameLen = buf.readUInt16LE(offset + 28);
+    const extraLen = buf.readUInt16LE(offset + 30);
+    const commentLen = buf.readUInt16LE(offset + 32);
+    const entryName = buf.toString("utf8", offset + 46, offset + 46 + nameLen);
+    const compSize = buf.readUInt32LE(offset + 20);
+    const localOffset = buf.readUInt32LE(offset + 42);
+    offset += 46 + nameLen + extraLen + commentLen;
+    if (entryName !== name) continue;
+
+    // 解析 local file header 取数据区
+    if (buf.readUInt32LE(localOffset) !== 0x04034b50) {
+      throw new Error(`corrupt zip: bad local header for entry ${entryName}`);
+    }
+    const method = buf.readUInt16LE(localOffset + 8);
+    const lNameLen = buf.readUInt16LE(localOffset + 26);
+    const lExtraLen = buf.readUInt16LE(localOffset + 28);
+    const dataStart = localOffset + 30 + lNameLen + lExtraLen;
+    const comp = buf.subarray(dataStart, dataStart + compSize);
+    if (method === 0) return Buffer.from(comp);
+    if (method === 8) return inflateRawSync(comp);
+    throw new Error(`unsupported zip compression method ${method} for entry ${entryName}`);
+  }
+  throw new Error(`zip entry not found: ${name}`);
+}
+
+/**
+ * 在目录中定位唯一的 word-radar-<version>-chrome.zip。
+ * 目录缺失 / 无 zip / 多个 zip 时抛错（消息与 CLI 口径一致）。
+ *
+ * @param {string} outDir
+ * @returns {string} zip 绝对路径
+ */
+export function findChromeZip(outDir) {
+  if (!existsSync(outDir)) {
+    throw new Error("dist/ not found. Run 'pnpm build && pnpm package' first.");
+  }
+  const zips = readdirSync(outDir).filter((n) => ZIP_NAME_RE.test(n));
   if (zips.length === 0) {
-    console.error("verify-zip: no word-radar-<version>-chrome.zip found in dist/. Run 'pnpm package' first.");
-    process.exit(1);
+    throw new Error("no word-radar-<version>-chrome.zip found in dist/. Run 'pnpm package' first.");
   }
   if (zips.length > 1) {
-    console.error(`verify-zip: expected exactly one versioned zip, found ${zips.length}: ${zips.join(", ")}`);
+    throw new Error(`expected exactly one versioned zip, found ${zips.length}: ${zips.join(", ")}`);
+  }
+  return resolve(outDir, zips[0]);
+}
+
+function main() {
+  let zipPath;
+  try {
+    zipPath = findChromeZip(OUT_DIR);
+  } catch (err) {
+    console.error("verify-zip:", err instanceof Error ? err.message : String(err));
     process.exit(1);
   }
 
-  const zipPath = resolve(OUT_DIR, zips[0]);
   const entries = listZipEntries(readFileSync(zipPath));
 
   const result = verifyZipContents(entries);
@@ -100,7 +166,7 @@ function main() {
     for (const err of result.errors) console.error(`  - ${err}`);
     process.exit(1);
   }
-  console.log(`verify-zip: OK — ${zips[0]} (${entries.length} entries): manifest at root, 3 icons, no .map leak`);
+  console.log(`verify-zip: OK — ${zipPath} (${entries.length} entries): manifest at root, 3 icons, no .map leak`);
 }
 
 // 仅作为 CLI 直接执行时运行 main（被测试 import 时不执行）

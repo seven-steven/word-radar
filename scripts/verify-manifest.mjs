@@ -2,29 +2,31 @@
 /**
  * verify-manifest：断言三方 version 一致 + MV3 基本形态合规。
  *
- * 三方：根 package.json / packages/extension/src/manifest.json / packages/extension/dist/manifest.json
- * （dist 缺失时提示先 build，非零退出）。
+ * 三方：根 package.json / packages/extension/src/manifest.json /
+ * dist/word-radar-<version>-chrome.zip 内的 manifest.json（verify-zip 提供
+ * 纯 Node zip 解析；zip 缺失时提示先 build/package，非零退出）。
  *
  * 断言逻辑抽纯函数 `verifyManifest(...)`，便于单测 fixture 覆盖失败路径。
  */
 import { readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { findChromeZip, readZipEntry } from "./verify-zip.mjs";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const REPO_ROOT = resolve(__dirname, "..");
 const SRC_MANIFEST = resolve(REPO_ROOT, "packages/extension/src/manifest.json");
-const DIST_MANIFEST = resolve(REPO_ROOT, "packages/extension/dist/manifest.json");
+const OUT_DIR = resolve(REPO_ROOT, "dist");
 
 const ICON_SIZES = ["16", "48", "128"];
 
 /**
- * 校验三方版本一致性 + MV3 形态（对 src 与 dist manifest 各查一遍）。
+ * 校验三方版本一致性 + MV3 形态（对 src 与 zip 内 manifest 各查一遍）。
  *
- * @param {{ rootVersion: string, srcManifest: object | null, distManifest: object | null }} input
+ * @param {{ rootVersion: string, srcManifest: object | null, zipManifest: object | null }} input
  * @returns {{ ok: boolean, errors: string[] }}
  */
-export function verifyManifest({ rootVersion, srcManifest, distManifest }) {
+export function verifyManifest({ rootVersion, srcManifest, zipManifest }) {
   const errors = [];
 
   if (typeof rootVersion !== "string" || rootVersion.length === 0) {
@@ -33,34 +35,34 @@ export function verifyManifest({ rootVersion, srcManifest, distManifest }) {
   if (!srcManifest || typeof srcManifest !== "object") {
     errors.push("src manifest.json is missing or unreadable");
   }
-  if (!distManifest || typeof distManifest !== "object") {
-    errors.push("dist manifest.json is missing — run 'pnpm build' first");
+  if (!zipManifest || typeof zipManifest !== "object") {
+    errors.push("manifest.json in word-radar-<version>-chrome.zip is missing — run 'pnpm build && pnpm package' first");
   }
   if (errors.length > 0) return { ok: false, errors };
 
   const versions = [
     ["root package.json", rootVersion],
     ["src manifest.json", srcManifest.version],
-    ["dist manifest.json", distManifest.version],
+    ["zip manifest.json", zipManifest.version],
   ];
   for (const [label, v] of versions) {
     if (typeof v !== "string" || v.length === 0) {
       errors.push(`${label} version is empty or missing`);
     }
   }
-  const [r, s, d] = versions.map(([, v]) => v);
+  const [r, s, z] = versions.map(([, v]) => v);
   if (r && s && r !== s) {
     errors.push(`version mismatch: root package.json is ${r} but src manifest.json is ${s}`);
   }
-  if (r && d && r !== d) {
-    errors.push(`version mismatch: root package.json is ${r} but dist manifest.json is ${d}`);
+  if (r && z && r !== z) {
+    errors.push(`version mismatch: root package.json is ${r} but zip manifest.json is ${z}`);
   }
-  if (s && d && s !== d) {
-    errors.push(`version mismatch: src manifest.json is ${s} but dist manifest.json is ${d}`);
+  if (s && z && s !== z) {
+    errors.push(`version mismatch: src manifest.json is ${s} but zip manifest.json is ${z}`);
   }
 
   errors.push(...checkMv3Shape(srcManifest, "src"));
-  errors.push(...checkMv3Shape(distManifest, "dist"));
+  errors.push(...checkMv3Shape(zipManifest, "zip"));
 
   return { ok: errors.length === 0, errors };
 }
@@ -96,19 +98,32 @@ function main() {
     console.error("verify-manifest: src manifest.json not found at", SRC_MANIFEST);
     process.exit(1);
   }
-  const distExists = existsSync(DIST_MANIFEST);
+
+  let zipPath;
+  try {
+    zipPath = findChromeZip(OUT_DIR);
+  } catch (err) {
+    console.error("verify-manifest:", err instanceof Error ? err.message : String(err));
+    process.exit(1);
+  }
 
   const rootVersion = JSON.parse(readFileSync(packageJsonPath, "utf8")).version;
   const srcManifest = JSON.parse(readFileSync(SRC_MANIFEST, "utf8"));
-  const distManifest = distExists ? JSON.parse(readFileSync(DIST_MANIFEST, "utf8")) : null;
+  let zipManifest = null;
+  try {
+    zipManifest = JSON.parse(readZipEntry(readFileSync(zipPath), "manifest.json").toString("utf8"));
+  } catch (err) {
+    console.error("verify-manifest: failed to read manifest.json from", zipPath, "-", err instanceof Error ? err.message : String(err));
+    process.exit(1);
+  }
 
-  const result = verifyManifest({ rootVersion, srcManifest, distManifest });
+  const result = verifyManifest({ rootVersion, srcManifest, zipManifest });
   if (!result.ok) {
     console.error("verify-manifest: FAILED");
     for (const err of result.errors) console.error(`  - ${err}`);
     process.exit(1);
   }
-  console.log(`verify-manifest: OK — version ${rootVersion} consistent across package.json / src / dist, MV3 shape valid`);
+  console.log(`verify-manifest: OK — version ${rootVersion} consistent across package.json / src manifest / zip manifest (${zipPath}), MV3 shape valid`);
 }
 
 // 仅作为 CLI 直接执行时运行 main（被测试 import 时不执行）
