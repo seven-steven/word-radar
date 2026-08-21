@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/).
 
-## [0.1.0] - 2026-08-20
+## [0.1.0] - 2026-08-22
 
 ### 核心功能
 
@@ -65,6 +65,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/
 
 ### 修复
 
+- 长词表推送中途静默停滞：MV3 service worker 在纯 fetch 循环中不重置 30s idle 计时器会被浏览器杀掉；推送循环现穿插扩展 API 心跳（`chrome.runtime.getPlatformInfo`，间隔 20s）保活
+- 图标从 word-radar.svg 重新光栅化，提升各尺寸清晰度
 - bbdc addWord 恒 20000：`newwordlist` 必须是 `JSON.stringify(对象)`，数组包对象一律 20000 / `data_kind=exception_handler` / "未知错误"；逆向官方查词插件 v1.2.1（Chrome Web Store ID `cklfipcjofdnmdolnfngpmokdaejidim`）确认对象格式
 - raw.githubusercontent.com 采集失败：真因是旧标签未补注入（非 CSP 阻断），`TabsGateway.injectIntoTab(tabId)` 用 `chrome.scripting.executeScript` 从 manifest `content_scripts[].js` 读路径补注入并重试；manifest 扩权 `activeTab` + `scripting`
 - 推送状态轮询自启与结束后计数刷新

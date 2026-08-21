@@ -83,6 +83,9 @@ export function createBackgroundListener(deps: BackgroundListenerDeps) {
   const pushCoordinator = deps.pushCoordinator ?? new PushCoordinator({
     client: bbdcClient,
     repository: deps.repository,
+    // MV3 SW idle keepalive：纯 fetch 循环不会重置 SW 的 30s idle 计时器，
+    // 长词表推送到一半 SW 会被静默杀掉。穿插一次扩展 API 调用即可重置。
+    sleep: swKeepAliveSleep,
   });
   const settingsStorage = deps.settingsStorage ?? defaultSettingsStorage();
 
@@ -238,4 +241,27 @@ function defaultBbdcClient(): BackgroundBbdcClient {
 
 function defaultActionBadge(): ActionBadgeGateway {
   return chromeActionBadge;
+}
+
+/**
+ * 带扩展 API 心跳的 sleep：距上次心跳超过 20s 时调一次
+ * `chrome.runtime.getPlatformInfo()`（无副作用的扩展 API 调用会重置 MV3
+ * SW 的 idle 计时器），防止长推送循环被 idle kill。非扩展环境（单测）
+ * 退化为纯 sleep。
+ */
+const KEEPALIVE_INTERVAL = 20_000;
+let lastKeepalive = 0;
+
+export async function swKeepAliveSleep(milliseconds: number): Promise<void> {
+  const runtimeApi = (globalThis as { chrome?: { runtime?: { getPlatformInfo?: () => Promise<unknown> } } })
+    .chrome?.runtime;
+  if (runtimeApi?.getPlatformInfo && Date.now() - lastKeepalive > KEEPALIVE_INTERVAL) {
+    lastKeepalive = Date.now();
+    try {
+      await runtimeApi.getPlatformInfo();
+    } catch {
+      // 心跳失败不影响 sleep 语义
+    }
+  }
+  await new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
