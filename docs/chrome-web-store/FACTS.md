@@ -49,7 +49,7 @@
 ## 3. 产物命名模式
 
 - 打包命令：`pnpm build && pnpm package` → `dist/word-radar-<version>-chrome.zip`（仓库根 `dist/`，manifest 位于 zip 根层级；打包前自动清理旧版本 zip）。
-- 版本号唯一来源：根 `package.json` 的 `version`（当前 0.1.0）；`pnpm verify:manifest` 断言 package.json / src manifest / dist manifest 三方一致，`pnpm verify:zip` 断言 zip 结构（唯一版本化 zip、manifest 在根、三尺寸图标、无 .map）。
+- 版本号唯一来源：根 `package.json` 的 `version`（当前 0.1.0）；`pnpm verify:manifest` 断言 package.json / src manifest / **zip 内 manifest** 三方一致，`pnpm verify:zip` 断言 zip 结构（唯一版本化 zip、manifest 在根、三尺寸图标、无 .map）。
 
 ## 4. 语言集
 
