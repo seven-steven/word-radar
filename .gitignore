@@ -14,4 +14,4 @@ test-results/
 *.log
 .turbo/
 .pnpm-store/
-.pnpm-debug.log*
+.pnpm-debug.log*.vscode/
