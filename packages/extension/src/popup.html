@@ -57,16 +57,24 @@
         font-size: 12px;
         line-height: 1.6;
       }
-      .auto-push-row {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        margin-top: 6px;
-        color: #555;
-        font-size: 12px;
+      .confirm {
+        margin-top: 8px;
+        padding: 8px;
+        border: 1px solid #e2e8f0;
+        border-radius: 6px;
       }
-      .auto-push-row input {
+      .confirm-summary {
         margin: 0;
+        font-size: 13px;
+      }
+      .confirm-actions {
+        display: flex;
+        gap: 8px;
+        margin-top: 8px;
+      }
+      .confirm-actions button {
+        margin-top: 0;
+        flex: 1;
       }
       .login-row {
         display: flex;
@@ -124,6 +132,14 @@
       </div>
       <p data-testid="status">采集中…</p>
       <button type="button" data-testid="collect">重新采集</button>
+      <!-- 确认闸门（issue #22）：待确认批次只存活于内存，确认才入库+推送 -->
+      <section class="confirm" data-testid="confirm-section" hidden>
+        <p class="confirm-summary" data-testid="confirm-summary"></p>
+        <div class="confirm-actions">
+          <button type="button" data-testid="confirm-push">确认推送</button>
+          <button type="button" data-testid="cancel-collect">取消</button>
+        </div>
+      </section>
       <section class="push">
         <div class="push-stats" data-testid="push-status">推送状态：空闲</div>
         <div class="push-stats">
@@ -131,10 +147,6 @@
           已存在 <span data-testid="push-existing">0</span> ·
           失败 <span data-testid="push-failed">0</span>
         </div>
-        <label class="auto-push-row">
-          <input type="checkbox" data-testid="auto-push" checked />
-          自动推送
-        </label>
         <button type="button" data-testid="retry-push">重试待推</button>
       </section>
       <section class="sync">

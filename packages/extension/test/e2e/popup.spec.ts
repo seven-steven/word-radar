@@ -16,6 +16,10 @@ test("popup renders counts and version on open", async ({ extContext, popupUrl }
   await expect(page.getByTestId("total")).toHaveText(/^\d+$/);
   await expect(page.getByTestId("pending")).toHaveText(/^\d+$/);
   await expect(page.getByTestId("version")).toContainText(/^core \d/);
+  // 「自动推送」开关已彻底移除（issue #22）：无残留 UI
+  await expect(page.getByTestId("auto-push")).toHaveCount(0);
+  // 确认页在采集应答前隐藏
+  await expect(page.getByTestId("confirm-section")).toBeHidden();
   await page.close();
 });
 

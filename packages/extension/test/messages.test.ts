@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   CHECK_LOGIN,
   COLLECT_WORDS,
+  CONFIRM_COLLECTED,
+  DISCARD_COLLECTED,
   EXPORT_CSV,
   GET_COUNTS,
   IMPORT_CSV,
@@ -9,6 +11,8 @@ import {
   WORDS_COLLECTED,
   isCheckLoginMessage,
   isCheckLoginResponse,
+  isConfirmCollectedMessage,
+  isDiscardCollectedMessage,
   isCollectResponse,
   isCollectWordsMessage,
   isExportCsvMessage,
@@ -26,6 +30,8 @@ describe("消息协议常量", () => {
     expect(GET_COUNTS).toBe("GET_COUNTS");
     expect(MARK_PUSHED).toBe("MARK_PUSHED");
     expect(CHECK_LOGIN).toBe("CHECK_LOGIN");
+    expect(CONFIRM_COLLECTED).toBe("CONFIRM_COLLECTED");
+    expect(DISCARD_COLLECTED).toBe("DISCARD_COLLECTED");
   });
 });
 
@@ -106,18 +112,37 @@ describe("isMarkPushedMessage", () => {
   });
 });
 
-describe("isCollectResponse", () => {
-  it("接受成功与失败两种形态", () => {
-    expect(isCollectResponse({ ok: true, count: 3 })).toBe(true);
+describe("isCollectResponse（确认页预览）", () => {
+  it("接受成功（total + newCount）与失败两种形态", () => {
+    expect(isCollectResponse({ ok: true, total: 3, newCount: 2 })).toBe(true);
+    expect(isCollectResponse({ ok: true, total: 0, newCount: 0 })).toBe(true);
     expect(isCollectResponse({ ok: false, error: "boom" })).toBe(true);
   });
 
   it("拒绝畸形应答", () => {
     expect(isCollectResponse({ ok: true })).toBe(false);
-    expect(isCollectResponse({ ok: true, count: "3" })).toBe(false);
+    expect(isCollectResponse({ ok: true, total: "3", newCount: 0 })).toBe(false);
+    expect(isCollectResponse({ ok: true, total: 3 })).toBe(false); // 缺 newCount
     expect(isCollectResponse({ ok: false })).toBe(false);
     expect(isCollectResponse(null)).toBe(false);
     expect(isCollectResponse("ok")).toBe(false);
+  });
+});
+
+describe("isConfirmCollectedMessage", () => {
+  it("接受合法消息、拒绝其他 type 与畸形值", () => {
+    expect(isConfirmCollectedMessage({ type: "CONFIRM_COLLECTED" })).toBe(true);
+    expect(isConfirmCollectedMessage({ type: "OTHER" })).toBe(false);
+    expect(isConfirmCollectedMessage(null)).toBe(false);
+    expect(isConfirmCollectedMessage(42)).toBe(false);
+  });
+});
+
+describe("isDiscardCollectedMessage", () => {
+  it("接受合法消息、拒绝其他 type 与畸形值", () => {
+    expect(isDiscardCollectedMessage({ type: "DISCARD_COLLECTED" })).toBe(true);
+    expect(isDiscardCollectedMessage({ type: "CONFIRM_COLLECTED" })).toBe(false);
+    expect(isDiscardCollectedMessage(null)).toBe(false);
   });
 });
 

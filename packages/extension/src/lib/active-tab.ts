@@ -57,8 +57,9 @@ export const chromeTabsGateway: TabsGateway = {
   },
 };
 
+/** 采集结果 = 确认页预览（总数 + 新词 diff，issue #22）。 */
 export type CollectOutcome =
-  | { ok: true; count: number }
+  | { ok: true; total: number; newCount: number }
   | { ok: false; error: string };
 
 /**
@@ -89,7 +90,7 @@ export async function requestCollection(
 
 function narrowToOutcome(response: CollectResponse): CollectOutcome {
   return response.ok
-    ? { ok: true, count: response.count }
+    ? { ok: true, total: response.total, newCount: response.newCount }
     : { ok: false, error: response.error };
 }
 

@@ -12,18 +12,24 @@ export type { Counts };
  *
  * 流向：
  * - popup → content：`COLLECT_WORDS`（tabs.sendMessage，触发当前页提取）
- * - content → popup：sendResponse 回 `CollectResponse`（同步应答，携带词数）
- * - content → background：`WORDS_COLLECTED`（runtime.sendMessage，携带词条）
+ * - content → popup：sendResponse 回 `CollectResponse`（同步应答，携带确认页预览）
+ * - content → background：`WORDS_COLLECTED`（runtime.sendMessage，携带词条；
+ *   SW 只把批次驻留内存（待确认批次）并应答新词 diff，不写库不推送）
  * - popup → background：`GET_COUNTS`（查 total/pending）+ `MARK_PUSHED`（标记已推）
+ *   + `CONFIRM_COLLECTED`（确认：批次合并入词库 + 触发一轮推送全部待推）
+ *   + `DISCARD_COLLECTED`（取消：丢弃待确认批次）
  * - popup → background（T11）：`EXPORT_CSV`（导出词库为 CSV 文本）
  *   + `IMPORT_CSV`（CSV 文本与词库合并，flags 按位或）
  *
- * background 是 WORDS_COLLECTED / GET_COUNTS / MARK_PUSHED / EXPORT_CSV /
- * IMPORT_CSV 的唯一接收方（独占 IndexedDB 写入 + 推送调度 + 所有 HTTP）。
+ * background 是 WORDS_COLLECTED / GET_COUNTS / MARK_PUSHED / CONFIRM_COLLECTED /
+ * DISCARD_COLLECTED / EXPORT_CSV / IMPORT_CSV 的唯一接收方
+ * （独占 IndexedDB 写入 + 推送调度 + 所有 HTTP）。
  */
 
 export const COLLECT_WORDS = "COLLECT_WORDS" as const;
 export const WORDS_COLLECTED = "WORDS_COLLECTED" as const;
+export const CONFIRM_COLLECTED = "CONFIRM_COLLECTED" as const;
+export const DISCARD_COLLECTED = "DISCARD_COLLECTED" as const;
 export const GET_COUNTS = "GET_COUNTS" as const;
 export const MARK_PUSHED = "MARK_PUSHED" as const;
 export const CHECK_LOGIN = "CHECK_LOGIN" as const;
@@ -52,10 +58,31 @@ export interface CollectWordsMessage {
   type: typeof COLLECT_WORDS;
 }
 
-/** content → background：一次采集的词条结果。 */
+/** content → background：一次采集的词条结果（SW 只驻留内存，不入库）。 */
 export interface WordsCollectedMessage {
   type: typeof WORDS_COLLECTED;
   entries: WordEntry[];
+}
+
+/**
+ * 确认页预览：新词 = 与本地词库的 lemma diff（零网络请求）。
+ * SW 收到 WORDS_COLLECTED 后应答此结构；content 透传给 popup。
+ */
+export interface BatchPreview {
+  /** 本次采集词条总数。 */
+  total: number;
+  /** 新词数（本地词库没有的 lemma）。 */
+  newCount: number;
+}
+
+/** popup → background：确认待确认批次（合并入词库 + 触发一轮推送全部待推）。 */
+export interface ConfirmCollectedMessage {
+  type: typeof CONFIRM_COLLECTED;
+}
+
+/** popup → background：取消（丢弃 SW 内存中的待确认批次）。 */
+export interface DiscardCollectedMessage {
+  type: typeof DISCARD_COLLECTED;
 }
 
 /** popup → background：查询词库累计 / 待推计数。 */
@@ -122,6 +149,8 @@ export type CheckLoginResponse =
 export type ExtensionMessage =
   | CollectWordsMessage
   | WordsCollectedMessage
+  | ConfirmCollectedMessage
+  | DiscardCollectedMessage
   | GetCountsMessage
   | MarkPushedMessage
   | CheckLoginMessage
@@ -130,9 +159,12 @@ export type ExtensionMessage =
   | ExportCsvMessage
   | ImportCsvMessage;
 
-/** content → popup 的同步应答。 */
+/**
+ * content → popup 的同步应答：成功携带确认页预览（总数 + 新词数），
+ * 失败携带错误。
+ */
 export type CollectResponse =
-  | { ok: true; count: number }
+  | ({ ok: true } & BatchPreview)
   | { ok: false; error: string };
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -157,6 +189,26 @@ export function isWordsCollectedMessage(
     Array.isArray(value.entries) &&
     value.entries.every(isWordEntry)
   );
+}
+
+export function isBatchPreview(value: unknown): value is BatchPreview {
+  return (
+    isObject(value) &&
+    typeof value.total === "number" &&
+    typeof value.newCount === "number"
+  );
+}
+
+export function isConfirmCollectedMessage(
+  value: unknown,
+): value is ConfirmCollectedMessage {
+  return isObject(value) && value.type === CONFIRM_COLLECTED;
+}
+
+export function isDiscardCollectedMessage(
+  value: unknown,
+): value is DiscardCollectedMessage {
+  return isObject(value) && value.type === DISCARD_COLLECTED;
 }
 
 export function isGetCountsMessage(value: unknown): value is GetCountsMessage {
@@ -218,7 +270,7 @@ export function isExportCsvResponse(value: unknown): value is ExportCsvResponse 
 
 export function isCollectResponse(value: unknown): value is CollectResponse {
   if (!isObject(value)) return false;
-  if (value.ok === true) return typeof value.count === "number";
+  if (value.ok === true) return isBatchPreview(value);
   if (value.ok === false) return typeof value.error === "string";
   return false;
 }

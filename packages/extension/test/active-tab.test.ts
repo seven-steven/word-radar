@@ -5,7 +5,7 @@ import { COLLECT_WORDS } from "../src/lib/messages.js";
 function fakeGateway(overrides: Partial<TabsGateway> = {}): TabsGateway {
   return {
     queryActiveTabId: vi.fn(async () => 42),
-    sendToTab: vi.fn(async () => ({ ok: true, count: 5 })),
+    sendToTab: vi.fn(async () => ({ ok: true, total: 5, newCount: 2 })),
     injectIntoTab: vi.fn(async () => undefined),
     openUrl: vi.fn(async () => undefined),
     ...overrides,
@@ -21,7 +21,7 @@ describe("requestCollection（popup 侧）", () => {
     });
     gateway.sendToTab = vi.fn(async () => {
       order.push("send");
-      return { ok: true, count: 5 };
+      return { ok: true, total: 5, newCount: 2 };
     });
 
     const outcome = await requestCollection(gateway);
@@ -30,7 +30,7 @@ describe("requestCollection（popup 侧）", () => {
     expect(gateway.queryActiveTabId).toHaveBeenCalledTimes(1);
     expect(gateway.injectIntoTab).toHaveBeenCalledWith(42);
     expect(gateway.sendToTab).toHaveBeenCalledWith(42, { type: COLLECT_WORDS });
-    expect(outcome).toEqual({ ok: true, count: 5 });
+    expect(outcome).toEqual({ ok: true, total: 5, newCount: 2 });
   });
 
   it("无活动标签页时不注入不发消息，返回错误", async () => {
@@ -47,7 +47,7 @@ describe("requestCollection（popup 侧）", () => {
   });
 
   it("注入失败（chrome:// 等不可注入页）时归一为友好错误，不再 sendMessage", async () => {
-    const sendToTab = vi.fn(async () => ({ ok: true, count: 1 }));
+    const sendToTab = vi.fn(async () => ({ ok: true, total: 1, newCount: 1 }));
     const gateway = fakeGateway({
       sendToTab,
       injectIntoTab: vi.fn(async () => {

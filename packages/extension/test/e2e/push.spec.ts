@@ -1,8 +1,9 @@
 /**
- * L4 推送路径（mock 版）：采集入词库 → retry-push → SW 发起 bbdc 请求（全部被
- * mock 拦截）→ PushCoordinator 状态机走完 → popup 计数刷新。
- * 断言重点：请求形状（URL / newwordlist JSON / opcode）+ 最终 PushStatus 一致性。
- * 真实 bbdc.cn 登录路径永不自动化（安全边界）。
+ * L4 推送路径（mock 版，确认闸门版 issue #22）：采集驻留待确认批次 →
+ * popup 确认 → SW 合并入词库并自动发起一轮推送（bbdc 请求全部被 mock 拦截）
+ * → PushCoordinator 状态机走完 → popup 计数刷新。
+ * 断言重点：确认即推送是唯一路径 + 请求形状（URL / newwordlist JSON / opcode）
+ * + 最终 PushStatus 一致性。真实 bbdc.cn 登录路径永不自动化（安全边界）。
  */
 import { test, expect } from "./fixtures.js";
 
@@ -10,7 +11,7 @@ test.beforeEach(({ mockBbdc }) => {
   mockBbdc.reset();
 });
 
-test("push pipeline pushes collected words to mocked bbdc and completes", async ({
+test("confirm merges the batch and pushes the whole pending pool to mocked bbdc", async ({
   extContext,
   popupUrl,
   fixtureServer,
@@ -18,33 +19,29 @@ test("push pipeline pushes collected words to mocked bbdc and completes", async 
 }) => {
   test.setTimeout(180_000); // 真实 pacing（~1s/词）× 前序测试累计的全部待推词
 
-  // 1) 采集：fixture 页 → 词库。
-  // 先关 autoPush（默认开 — collect 后 SW 立即自动推送，会和手动 retry-push 竞态）；
-  // 持久化在 chrome.storage，对本 run 后续测试同样生效。
-  // 用独立词汇的 fixture 页：article.html 的词已被前序测试自动推走（pending=0）。
+  // 1) 采集：fixture 页 → SW 内存中的待确认批次（不落库）。
+  // 用独立词汇的 fixture 页：article.html 的词已被前序测试确认推走（pending=0）。
   const article = await extContext.newPage();
   await article.goto(`${fixtureServer.url}/push-happy.html`);
   await article.waitForTimeout(500);
   const popup = await extContext.newPage();
   await popup.goto(popupUrl);
-  const autoPush = popup.getByTestId("auto-push");
-  if (await autoPush.isChecked()) await autoPush.click();
-  // popup 标签页自身是「活动标签」→ 把文章页带回前台再手动采集
   await article.bringToFront();
   await popup.getByTestId("collect").click();
-  await expect(popup.getByTestId("status")).toHaveText(/本次采集 \d+ 词/, {
-    timeout: 15_000,
-  });
+  await expect(popup.getByTestId("confirm-summary")).toHaveText(
+    /本次共计采集 \d+ 个单词，其中新词 [1-9]\d* 个/,
+    { timeout: 15_000 },
+  );
+
+  // 2) 确认推送：批次合并入词库 + 一轮推送覆盖全部待推。
+  // popup 必须在前台：后台标签的 setTimeout 被节流，500ms 轮询会冻结。
+  await popup.bringToFront();
+  await popup.getByTestId("confirm-push").click();
   await expect(popup.getByTestId("pending")).toHaveText(/^[1-9]\d*$/, {
     timeout: 10_000,
   });
   const pending = Number(await popup.getByTestId("pending").textContent());
   expect(pending).toBeGreaterThanOrEqual(1);
-
-  // 2) 手动触发推送（不依赖 autoPush 设置）。
-  // popup 必须在前台：后台标签的 setTimeout 被节流，500ms 轮询会冻结。
-  await popup.bringToFront();
-  await popup.getByTestId("retry-push").click();
 
   // 3) 状态机走完：phase 离开 running（mock 全成功 → completed）
   await expect(popup.getByTestId("push-status")).not.toHaveAttribute(
@@ -69,7 +66,7 @@ test("push pipeline pushes collected words to mocked bbdc and completes", async 
   expect(firstRaw).toContain("opcode");
   expect(firstRaw).toContain("infoidx");
 
-  // 5) 最终计数一致：本轮推送的 succeeded + existing + failed === retry-push 前的
+  // 5) 最终计数一致：本轮推送的 succeeded + existing + failed === 确认后的
   //    待推数（completed 文案「推送完成」不含 N/N，不能用状态文本反解 total）。
   const succeeded = Number(await popup.getByTestId("push-succeeded").textContent());
   const existing = Number(await popup.getByTestId("push-existing").textContent());
@@ -104,17 +101,16 @@ test("auth failure pauses the push and shows error state", async ({
   await article.waitForTimeout(500);
   const popup = await extContext.newPage();
   await popup.goto(popupUrl);
-  const autoPush = popup.getByTestId("auto-push");
-  if (await autoPush.isChecked()) await autoPush.click();
   await article.bringToFront();
   await popup.getByTestId("collect").click();
-  await expect(popup.getByTestId("status")).toHaveText(/本次采集 \d+ 词/, {
-    timeout: 15_000,
-  });
+  await expect(popup.getByTestId("confirm-summary")).toHaveText(
+    /本次共计采集 \d+ 个单词，其中新词 [1-9]\d* 个/,
+    { timeout: 15_000 },
+  );
 
-  // popup 前台（避免后台标签轮询节流）
+  // 确认即推送（popup 前台，避免后台标签轮询节流）
   await popup.bringToFront();
-  await popup.getByTestId("retry-push").click();
+  await popup.getByTestId("confirm-push").click();
   // BbdcAuthError → paused（不重试）
   await expect(popup.getByTestId("push-status")).toHaveAttribute(
     "data-phase",

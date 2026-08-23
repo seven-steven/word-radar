@@ -425,3 +425,36 @@ describe("PushCoordinator HTTP 4xx 状态码分流", () => {
     expect(repository.markPushed).not.toHaveBeenCalled();
   });
 });
+
+describe("PushCoordinator 确认闸门后的推送输入（issue #22）", () => {
+  it("推送输入 = listPending 快照的整个待推池（本次采集 + CSV 存量，不区分来源）", async () => {
+    const client = makeClient();
+    // 待推池混合来源：本次采集确认的新词 + CSV 导入的存量，都由 listPending 返回
+    const repository = makeRepository([
+      { lemma: "serendipity", flags: 0 }, // 本次采集（确认后入库）
+      { lemma: "legacy-csv", flags: 0 }, // CSV 导入存量
+      { lemma: "older-retry", flags: 0 }, // 历史失败保留
+    ]);
+    const { sleep } = makeSleep();
+    const coordinator = new PushCoordinator({ client, repository, sleep });
+
+    const result = await coordinator.start();
+
+    expect(repository.listPending).toHaveBeenCalledTimes(1); // 一次运行只读一次快照
+    expect(client.checkExisting).toHaveBeenCalledTimes(3);
+    expect(client.addWord).toHaveBeenCalledTimes(3);
+    expect(result.total).toBe(3);
+    expect(result.phase).toBe("completed");
+    expect(result.pending).toBe(0);
+  });
+
+  it("构造后未确认触发 start 前不下发任何 HTTP（推送仅由确认动作驱动）", async () => {
+    const client = makeClient();
+    const repository = makeRepository([makeEntry("run")]);
+    const coordinator = new PushCoordinator({ client, repository, sleep: async () => undefined });
+
+    expect(client.checkLogin).not.toHaveBeenCalled();
+    expect(coordinator.getStatus().phase).toBe("idle");
+    expect(repository.listPending).not.toHaveBeenCalled();
+  });
+});

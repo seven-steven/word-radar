@@ -11,8 +11,8 @@ import { runCollection } from "./lib/run-collection.js";
 import type { WordsCollectedMessage } from "./lib/messages.js";
 
 function broadcast(message: WordsCollectedMessage): Promise<unknown> {
-  // 应答 ack（SW 入库完成）；content-listener 持有消息通道直到 ack 落地，
-  // 保证 popup 拿到的 COLLECT_WORDS 应答意味着词已入库（修 C6 竞态）。
+  // 应答预览（SW 驻留待确认批次 + 新词 diff，不写库）；content-listener
+  // 持有消息通道直到预览落地，popup 确认页拿到的 total/newCount 与批次一致。
   return chrome.runtime.sendMessage(message);
 }
 

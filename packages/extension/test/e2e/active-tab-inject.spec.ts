@@ -24,13 +24,13 @@ test("collects into a fresh tab with no declarative injection and no reload", as
   await article.bringToFront();
   await popup.getByTestId("collect").click();
 
-  await expect(popup.getByTestId("status")).toHaveText(/本次采集 \d+ 词/, {
-    timeout: 15_000,
-  });
+  await expect(popup.getByTestId("confirm-summary")).toHaveText(
+    /本次共计采集 \d+ 个单词，其中新词 \d+ 个/,
+    { timeout: 15_000 },
+  );
+  // 确认 → 入库 → 计数刷新
+  await popup.getByTestId("confirm-push").click();
   await expect(popup.getByTestId("total")).toHaveText(/[1-9]\d*/, {
-    timeout: 10_000,
-  });
-  await expect(popup.getByTestId("pending")).toHaveText(/^[1-9]\d*$/, {
     timeout: 10_000,
   });
 
@@ -38,9 +38,11 @@ test("collects into a fresh tab with no declarative injection and no reload", as
   const totalBefore = Number(await popup.getByTestId("total").textContent());
   await article.bringToFront();
   await popup.getByTestId("collect").click();
-  await expect(popup.getByTestId("status")).toHaveText(/本次采集 \d+ 词/, {
-    timeout: 15_000,
-  });
+  await expect(popup.getByTestId("confirm-summary")).toHaveText(
+    /本次共计采集 \d+ 个单词，其中新词 0 个/,
+    { timeout: 15_000 },
+  );
+  await popup.getByTestId("confirm-push").click();
   await expect(popup.getByTestId("total")).toHaveText(String(totalBefore), {
     timeout: 10_000,
   });

@@ -1,12 +1,14 @@
 /**
- * Popup 入口：打开即向当前活动标签页发 COLLECT_WORDS 触发采集，
- * 显示「累计 N / 待推 M」；点击「重新采集」按钮再次触发。
- * T09 起再叠加：登录检查按钮 + 登录状态显示 + 未登录时显示「打开不背单词」按钮。
- * T11 起再叠加：导出 CSV（词库 → 本地下载）+ 导入 CSV（本地文件 → 词库合并）。
+ * Popup 入口：打开即对当前活动标签页重新采集，展示确认页
+ * 「本次共计采集 N 个单词，其中新词 M 个」（新词 = 与本地词库的 lemma diff，
+ * 零网络请求）。点「确认推送」→ SW 把待确认批次合并入词库并触发一轮推送
+ * 全部待推；点「取消」或关闭弹窗 → 什么都不发生（批次只在内存，不持久化）。
+ * 确认即推送是唯一路径，无自动推送开关（issue #22）。
  *
  * chrome.* 调用收在两个边界模块里：
  * - active-tab.ts：popup → content（COLLECT_WORDS / 应答）+ 新标签页打开
- * - sw-channel.ts：popup → service worker（GET_COUNTS / CHECK_LOGIN / EXPORT_CSV / IMPORT_CSV）
+ * - sw-channel.ts：popup → service worker（GET_COUNTS / CHECK_LOGIN /
+ *   EXPORT_CSV / IMPORT_CSV / CONFIRM_COLLECTED / DISCARD_COLLECTED）
  * 本地文件操作收在 csv-file.ts（下载 / 文件选择，可注入）。
  *
  * 词库读写 + HTTP 调用 全部发生在 service worker；popup 不直连 IndexedDB、不发 HTTP。
@@ -19,6 +21,8 @@ import {
 } from "./lib/active-tab.js";
 import {
   chromeSwChannel,
+  confirmCollected,
+  discardCollected,
   fetchCounts,
   fetchExportCsv,
   fetchLoginStatus,
@@ -27,7 +31,6 @@ import {
   retryPush,
 } from "./lib/sw-channel.js";
 import { browserCsvFileGateway } from "./lib/csv-file.js";
-import { readAutoPush, writeAutoPush } from "./lib/settings.js";
 import type { PushStatus } from "./lib/messages.js";
 
 const BBDC_HOME_URL = "https://bbdc.cn/";
@@ -56,17 +59,10 @@ const pushFailedEl = document.querySelector<HTMLElement>('[data-testid="push-fai
 const exportCsvButton = document.querySelector<HTMLButtonElement>('[data-testid="export-csv"]');
 const importCsvButton = document.querySelector<HTMLButtonElement>('[data-testid="import-csv"]');
 const syncStatusEl = document.querySelector<HTMLElement>('[data-testid="sync-status"]');
-const autoPushCheckbox = document.querySelector<HTMLInputElement>('[data-testid="auto-push"]');
-
-if (autoPushCheckbox) {
-  // 初始状态从 chrome.storage.local 读取（未设置时默认开）
-  void readAutoPush().then((enabled) => {
-    autoPushCheckbox.checked = enabled;
-  });
-  autoPushCheckbox.addEventListener("change", () => {
-    void writeAutoPush(autoPushCheckbox.checked);
-  });
-}
+const confirmSection = document.querySelector<HTMLElement>('[data-testid="confirm-section"]');
+const confirmSummaryEl = document.querySelector<HTMLElement>('[data-testid="confirm-summary"]');
+const confirmPushButton = document.querySelector<HTMLButtonElement>('[data-testid="confirm-push"]');
+const cancelCollectButton = document.querySelector<HTMLButtonElement>('[data-testid="cancel-collect"]');
 
 if (versionEl) {
   versionEl.textContent = `core ${CORE_VERSION}`;
@@ -211,25 +207,76 @@ async function checkLogin(): Promise<void> {
   }
 }
 
+/** 确认页：展示待确认批次的总数 / 新词数，并挂起确认 / 取消按钮。 */
+function renderConfirmPage(total: number, newCount: number): void {
+  if (confirmSummaryEl) {
+    confirmSummaryEl.textContent = `本次共计采集 ${total} 个单词，其中新词 ${newCount} 个`;
+  }
+  if (confirmSection) confirmSection.hidden = false;
+  if (confirmPushButton) confirmPushButton.disabled = false;
+}
+
+function hideConfirmPage(): void {
+  if (confirmSection) confirmSection.hidden = true;
+}
+
 async function collect(): Promise<void> {
   if (statusEl) statusEl.textContent = "采集中…";
   if (collectButton) collectButton.disabled = true;
+  hideConfirmPage();
   try {
     const outcome = await requestCollection(chromeTabsGateway);
-    if (statusEl) {
-      statusEl.textContent = outcome.ok
-        ? `本次采集 ${outcome.count} 词`
-        : outcome.error;
+    if (outcome.ok) {
+      // 确认闸门：采集结果只在 SW 内存（待确认批次），此处仅展示预览
+      renderConfirmPage(outcome.total, outcome.newCount);
+      if (statusEl) statusEl.textContent = "待确认";
+    } else if (statusEl) {
+      statusEl.textContent = outcome.error;
     }
-    // 采集后从 SW 拉一次最新计数（含累计 + 待推）
-    await refreshCounts();
   } finally {
     if (collectButton) collectButton.disabled = false;
   }
 }
 
+/** 确认推送：批次合并入词库 + 触发一轮推送全部待推，确认页过渡为推送进度。 */
+async function confirmPush(): Promise<void> {
+  if (confirmPushButton) confirmPushButton.disabled = true;
+  if (cancelCollectButton) cancelCollectButton.disabled = true;
+  try {
+    const outcome = await confirmCollected(chromeSwChannel);
+    if (outcome.ok) {
+      renderCounts(outcome.counts.total, outcome.counts.pending);
+      if (statusEl) statusEl.textContent = "已确认，推送已启动";
+      hideConfirmPage();
+      // 确认即推送：拉起进度轮询（推送在 SW，popup 关闭不中断）
+      await refreshPushStatus();
+      startPushStatusPolling();
+    } else {
+      if (statusEl) statusEl.textContent = `确认失败：${outcome.error}`;
+    }
+  } finally {
+    if (confirmPushButton) confirmPushButton.disabled = false;
+    if (cancelCollectButton) cancelCollectButton.disabled = false;
+  }
+}
+
+/** 取消：丢弃待确认批次，什么都不发生（词库、推送状态不变）。 */
+async function cancelCollect(): Promise<void> {
+  await discardCollected(chromeSwChannel);
+  hideConfirmPage();
+  if (statusEl) statusEl.textContent = "已取消";
+}
+
 collectButton?.addEventListener("click", () => {
   void collect();
+});
+
+confirmPushButton?.addEventListener("click", () => {
+  void confirmPush();
+});
+
+cancelCollectButton?.addEventListener("click", () => {
+  void cancelCollect();
 });
 
 checkLoginButton?.addEventListener("click", () => {

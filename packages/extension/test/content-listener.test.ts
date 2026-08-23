@@ -4,7 +4,7 @@ import { COLLECT_WORDS, type CollectResponse } from "../src/lib/messages.js";
 
 describe("createContentListener", () => {
   it("非 COLLECT_WORDS 消息不响应、不执行采集", () => {
-    const runCollection = vi.fn(() => ({ ok: true, count: 1 }) as CollectResponse);
+    const runCollection = vi.fn(() => ({ ok: true, total: 1, newCount: 1 }) as CollectResponse);
     const sendResponse = vi.fn();
     const listener = createContentListener(runCollection);
 
@@ -16,7 +16,7 @@ describe("createContentListener", () => {
   });
 
   it("COLLECT_WORDS 触发采集，等 ack 后应答结果", async () => {
-    const runCollection = vi.fn(async () => ({ ok: true, count: 7 }) as CollectResponse);
+    const runCollection = vi.fn(async () => ({ ok: true, total: 7, newCount: 3 }) as CollectResponse);
     const sendResponse = vi.fn();
     const listener = createContentListener(runCollection);
 
@@ -25,7 +25,7 @@ describe("createContentListener", () => {
     expect(keepChannel).toBe(true); // 异步应答，持有消息通道
     await new Promise((r) => setTimeout(r, 0)); // 等 microtask + promise 链
     expect(runCollection).toHaveBeenCalledTimes(1);
-    expect(sendResponse).toHaveBeenCalledWith({ ok: true, count: 7 });
+    expect(sendResponse).toHaveBeenCalledWith({ ok: true, total: 7, newCount: 3 });
   });
 
   it("采集抛异常时兜底为 {ok:false,error}", async () => {

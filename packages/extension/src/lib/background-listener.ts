@@ -5,6 +5,8 @@ import {
 } from "@word-radar/core";
 import {
   isCheckLoginMessage,
+  isConfirmCollectedMessage,
+  isDiscardCollectedMessage,
   isExportCsvMessage,
   isGetCountsMessage,
   isImportCsvMessage,
@@ -12,6 +14,7 @@ import {
   isWordsCollectedMessage,
   isRetryPushMessage,
   isGetPushStatusMessage,
+  type BatchPreview,
   type CheckLoginResponse,
   type Counts,
   type ExportCsvResponse,
@@ -21,11 +24,12 @@ import {
 import { createBbdcClient, type BbdcClient } from "./bbdc-client.js";
 import { chromeActionBadge } from "./action-badge.js";
 import { PushCoordinator } from "./push-coordinator.js";
-import { defaultSettingsStorage, readAutoPush, type SettingsStorage } from "./settings.js";
 
 /** background 写入的 IndexedDB 仓储边界（service worker 独占）。 */
 export interface BackgroundRepository {
   mergeCollected(entries: WordEntry[]): Promise<Counts>;
+  /** 确认页新词 diff（lemma 对比本地词库，零网络请求）。 */
+  countNew(entries: WordEntry[]): Promise<number>;
   getCounts(): Promise<Counts>;
   markPushed(lemmas: string[]): Promise<Counts>;
   listPending(): Promise<WordEntry[]>;
@@ -57,14 +61,15 @@ export interface BackgroundListenerDeps {
   /** 注入 action badge 网关（默认 lazy 创建 chromeActionBadge）。 */
   actionBadge?: ActionBadgeGateway;
   pushCoordinator?: PushCoordinator;
-  /** 注入配置存储（默认 chrome.storage.local 网关）。 */
-  settingsStorage?: SettingsStorage;
 }
 
 /**
- * service worker 的消息分发器：
- * - WORDS_COLLECTED：合并入 IndexedDB 仓储，返回最新计数（不主动 push 给 sender；
- *   popup 按需用 GET_COUNTS 拉，T09/T10 的推送循环再独立调度）
+ * service worker 的消息分发器（确认闸门定稿，issue #22）：
+ * - WORDS_COLLECTED：批次只驻留内存（待确认批次），不写库不推送；
+ *   用词库 lemma diff 算新词数，应答 {total,newCount}（零网络请求）
+ * - CONFIRM_COLLECTED：确认——批次合并入词库，随后非阻塞触发一轮推送
+ *   （覆盖整个待推池，含 CSV 导入的存量）；应答最新计数
+ * - DISCARD_COLLECTED：取消——丢弃内存中的待确认批次，不持有通道
  * - GET_COUNTS：返回当前计数
  * - MARK_PUSHED：标记指定 lemma 已推，返回最新计数
  * - CHECK_LOGIN（T09）：调 BbdcClient.checkLogin；成功 → 清除 badge；
@@ -74,8 +79,9 @@ export interface BackgroundListenerDeps {
  *
  * 其他消息一律忽略（返回 false，不持有消息通道）。
  *
- * 异步应答（GET_COUNTS / MARK_PUSHED / CHECK_LOGIN / EXPORT_CSV / IMPORT_CSV）
- * 通过 return true 保持消息通道，sendResponse 在仓库 promise resolve 时调用。
+ * 异步应答（WORDS_COLLECTED / CONFIRM_COLLECTED / GET_COUNTS / MARK_PUSHED /
+ * CHECK_LOGIN / EXPORT_CSV / IMPORT_CSV）通过 return true 保持消息通道，
+ * sendResponse 在仓库 promise resolve 时调用。
  */
 export function createBackgroundListener(deps: BackgroundListenerDeps) {
   const bbdcClient = deps.bbdcClient ?? defaultBbdcClient();
@@ -87,13 +93,15 @@ export function createBackgroundListener(deps: BackgroundListenerDeps) {
     // 长词表推送到一半 SW 会被静默杀掉。穿插一次扩展 API 调用即可重置。
     sleep: swKeepAliveSleep,
   });
-  const settingsStorage = deps.settingsStorage ?? defaultSettingsStorage();
+  /**
+   * 待确认批次：只存活于内存（issue #22）。下一次 WORDS_COLLECTED 覆盖；
+   * DISCARD_COLLECTED / 确认后清空；SW 被杀即丢弃——永不持久化。
+   */
+  let pendingBatch: WordEntry[] | null = null;
 
-  /** 自动合并后是否自动启动推送（受「自动推送」开关控制，默认开）。 */
-  const maybeStartPush = async (): Promise<void> => {
-    if (await readAutoPush(settingsStorage)) {
-      void pushCoordinator.start();
-    }
+  /** 合并入库后触发一轮推送（确认即推送是唯一路径，无自动推送开关）。 */
+  const startPushRound = (): void => {
+    void pushCoordinator.start();
   };
 
   return (
@@ -101,6 +109,7 @@ export function createBackgroundListener(deps: BackgroundListenerDeps) {
     _sender: unknown,
     sendResponse: (
       response:
+        | BatchPreview
         | Counts
         | CheckLoginResponse
         | PushStatus
@@ -110,13 +119,36 @@ export function createBackgroundListener(deps: BackgroundListenerDeps) {
     ) => void,
   ): boolean => {
     if (isWordsCollectedMessage(message)) {
-      // 应答 ack（入库结果）并持有通道，保证 content 侧 sendResponse 不会
-      // 在 mergeCollected 之前返回 → popup 拉到的 counts 一定是最新的。
-      void handleWordsCollected(message.entries, deps.repository, maybeStartPush)
-        .then((counts) => sendResponse(counts), () =>
-          sendResponse({ ok: false, error: "merge-collected-failed" }))
+      // 驻留待确认批次 + 算新词 diff（纯词库查询，零网络）；
+      // 持有通道保证 content 侧应答在预览就绪后才返回（popup 确认页拿到
+      // 的 total/newCount 一定与本批次一致）。
+      void handleWordsCollected(message.entries, deps.repository)
+        .then((preview) => {
+          pendingBatch = message.entries;
+          sendResponse(preview);
+        }, () => sendResponse({ ok: false, error: "preview-failed" }))
         .catch(() => undefined);
       return true;
+    }
+    if (isConfirmCollectedMessage(message)) {
+      const batch = pendingBatch;
+      if (batch === null) {
+        sendResponse({ ok: false, error: "no-pending-batch" });
+        return false;
+      }
+      pendingBatch = null;
+      void handleConfirm(batch, deps.repository)
+        .then((counts) => {
+          sendResponse(counts);
+          // 确认即推送：合并完成后非阻塞触发一轮推送全部待推（含 CSV 存量）
+          startPushRound();
+        }, () => sendResponse({ ok: false, error: "confirm-failed" }))
+        .catch(() => undefined);
+      return true;
+    }
+    if (isDiscardCollectedMessage(message)) {
+      pendingBatch = null;
+      return false;
     }
     if (isGetCountsMessage(message)) {
       deps.repository
@@ -153,8 +185,12 @@ export function createBackgroundListener(deps: BackgroundListenerDeps) {
       return true;
     }
     if (isImportCsvMessage(message)) {
-      handleImportCsv(message.csvText, message.fileName, deps.repository, maybeStartPush)
-        .then(sendResponse, () => sendResponse({ ok: false, error: "import-failed" }))
+      handleImportCsv(message.csvText, message.fileName, deps.repository)
+        .then((response) => {
+          sendResponse(response);
+          // 导入合并完成后非阻塞触发一轮推送（待推池不区分来源）
+          if (!("ok" in response && response.ok === false)) startPushRound();
+        }, () => sendResponse({ ok: false, error: "import-failed" }))
         .catch(() => undefined);
       return true;
     }
@@ -162,15 +198,24 @@ export function createBackgroundListener(deps: BackgroundListenerDeps) {
   };
 }
 
+/**
+ * 采集结果只算预览：新词 = 与本地词库的 lemma diff（零网络请求），
+ * 不写库、不推送——入库仅由确认动作（CONFIRM_COLLECTED）触发。
+ */
 async function handleWordsCollected(
   entries: WordEntry[],
   repository: BackgroundRepository,
-  maybeStartPush: () => Promise<void>,
+): Promise<BatchPreview> {
+  const newCount = await repository.countNew(entries);
+  return { total: entries.length, newCount };
+}
+
+/** 确认：待确认批次合并入词库，返回最新计数（推送由调用方在应答后触发）。 */
+async function handleConfirm(
+  entries: WordEntry[],
+  repository: BackgroundRepository,
 ): Promise<Counts> {
-  const counts = await repository.mergeCollected(entries);
-  // 非阻塞触发推送：失败不影响应答（与 handleWordsCollected 一致）
-  await maybeStartPush().catch(() => undefined);
-  return counts;
+  return repository.mergeCollected(entries);
 }
 
 /**
@@ -188,13 +233,12 @@ async function handleExportCsv(
  * T11 导入：先整体解析（core parseWordListCsv），解析失败直接应答
  * {ok:false,error}（包装文件名 + core 报的行号），不产生任何写入；
  * 解析成功才走 mergeCollected（同词 flags 按位或：已推不洗回待推，
- * 新词按 CSV 自带 flags 值进库），随后对齐 WORDS_COLLECTED 非阻塞触发推送。
+ * 新词按 CSV 自带 flags 值进库），随后非阻塞触发一轮推送。
  */
 async function handleImportCsv(
   csvText: string,
   fileName: string,
   repository: BackgroundRepository,
-  maybeStartPush: () => Promise<void>,
 ): Promise<ImportCsvResponse> {
   let entries: WordEntry[];
   try {
@@ -203,10 +247,7 @@ async function handleImportCsv(
     const detail = error instanceof Error ? error.message : String(error);
     return { ok: false, error: `${fileName}: ${detail}` };
   }
-  const counts = await repository.mergeCollected(entries);
-  // 非阻塞触发推送：失败不影响导入结果应答（已提交的合并不应被推送失败回滚）
-  await maybeStartPush().catch(() => undefined);
-  return counts;
+  return repository.mergeCollected(entries);
 }
 
 async function handleCheckLogin(

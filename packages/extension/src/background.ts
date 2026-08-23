@@ -1,17 +1,17 @@
 /**
  * Background service worker 入口。
  *
- * 本张职责（T08 起独占以下能力）：
+ * 职责（确认闸门定稿，issue #22）：
  * - 唯一 IndexedDB 写入方（通过 WordRepository）
- * - 接收 WORDS_COLLECTED 后与词库合并
- * - 接收 GET_COUNTS / MARK_PUSHED 消息并应答
- *
- * T09 起本入口会再叠加：登录检查 + 所有 HTTP（通过 BbdcClient）。
- * 推送调度（PushCoordinator）留给 T10，本工单只覆盖「登录引导」闭环。
+ * - WORDS_COLLECTED 只把批次驻留内存（待确认批次）并应答新词 diff
+ * - CONFIRM_COLLECTED：批次合并入词库 + 触发一轮推送全部待推
+ * - 接收 GET_COUNTS / MARK_PUSHED / CHECK_LOGIN / CSV 导入导出等消息
+ * - 独占所有 HTTP（BbdcClient）
  */
 import { createBackgroundListener } from "./lib/background-listener.js";
 import { createBbdcClient } from "./lib/bbdc-client.js";
 import { createWordRepository } from "./lib/word-repository.js";
+import { cleanupLegacyAutoPush } from "./lib/settings.js";
 
 const HEARTBEAT_KEY = "word-radar-installed";
 
@@ -25,6 +25,9 @@ const bbdcClient = createBbdcClient({ fetch: globalThis.fetch.bind(globalThis) }
 chrome.runtime.onInstalled.addListener(() => {
   void chrome.storage.local.set({ [HEARTBEAT_KEY]: true });
 });
+
+// 「自动推送」开关已移除（issue #22）：每次 SW 启动清理旧存储键（幂等）。
+void cleanupLegacyAutoPush();
 
 chrome.runtime.onMessage.addListener(
   createBackgroundListener({ repository, bbdcClient }),

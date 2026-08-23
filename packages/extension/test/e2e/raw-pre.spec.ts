@@ -24,9 +24,10 @@ test("collects words from a raw-like pre-only page", async ({
   // popup 标签页自身是「活动标签」→ 把 raw 页带回前台再手动采集
   await raw.bringToFront();
   await popup.getByTestId("collect").click();
-  await expect(popup.getByTestId("status")).toHaveText(/本次采集 \d+ 词/, {
-    timeout: 15_000,
-  });
+  await expect(popup.getByTestId("confirm-summary")).toHaveText(
+    /本次共计采集 \d+ 个单词，其中新词 \d+ 个/,
+    { timeout: 15_000 },
+  );
   await popup.close();
   await raw.close();
 });

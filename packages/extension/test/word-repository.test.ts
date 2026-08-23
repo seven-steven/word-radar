@@ -234,3 +234,92 @@ describe("WordRepository.clear", () => {
     expect(await repo.listPending()).toEqual([]);
   });
 });
+describe("WordRepository.countNew（确认页新词 diff，issue #22）", () => {
+  it("空库：全部是新词", async () => {
+    const repo = makeRepository();
+
+    await expect(
+      repo.countNew([
+        { lemma: "run", flags: 0 },
+        { lemma: "garden", flags: 0 },
+      ]),
+    ).resolves.toBe(2);
+  });
+
+  it("全旧：词条都在词库 → 新词 0（含已推词，只看 lemma）", async () => {
+    const repo = makeRepository();
+    await repo.mergeCollected([
+      { lemma: "run", flags: 1 }, // 已推也算「非新词」：判断只看 lemma
+      { lemma: "garden", flags: 0 },
+    ]);
+
+    await expect(
+      repo.countNew([
+        { lemma: "run", flags: 0 },
+        { lemma: "garden", flags: 0 },
+      ]),
+    ).resolves.toBe(0);
+  });
+
+  it("全新：词条都不在词库 → 新词 = 词条数", async () => {
+    const repo = makeRepository();
+    await repo.mergeCollected([{ lemma: "run", flags: 0 }]);
+
+    await expect(
+      repo.countNew([
+        { lemma: "serendipity", flags: 0 },
+        { lemma: "ephemeral", flags: 0 },
+      ]),
+    ).resolves.toBe(2);
+  });
+
+  it("混合：只数词库没有的 lemma", async () => {
+    const repo = makeRepository();
+    await repo.mergeCollected([
+      { lemma: "run", flags: 0 },
+      { lemma: "garden", flags: 1 },
+    ]);
+
+    await expect(
+      repo.countNew([
+        { lemma: "run", flags: 0 }, // 旧
+        { lemma: "serendipity", flags: 0 }, // 新
+        { lemma: "garden", flags: 0 }, // 旧
+        { lemma: "ephemeral", flags: 0 }, // 新
+      ]),
+    ).resolves.toBe(2);
+  });
+
+  it("lemma 大小写不敏感", async () => {
+    const repo = makeRepository();
+    await repo.mergeCollected([{ lemma: "run", flags: 0 }]);
+
+    await expect(repo.countNew([{ lemma: "RUN", flags: 0 }])).resolves.toBe(0);
+  });
+
+  it("空 entries 返回 0，不触库也可（结果一致）", async () => {
+    const repo = makeRepository();
+    await repo.mergeCollected([{ lemma: "run", flags: 0 }]);
+
+    await expect(repo.countNew([])).resolves.toBe(0);
+  });
+});
+
+describe("WordRepository 确认合并入库（issue #22）", () => {
+  it("确认合并 = mergeCollected：新词入库、旧词 flags 按位或不丢已推位", async () => {
+    const repo = makeRepository();
+    await repo.mergeCollected([{ lemma: "run", flags: 1 }]); // 既有已推词
+
+    const counts = await repo.mergeCollected([
+      { lemma: "run", flags: 0 }, // 旧词：保持已推（不洗回待推）
+      { lemma: "serendipity", flags: 0 }, // 新词：进入待推池
+    ]);
+
+    expect(counts).toEqual({ total: 2, pending: 1 });
+    const all = await repo.getAll();
+    expect(all).toContainEqual({ lemma: "run", flags: 1 });
+    expect(all).toContainEqual({ lemma: "serendipity", flags: 0 });
+    // 合并后新词进入待推池，供确认后的推送一轮覆盖
+    expect((await repo.listPending()).map((e) => e.lemma)).toEqual(["serendipity"]);
+  });
+});

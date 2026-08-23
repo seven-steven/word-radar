@@ -5,7 +5,7 @@
  * 复用 e2e 基座（persistent context + 真实扩展 + mockBbdc / fixtureServer），
  * 产出 3 张 1280×800 真实 UI 场景：
  *   01-reading.png  英文阅读页（采集目标）
- *   02-collect.png  popup 采集完成：词数 + 本次采集状态 + 已登录
+ *   02-collect.png  popup 确认页：本次采集总数 + 新词数 + 已登录
  *   03-push.png     popup 推送完成：成功/已存在/失败计数 + phase completed
  *
  * 尺寸硬校验不在本 spec —— run-screenshots.mjs 生成后读 PNG IHDR 逐张断言。
@@ -55,13 +55,10 @@ test("generates 1280x800 store screenshots of real extension UI", async ({
   await article.screenshot({ path: shots("01-reading.png") });
   await article.close();
 
-  // ── 场景 2：popup 采集完成 ─────────────────────────────────────
+  // ── 场景 2：popup 确认页（待确认批次：总数 + 新词） ────────────
   const popup = await extContext.newPage();
   await popup.goto(popupUrl);
   await popup.addStyleTag({ content: POPUP_STAGE_STYLE });
-  // 关 autoPush：采集后立即自动推送会抢在截图前把 pending 清掉
-  const autoPush = popup.getByTestId("auto-push");
-  if (await autoPush.isChecked()) await autoPush.click();
   // popup 标签页自身是「活动标签」→ 把文章页带回前台再手动采集（e2e 基座同款手法）
   // 重新开一页：场景 1 的页面已关，且换一页可确保采集链路走完整注入
   const article2 = await extContext.newPage();
@@ -69,11 +66,10 @@ test("generates 1280x800 store screenshots of real extension UI", async ({
   await article2.waitForTimeout(500);
   await article2.bringToFront();
   await popup.getByTestId("collect").click();
-  await expect(popup.getByTestId("status")).toHaveText(/本次采集 \d+ 词/, {
-    timeout: 15_000,
-  });
-  await expect(popup.getByTestId("total")).toHaveText(/^[1-9]\d*$/, { timeout: 10_000 });
-  await expect(popup.getByTestId("pending")).toHaveText(/^[1-9]\d*$/, { timeout: 10_000 });
+  await expect(popup.getByTestId("confirm-summary")).toHaveText(
+    /本次共计采集 \d+ 个单词，其中新词 \d+ 个/,
+    { timeout: 15_000 },
+  );
   // 登录态（mock check-login → 已登录）
   await popup.getByTestId("check-login").click();
   await expect(popup.getByTestId("login-status")).toHaveAttribute("data-state", "logged-in");
@@ -82,9 +78,11 @@ test("generates 1280x800 store screenshots of real extension UI", async ({
   await popup.screenshot({ path: shots("02-collect.png") });
 
   // ── 场景 3：popup 推送完成 ─────────────────────────────────────
+  await expect(popup.getByTestId("pending")).toHaveText(/^[1-9]\d*$/, { timeout: 10_000 });
   const pending = Number(await popup.getByTestId("pending").textContent());
   expect(pending).toBeGreaterThanOrEqual(1);
-  await popup.getByTestId("retry-push").click();
+  // 确认即推送：批次入库 + 一轮推送（mock 全成功）
+  await popup.getByTestId("confirm-push").click();
   await expect(popup.getByTestId("push-status")).toHaveAttribute(
     "data-phase",
     "completed",

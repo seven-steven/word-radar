@@ -2,13 +2,17 @@ import {
   GET_COUNTS,
   MARK_PUSHED,
   CHECK_LOGIN,
+  CONFIRM_COLLECTED,
+  DISCARD_COLLECTED,
   GET_PUSH_STATUS,
   RETRY_PUSH,
   EXPORT_CSV,
   IMPORT_CSV,
   isExportCsvResponse,
   type CheckLoginResponse,
+  type ConfirmCollectedMessage,
   type Counts,
+  type DiscardCollectedMessage,
   type PushStatus,
   type ExportCsvMessage,
   type GetCountsMessage,
@@ -36,6 +40,10 @@ export interface SwChannel {
   exportCsv(): Promise<unknown>;
   /** T11：把本地 CSV 文本交给 SW 与词库合并。 */
   importCsv(csvText: string, fileName: string): Promise<unknown>;
+  /** 确认待确认批次（issue #22）：SW 合并入词库并触发一轮推送。 */
+  confirmCollected(): Promise<unknown>;
+  /** 取消：丢弃 SW 内存中的待确认批次。 */
+  discardCollected(): Promise<unknown>;
 }
 
 export const chromeSwChannel: SwChannel = {
@@ -63,6 +71,14 @@ export const chromeSwChannel: SwChannel = {
   },
   importCsv(csvText: string, fileName: string) {
     const message: ImportCsvMessage = { type: IMPORT_CSV, csvText, fileName };
+    return chrome.runtime.sendMessage(message);
+  },
+  confirmCollected() {
+    const message: ConfirmCollectedMessage = { type: CONFIRM_COLLECTED };
+    return chrome.runtime.sendMessage(message);
+  },
+  discardCollected() {
+    const message: DiscardCollectedMessage = { type: DISCARD_COLLECTED };
     return chrome.runtime.sendMessage(message);
   },
 };
@@ -126,6 +142,45 @@ export async function fetchPushStatus(channel: SwChannel): Promise<PushStatus | 
 
 export async function retryPush(channel: SwChannel): Promise<void> {
   await channel.retryPush();
+}
+
+/**
+ * 确认待确认批次（issue #22）：
+ * - SW 返回 Counts（合并成功）→ `{ok:true,counts}`
+ * - SW 返回 `{ok:false,error}`（无待确认批次 / 合并失败）→ 原样透传
+ * - 任何其他应答 / 抛错 → `{ok:false}`
+ */
+export type ConfirmCollectedOutcome =
+  | { ok: true; counts: Counts }
+  | { ok: false; error: string };
+
+export async function confirmCollected(
+  channel: SwChannel,
+): Promise<ConfirmCollectedOutcome> {
+  try {
+    const raw = await channel.confirmCollected();
+    if (isCounts(raw)) return { ok: true, counts: raw };
+    if (
+      typeof raw === "object" &&
+      raw !== null &&
+      (raw as { ok?: unknown }).ok === false &&
+      typeof (raw as { error?: unknown }).error === "string"
+    ) {
+      return { ok: false, error: (raw as { error: string }).error };
+    }
+    return { ok: false, error: "confirm-unavailable" };
+  } catch {
+    return { ok: false, error: "confirm-unavailable" };
+  }
+}
+
+/** 取消：丢弃待确认批次。fire-and-forget，失败不打扰用户。 */
+export async function discardCollected(channel: SwChannel): Promise<void> {
+  try {
+    await channel.discardCollected();
+  } catch {
+    // SW 不可达时批次同样只在内存，随 SW 生命周期消失
+  }
 }
 
 /** T11 导出应答（popup 侧收窄后的形态）。 */

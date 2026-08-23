@@ -1,47 +1,33 @@
 /**
- * settings（自动推送开关）单测：默认开、布尔透传、非布尔视为默认开、写入透传。
+ * settings 单测（issue #22）：「自动推送」开关已彻底移除，本模块只负责
+ * 清理旧存储键 `autoPush`（幂等）。
  */
 import { describe, expect, it, vi } from "vitest";
-import { readAutoPush, writeAutoPush, type SettingsStorage } from "../src/lib/settings.js";
+import {
+  LEGACY_AUTO_PUSH_KEY,
+  cleanupLegacyAutoPush,
+  type SettingsStorage,
+} from "../src/lib/settings.js";
 
-function makeStorage(initial: unknown = undefined): SettingsStorage & {
-  getAutoPush: ReturnType<typeof vi.fn>;
-  setAutoPush: ReturnType<typeof vi.fn>;
+function makeStorage(): SettingsStorage & {
+  remove: ReturnType<typeof vi.fn>;
 } {
-  let value = initial;
-  return {
-    getAutoPush: vi.fn(async () => value),
-    setAutoPush: vi.fn(async (next: boolean) => {
-      value = next;
-    }),
-  };
+  return { remove: vi.fn(async () => undefined) };
 }
 
-describe("自动推送开关（chrome.storage.local）", () => {
-  it("未设置时默认开（true）", async () => {
-    const storage = makeStorage(undefined);
-    await expect(readAutoPush(storage)).resolves.toBe(true);
+describe("cleanupLegacyAutoPush（旧存储键清理）", () => {
+  it("对默认网关调用 remove(\"autoPush\")", async () => {
+    const storage = makeStorage();
+    await cleanupLegacyAutoPush(storage);
+    expect(storage.remove).toHaveBeenCalledWith(LEGACY_AUTO_PUSH_KEY);
+    expect(LEGACY_AUTO_PUSH_KEY).toBe("autoPush");
   });
 
-  it("存储为 false 时读到 false", async () => {
-    const storage = makeStorage(false);
-    await expect(readAutoPush(storage)).resolves.toBe(false);
-  });
-
-  it("存储为 true 时读到 true", async () => {
-    const storage = makeStorage(true);
-    await expect(readAutoPush(storage)).resolves.toBe(true);
-  });
-
-  it("存储值类型异常（如字符串）时按默认开处理", async () => {
-    const storage = makeStorage("off");
-    await expect(readAutoPush(storage)).resolves.toBe(true);
-  });
-
-  it("writeAutoPush 写入布尔值", async () => {
-    const storage = makeStorage(undefined);
-    await writeAutoPush(false, storage);
-    expect(storage.setAutoPush).toHaveBeenCalledWith(false);
-    await expect(readAutoPush(storage)).resolves.toBe(false);
+  it("remove 抛错时异常透出，由调用方（background.ts 顶层 void）兜底", async () => {
+    const storage = makeStorage();
+    storage.remove = vi.fn(async () => {
+      throw new Error("storage boom");
+    });
+    await expect(cleanupLegacyAutoPush(storage)).rejects.toThrow("storage boom");
   });
 });

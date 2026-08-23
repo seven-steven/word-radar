@@ -43,6 +43,11 @@ export interface Counts {
 export interface WordRepository {
   /** 合并新采集的词条（lemma 同则 flags 按位或），返回最新计数。 */
   mergeCollected(entries: WordEntry[]): Promise<Counts>;
+  /**
+   * 新词计数：entries 中 lemma（大小写不敏感）不在本地词库的数量。
+   * 确认页的「其中新词 x 个」由此得出，零网络请求（issue #22）。
+   */
+  countNew(entries: WordEntry[]): Promise<number>;
   /** 列出所有待推词（flags === 0）。 */
   listPending(): Promise<WordEntry[]>;
   /** 给定 lemma 列表标记不背单词位为已推；返回最新计数。 */
@@ -78,6 +83,18 @@ export function createWordRepository(options: RepositoryOptions = {}): WordRepos
       // 3. 单个 readwrite 事务内清空并重写（避免跨事务不一致）
       await rewriteAll(openDb, merged);
       return computeCounts(merged);
+    },
+
+    async countNew(entries) {
+      if (entries.length === 0) return 0;
+      const existing = new Set(
+        (await readAll(openDb)).map((entry) => entry.lemma.toLowerCase()),
+      );
+      let newCount = 0;
+      for (const entry of entries) {
+        if (!existing.has(entry.lemma.toLowerCase())) newCount += 1;
+      }
+      return newCount;
     },
 
     async listPending() {
