@@ -276,3 +276,51 @@ test("export-log exports storage.local error ring buffer as text (issue #25)", a
   await expect(page.getByTestId("sync-status")).toHaveText(/暂无错误日志/);
   await page.close();
 });
+
+test("right-click menu upload file target shows hint and skips auto-collect (issue #24 option C)", async ({
+  extContext,
+  popupUrl,
+}) => {
+  // 模拟右键菜单流程：先设置 UPLOAD_TARGET_FLAG 标记，再打开 popup
+  await extContext.addInitScript(async () => {
+    await chrome.storage.local.set({ collectTargetUploadFile: true });
+  });
+
+  const page = await extContext.newPage();
+  await page.goto(popupUrl);
+
+  // 应该显示提示信息，而不是自动触发文件选择器
+  await expect(page.getByTestId("sync-status")).toHaveText(
+    /已选择采集目标：上传文件——请点击「上传文件」选择文件/,
+    { timeout: 5000 },
+  );
+
+  // 确认页应该保持隐藏（没有自动触发采集或文件上传）
+  await expect(page.getByTestId("confirm-section")).toBeHidden();
+
+  // 计数应该正常显示（没有自动采集改变词库）
+  await expect(page.getByTestId("total")).toHaveText(/^\d+$/);
+
+  // 手动点击「上传文件」按钮应该正常工作
+  const txtPath = "/tmp/word-radar-e2e-rightclick.txt";
+  const { writeFileSync } = await import("node:fs");
+  writeFileSync(txtPath, "manual click after right click menu\n");
+
+  const [chooser] = await Promise.all([
+    page.waitForEvent("filechooser"),
+    page.getByTestId("upload-file").click(),
+  ]);
+  await chooser.setFiles(txtPath);
+
+  // 现在应该显示确认页
+  await expect(page.getByTestId("confirm-summary")).toHaveText(
+    /本次共计上传采集 \d+ 个单词，其中新词 \d+ 个/,
+    { timeout: 10_000 },
+  );
+
+  // 取消本次测试的确认页，避免影响后续测试
+  await page.getByTestId("cancel-collect").click();
+  await expect(page.getByTestId("confirm-section")).toBeHidden();
+
+  await page.close();
+});
