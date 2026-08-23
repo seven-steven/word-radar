@@ -143,12 +143,6 @@ export interface UploadFileMessage {
   /** 源文件名：校验 .txt/.md 后缀 + 错误提示包装。 */
   fileName: string;
 }
-export interface ImportCsvMessage {
-  type: typeof IMPORT_CSV;
-  csvText: string;
-  /** 源文件名，仅用于错误提示包装。 */
-  fileName: string;
-}
 
 /** service worker → popup 的导出应答。 */
 export type ExportCsvResponse =
