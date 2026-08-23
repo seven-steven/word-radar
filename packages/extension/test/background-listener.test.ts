@@ -999,6 +999,24 @@ describe("createBackgroundListener 推送进度 + badge 回执（issue #23）", 
     listener({ type: DISCARD_COLLECTED }, {}, vi.fn());
     expect(badge.set).toHaveBeenLastCalledWith(null);
   });
+
+  it("badge：推送完成（✓ 驻留）后再驻留待确认批次 → \"?\" 压过 \"✓\"（验收缺陷：popup 打开即 CHECK_LOGIN 触发的推送轮会把 phase 永久停在 completed，旧优先级下 ? 从未显示）", async () => {
+    const repository = fakeRepository();
+    repository.mergeCollected = vi.fn(async () => ({ total: 1, pending: 1 }));
+    repository.listPending = vi.fn(async () => [{ lemma: "a", flags: 0 }]);
+    const badge = fakeActionBadge();
+    const listener = listenerWithRealCoordinator(repository, slowBbdcClient(5), badge);
+
+    // 第一轮：采集 → 确认 → 推送完成，badge 停在 ✓（phase 不回落 idle）
+    await confirmBatch(listener, [{ lemma: "a", flags: 0 }]);
+    await waitForTerminal(listener);
+    expect(badge.set).toHaveBeenLastCalledWith("✓", "#0a7d2c");
+
+    // 第二轮：再次采集驻留批次（如 popup 重开自动采集）→ ? 必须可见
+    listener({ type: WORDS_COLLECTED, entries: [{ lemma: "b", flags: 0 }] }, {}, vi.fn());
+    await flush();
+    expect(badge.set).toHaveBeenLastCalledWith("?", "#888888");
+  });
 });
 
 describe("createBackgroundListener 推送自动恢复（issue #26 resumeOnStart）", () => {

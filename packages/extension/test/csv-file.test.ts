@@ -95,3 +95,30 @@ describe("browserCsvFileGateway.pickCsvText", () => {
     await expect(promise).resolves.toBeNull();
   });
 });
+
+describe("browserCsvFileGateway.pickUploadText（issue #24 验收修订）", () => {
+  it("accept 过滤包含全部允许后缀（与 SW 校验共用 UPLOAD_TEXT_SUFFIXES）", async () => {
+    const originalCreate = document.createElement.bind(document);
+    let input!: HTMLInputElement;
+    vi.spyOn(document, "createElement").mockImplementation(
+      ((tagName: string, options?: unknown) => {
+        const el = originalCreate(tagName, options as never);
+        if (tagName === "input") {
+          input = el as HTMLInputElement;
+          vi.spyOn(input, "click").mockImplementation(() => undefined);
+        }
+        return el;
+      }) as typeof document.createElement,
+    );
+
+    const promise = browserCsvFileGateway.pickUploadText();
+    const accept = input.accept;
+    for (const suffix of ["txt", "md", "markdown", "csv", "log", "text", "json"]) {
+      expect(accept).toContain(`.${suffix}`);
+    }
+
+    // 结束 promise（避免悬挂）：模拟用户取消
+    input.dispatchEvent(new Event("cancel"));
+    await expect(promise).resolves.toBeNull();
+  });
+});

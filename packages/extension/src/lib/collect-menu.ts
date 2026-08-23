@@ -4,9 +4,12 @@
  * 分层（spec §扩展行为 采集入口）：
  * - 左键单击图标 = 打开 popup 采集当前网页（既有默认行为，不在本模块）
  * - 右键图标 = 采集目标菜单，当前唯一目标「上传文件」：
- *   点选后写一个 storage.local 标记（popup 打开时消费：跳过自动网页采集、
- *   直接触发文件选择器），并 best-effort 调 chrome.action.openPopup()
- *   （Chrome 127+；不可用时用户随后手动点开图标同样消费标记）。
+ *   点选后写一个 storage.local 标记（popup 打开时经 CONSUME_UPLOAD_TARGET
+ *   消息由 SW 消费：跳过自动网页采集、直接触发文件选择器），并 best-effort
+ *   调 chrome.action.openPopup()（Chrome 127+；不可用时用户随后手动点开图标
+ *   同样消费标记）。标记先 await 写入完成再 openPopup；消费侧走 SW 消息
+ *   （写读同上下文，严格有序）——popup 直读 storage 会撞上 chrome.storage
+ *   跨上下文最终一致传播的竞态（验收缺陷：选择器从未弹出）。
  *
  * chrome.* 调用收在本模块并全部可注入，便于单测。
  * manifest 需要新增 "contextMenus" 权限（本工单允许的最小权限）。

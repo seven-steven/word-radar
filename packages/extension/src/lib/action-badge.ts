@@ -54,7 +54,13 @@ export interface ComposeBadgeInput {
 
 /**
  * 合成 badge 应显示的状态（纯函数，优先级从高到低）：
- * 推送运行 x/y > 暂停回执 ! > 完成回执 ✓ > 待确认批次 ? > 无。
+ * 推送运行 x/y > 暂停回执 ! > 待确认批次 ? > 完成回执 ✓ > 无。
+ *
+ * ? 高于 ✓ 的原因（issue #23 验收缺陷修复）：completed/paused 不会自动回到
+ * idle——popup 打开时的 CHECK_LOGIN 会触发一轮推送（哪怕待推为空也会瞬间
+ * completed），之后 ✓ 会永久驻留。若 ✓ 优先于 ?，待确认批次在任何一次
+ * 推送之后都永远显示不出来（真机验收 #22/#23：? 从未出现）。
+ * 待确认批次是最需要用户当下注意的状态，故压过完成回执。
  */
 export function composeBadge(input: ComposeBadgeInput): BadgeSpec | null {
   const phase = input.push?.phase ?? "idle";
@@ -64,11 +70,11 @@ export function composeBadge(input: ComposeBadgeInput): BadgeSpec | null {
   if (phase === "paused") {
     return { text: "!", color: BADGE_COLOR_ERROR };
   }
-  if (phase === "completed") {
-    return { text: "✓", color: BADGE_COLOR_OK };
-  }
   if (input.hasPendingBatch) {
     return { text: "?", color: BADGE_COLOR_HINT };
+  }
+  if (phase === "completed") {
+    return { text: "✓", color: BADGE_COLOR_OK };
   }
   return null;
 }

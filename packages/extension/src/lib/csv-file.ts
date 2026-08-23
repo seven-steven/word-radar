@@ -7,6 +7,8 @@
  * 不需要额外 manifest 权限：Blob + a[download] 的浏览器下载与
  * <input type=file> 的文件选择均属于页面级能力。
  */
+import { UPLOAD_TEXT_SUFFIXES } from "./messages.js";
+
 export interface CsvFileGateway {
   /** 把文本保存为本地文件（触发浏览器下载）。 */
   download(filename: string, text: string): void;
@@ -16,8 +18,9 @@ export interface CsvFileGateway {
    */
   pickCsvText(): Promise<{ name: string; text: string } | null>;
   /**
-   * 弹出文件选择器让用户挑一份 .txt/.md 文本文件（issue #24 上传文件采集），
-   * 读出原始文本；用户取消 / 未选文件 / 读取失败时 resolve null。
+   * 弹出文件选择器让用户挑一份纯文本文件（issue #24 上传文件采集，验收修订：
+   * txt/md/markdown/csv/log/text/json 等），读出原始文本；用户取消 / 未选文件 /
+   * 读取失败时 resolve null。
    */
   pickUploadText(): Promise<{ name: string; text: string } | null>;
 }
@@ -41,7 +44,12 @@ export const browserCsvFileGateway: CsvFileGateway = {
   },
 
   pickUploadText() {
-    return pickTextFile(".txt,.md,text/plain,text/markdown");
+    // 后缀清单与 SW 的 handleUploadFile 校验共用 UPLOAD_TEXT_SUFFIXES；
+    // MIME 只是兜底（系统未必标注 text/markdown 等），真正的闸门在 SW 后缀校验。
+    // 注意：这里的 .csv 是当纯文本提词（自然语言提取管线），不是结构化导入。
+    return pickTextFile(
+      `${UPLOAD_TEXT_SUFFIXES.map((suffix) => `.${suffix}`).join(",")},text/plain,text/markdown,text/csv`,
+    );
   },
 };
 

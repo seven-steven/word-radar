@@ -15,6 +15,7 @@ import {
 } from "../src/lib/background-listener.js";
 import {
   CONFIRM_COLLECTED,
+  CONSUME_UPLOAD_TARGET,
   UPLOAD_FILE,
   type PushStatus,
 } from "../src/lib/messages.js";
@@ -23,9 +24,10 @@ import type { WordEntry } from "@word-radar/core";
 import {
   setupCollectMenu,
   handleCollectMenuClick,
+  UPLOAD_TARGET_FLAG,
   UPLOAD_TARGET_MENU_ID,
 } from "../src/lib/collect-menu.js";
-import { uploadFile } from "../src/lib/sw-channel.js";
+import { uploadFile, consumeUploadTargetFlag } from "../src/lib/sw-channel.js";
 
 function fakeRepository(): BackgroundRepository & {
   mergeCollected: ReturnType<typeof vi.fn>;
@@ -155,7 +157,29 @@ describe("createBackgroundListener UPLOAD_FILE（issue #24）", () => {
     expect(sendResponse).toHaveBeenCalledWith({ total: 1, pending: 1 });
   });
 
-  it("非 .txt/.md 文件：零写入、零提取，应答错误并写错误日志 stage=upload", async () => {
+  it("验收修订：.csv / .markdown 等纯文本后缀合法——.csv 走自然语言提取管线（不是 IMPORT_CSV 的结构化解析）", async () => {
+    const extract = freshExtract();
+    const repository = fakeRepository();
+    const listener = createBackgroundListener({
+      repository,
+      bbdcClient: fakeBbdcClient(),
+      actionBadge: fakeActionBadge(),
+      pushCoordinator: fakePushCoordinator(),
+      errorLogger: { log: vi.fn() },
+      extract,
+    });
+
+    for (const fileName of ["notes.csv", "readme.markdown", "app.log", "dump.json", "a.text"]) {
+      const sendResponse = vi.fn();
+      listener({ type: UPLOAD_FILE, text: "run and jump", fileName }, {}, sendResponse);
+      await flush();
+      expect(sendResponse).toHaveBeenCalledWith({ total: 3, newCount: 3 });
+    }
+    // .csv 也只是被当纯文本提词：extract 收到原始文本
+    expect(extract).toHaveBeenCalledWith("run and jump");
+  });
+
+  it("非法后缀（如 .png）：零写入、零提取，应答错误并写错误日志 stage=upload", async () => {
     const extract = freshExtract();
     const repository = fakeRepository();
     const errorLogger = { log: vi.fn() };
@@ -170,7 +194,7 @@ describe("createBackgroundListener UPLOAD_FILE（issue #24）", () => {
     const sendResponse = vi.fn();
 
     const keep = listener(
-      { type: UPLOAD_FILE, text: "lemma,flags", fileName: "words.csv" },
+      { type: UPLOAD_FILE, text: "binary-ish", fileName: "photo.png" },
       {},
       sendResponse,
     );
@@ -181,7 +205,7 @@ describe("createBackgroundListener UPLOAD_FILE（issue #24）", () => {
     expect(repository.countNew).not.toHaveBeenCalled();
     expect(sendResponse.mock.calls[0]?.[0]).toEqual({
       ok: false,
-      error: expect.stringContaining("words.csv"),
+      error: expect.stringContaining("photo.png"),
     });
     expect(errorLogger.log).toHaveBeenCalledTimes(1);
     const event = errorLogger.log.mock.calls[0]?.[0] as { stage: string };
@@ -254,6 +278,97 @@ describe("sw-channel uploadFile 收窄（issue #24）", () => {
   });
 });
 
+describe("createBackgroundListener CONSUME_UPLOAD_TARGET（issue #24 验收缺陷修复）", () => {
+  function fakeUploadTargetStorage(items: Record<string, unknown> = {}) {
+    return {
+      items,
+      get: vi.fn(async (key: string) => ({ [key]: items[key] })),
+      remove: vi.fn(async (key: string) => {
+        delete items[key];
+      }),
+    };
+  }
+
+  function listenerWithStorage(storage: ReturnType<typeof fakeUploadTargetStorage>) {
+    return createBackgroundListener({
+      repository: fakeRepository(),
+      bbdcClient: fakeBbdcClient(),
+      actionBadge: fakeActionBadge(),
+      pushCoordinator: fakePushCoordinator(),
+      uploadTargetStorage: storage,
+    });
+  }
+
+  it("标记为 true：SW 读并清掉（同一上下文，严格有序），应答 {ok:true,uploadRequested:true}", async () => {
+    const storage = fakeUploadTargetStorage({ [UPLOAD_TARGET_FLAG]: true });
+    const listener = listenerWithStorage(storage);
+    const sendResponse = vi.fn();
+
+    const keep = listener({ type: CONSUME_UPLOAD_TARGET }, {}, sendResponse);
+    expect(keep).toBe(true);
+    await flush();
+
+    expect(storage.get).toHaveBeenCalledWith(UPLOAD_TARGET_FLAG);
+    expect(storage.remove).toHaveBeenCalledWith(UPLOAD_TARGET_FLAG);
+    expect(sendResponse).toHaveBeenCalledWith({ ok: true, uploadRequested: true });
+  });
+
+  it("无标记：不清 storage，应答 {ok:true,uploadRequested:false}", async () => {
+    const storage = fakeUploadTargetStorage();
+    const listener = listenerWithStorage(storage);
+    const sendResponse = vi.fn();
+
+    listener({ type: CONSUME_UPLOAD_TARGET }, {}, sendResponse);
+    await flush();
+
+    expect(storage.remove).not.toHaveBeenCalled();
+    expect(sendResponse).toHaveBeenCalledWith({ ok: true, uploadRequested: false });
+  });
+
+  it("storage 抛错：应答 {ok:false,error}（popup 收窄为 false，回退默认采集）", async () => {
+    const storage = fakeUploadTargetStorage();
+    storage.get = vi.fn(async () => {
+      throw new Error("storage gone");
+    });
+    const listener = listenerWithStorage(storage);
+    const sendResponse = vi.fn();
+
+    listener({ type: CONSUME_UPLOAD_TARGET }, {}, sendResponse);
+    await flush();
+
+    expect(sendResponse).toHaveBeenCalledWith({
+      ok: false,
+      error: "consume-upload-target-failed",
+    });
+  });
+});
+
+describe("sw-channel consumeUploadTargetFlag 收窄（issue #24）", () => {
+  it("{ok:true,uploadRequested:true} → true", async () => {
+    const channel = { consumeUploadTarget: vi.fn(async () => ({ ok: true, uploadRequested: true })) };
+    await expect(consumeUploadTargetFlag(channel)).resolves.toBe(true);
+    expect(channel.consumeUploadTarget).toHaveBeenCalledTimes(1);
+  });
+
+  it("uploadRequested:false / 异常应答 / 抛错 → false（回退默认网页采集）", async () => {
+    await expect(
+      consumeUploadTargetFlag({
+        consumeUploadTarget: vi.fn(async () => ({ ok: true, uploadRequested: false })),
+      }),
+    ).resolves.toBe(false);
+    await expect(
+      consumeUploadTargetFlag({ consumeUploadTarget: vi.fn(async () => "garbage") }),
+    ).resolves.toBe(false);
+    await expect(
+      consumeUploadTargetFlag({
+        consumeUploadTarget: vi.fn(async () => {
+          throw new Error("sw gone");
+        }),
+      }),
+    ).resolves.toBe(false);
+  });
+});
+
 describe("collect-menu（issue #24 右键采集目标菜单）", () => {
   it("setupCollectMenu：removeAll 后注册「上传文件」目标，contexts 含 action", async () => {
     const menus = {
@@ -277,6 +392,30 @@ describe("collect-menu（issue #24 右键采集目标菜单）", () => {
       { menus: { removeAll: vi.fn(), create: vi.fn() }, storage, action: { openPopup } },
     );
     expect(storage.set).toHaveBeenCalledWith({ collectTargetUploadFile: true });
+    expect(openPopup).toHaveBeenCalledTimes(1);
+  });
+
+  it("openPopup 严格等 storage.set 写入完成后才调用（防 popup 打开赶在提交落地前）", async () => {
+    let resolveSet: () => void = () => undefined;
+    const storage = {
+      set: vi.fn(async () => {
+        await new Promise<void>((resolve) => {
+          resolveSet = resolve;
+        });
+      }),
+    };
+    const openPopup = vi.fn(async () => undefined);
+    const pending = handleCollectMenuClick(
+      { menuItemId: UPLOAD_TARGET_MENU_ID },
+      { menus: { removeAll: vi.fn(), create: vi.fn() }, storage, action: { openPopup } },
+    );
+
+    // 写入未落地：popup 不得被打开
+    await flush();
+    expect(openPopup).not.toHaveBeenCalled();
+
+    resolveSet();
+    await pending;
     expect(openPopup).toHaveBeenCalledTimes(1);
   });
 

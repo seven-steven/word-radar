@@ -7,6 +7,7 @@ import {
 import {
   isCheckLoginMessage,
   isConfirmCollectedMessage,
+  isConsumeUploadTargetMessage,
   isDiscardCollectedMessage,
   isExportCsvMessage,
   isGetCountsMessage,
@@ -16,8 +17,10 @@ import {
   isWordsCollectedMessage,
   isRetryPushMessage,
   isGetPushStatusMessage,
+  UPLOAD_TEXT_SUFFIXES,
   type BatchPreview,
   type CheckLoginResponse,
+  type ConsumeUploadTargetResponse,
   type Counts,
   type ExportCsvResponse,
   type ImportCsvResponse,
@@ -25,6 +28,7 @@ import {
 } from "./messages.js";
 import { createBbdcClient, type BbdcClient } from "./bbdc-client.js";
 import { chromeActionBadge, composeBadge } from "./action-badge.js";
+import { UPLOAD_TARGET_FLAG } from "./collect-menu.js";
 import { PushCoordinator } from "./push-coordinator.js";
 import { createErrorLogger, type ErrorLogger } from "./error-log.js";
 
@@ -57,12 +61,35 @@ export interface ActionBadgeGateway {
   set(text: string | null, color?: string): Promise<void>;
 }
 
+/**
+ * 「上传文件」目标标记的 storage 边界（issue #24 验收缺陷修复）：
+ * 标记由 collect-menu 在 SW 上下文写入；popup 若直读 storage 会撞上
+ * chrome.storage 跨上下文最终一致传播（popup 可能读到未提交的空值）。
+ * 改由 SW 收 CONSUME_UPLOAD_TARGET 消息后在同一上下文读并清掉——
+ * 写读同上下文，严格有序，竞态消除。默认 chrome.storage.local。
+ */
+export interface UploadTargetStorage {
+  get(key: string): Promise<Record<string, unknown>>;
+  remove(key: string): Promise<void>;
+}
+
+export const chromeUploadTargetStorage: UploadTargetStorage = {
+  async get(key) {
+    return (await chrome.storage.local.get(key)) as Record<string, unknown>;
+  },
+  remove(key) {
+    return chrome.storage.local.remove(key);
+  },
+};
+
 export interface BackgroundListenerDeps {
   repository: BackgroundRepository;
   /** 注入 BbdcClient（默认 lazy 创建，使用全局 fetch）。 */
   bbdcClient?: BackgroundBbdcClient;
   /** 注入 action badge 网关（默认 lazy 创建 chromeActionBadge）。 */
   actionBadge?: ActionBadgeGateway;
+  /** 注入上传目标标记 storage（默认 lazy 创建 chromeUploadTargetStorage）。 */
+  uploadTargetStorage?: UploadTargetStorage;
   pushCoordinator?: PushCoordinator;
   /**
    * SW 冷启动推送自动恢复（issue #26）：true 时构造即检查待推池，
@@ -96,8 +123,12 @@ export interface BackgroundListenerDeps {
  *   零写入）→ countNew 算新词 diff → 驻留待确认批次（与采集批次同形态，
  *   覆盖任何旧批次）→ 应答 {total,newCount}；不写库、不推送，入库与
  *   推送仅由 CONFIRM_COLLECTED 触发
- * - UPLOAD_FILE（issue #24）：.txt/.md 文本走同一 core 提取管线后驻留
- *   待确认批次（同采集语义）；非法后缀零写入 + 错误日志 stage=upload
+ * - UPLOAD_FILE（issue #24，验收修订）：纯文本文件（UPLOAD_TEXT_SUFFIXES）
+ *   走同一 core 提取管线后驻留待确认批次（同采集语义）；非法后缀零写入 +
+ *   错误日志 stage=upload。注意：.csv 在这里当纯文本提词，不做 IMPORT_CSV
+ *   的结构化解析
+ * - CONSUME_UPLOAD_TARGET（issue #24 验收缺陷修复）：SW 上下文读并清掉
+ *   右键菜单写的「上传文件」目标标记，应答 {ok:true,uploadRequested}
  *
  * 其他消息一律忽略（返回 false，不持有消息通道）。
  *
@@ -108,6 +139,7 @@ export interface BackgroundListenerDeps {
 export function createBackgroundListener(deps: BackgroundListenerDeps) {
   const bbdcClient = deps.bbdcClient ?? defaultBbdcClient();
   const actionBadge = deps.actionBadge ?? defaultActionBadge();
+  const uploadTargetStorage = deps.uploadTargetStorage ?? chromeUploadTargetStorage;
   const errorLogger = deps.errorLogger ?? createErrorLogger();
   const pushCoordinator = deps.pushCoordinator ?? new PushCoordinator({
     client: bbdcClient,
@@ -158,6 +190,7 @@ export function createBackgroundListener(deps: BackgroundListenerDeps) {
         | PushStatus
         | ExportCsvResponse
         | ImportCsvResponse
+        | ConsumeUploadTargetResponse
         | { ok: false; error: string },
     ) => void,
   ): boolean => {
@@ -291,6 +324,14 @@ export function createBackgroundListener(deps: BackgroundListenerDeps) {
         .catch(() => undefined);
       return true;
     }
+    if (isConsumeUploadTargetMessage(message)) {
+      // 读并清掉标记都在 SW 上下文（与写入同上下文，严格有序）——popup
+      // 直读 storage 会撞上跨上下文最终一致传播（issue #24 验收缺陷）。
+      handleConsumeUploadTarget(uploadTargetStorage)
+        .then(sendResponse, () => sendResponse({ ok: false, error: "consume-upload-target-failed" }))
+        .catch(() => undefined);
+      return true;
+    }
     return false;
   };
 }
@@ -353,9 +394,13 @@ async function handleImportCsv(
 }
 
 /**
- * 上传文件采集（issue #24）：校验 `.txt`/`.md` 后缀（合法采集目标）→
- * core 提取管线（与网页采集同源）→ countNew 算新词 diff（零网络请求），
- * 返回 {entries,preview} 由调用方驻留为待确认批次——不直接 mergeCollected。
+ * 上传文件采集（issue #24，验收修订）：校验后缀属于 UPLOAD_TEXT_SUFFIXES
+ * （txt/md/markdown/csv/log/text/json 等纯文本）→ core 提取管线（与网页采集
+ * 同源）→ countNew 算新词 diff（零网络请求），返回 {entries,preview} 由调用
+ * 方驻留为待确认批次——不直接 mergeCollected。
+ *
+ * .csv 特例（用户明确决策）：上传入口的 .csv 走自然语言提取管线（从文本中
+ * 提词），不是 IMPORT_CSV 的 lemma,flags 结构化解析——结构化词表只走导入。
  */
 async function handleUploadFile(
   text: string,
@@ -366,12 +411,29 @@ async function handleUploadFile(
   | { ok: false; error: string }
 > {
   const lower = fileName.toLowerCase();
-  if (!lower.endsWith(".txt") && !lower.endsWith(".md")) {
-    return { ok: false, error: `${fileName}: 仅支持 .txt / .md 文本文件` };
+  const allowed = UPLOAD_TEXT_SUFFIXES.some((suffix) => lower.endsWith(`.${suffix}`));
+  if (!allowed) {
+    const list = UPLOAD_TEXT_SUFFIXES.map((suffix) => `.${suffix}`).join(" / ");
+    return { ok: false, error: `${fileName}: 仅支持纯文本文件（${list}）` };
   }
   const entries = deps.extract(text);
   const newCount = await deps.repository.countNew(entries);
   return { entries, preview: { total: entries.length, newCount } };
+}
+
+/**
+ * 消费「上传文件」目标标记（issue #24 验收缺陷修复）：在 SW 上下文
+ * （与 collect-menu 写入同上下文，严格有序）读标记，为 true 则清掉。
+ */
+async function handleConsumeUploadTarget(
+  storage: UploadTargetStorage,
+): Promise<ConsumeUploadTargetResponse> {
+  const items = await storage.get(UPLOAD_TARGET_FLAG);
+  const requested = items[UPLOAD_TARGET_FLAG] === true;
+  if (requested) {
+    await storage.remove(UPLOAD_TARGET_FLAG);
+  }
+  return { ok: true, uploadRequested: requested };
 }
 
 /**

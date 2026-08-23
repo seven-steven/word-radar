@@ -188,7 +188,7 @@ test("upload-file target walks collect → confirm → push with .txt text (issu
   await page.close();
 });
 
-test("upload-file target rejects non-.txt/.md file with zero writes (issue #24)", async ({
+test("upload-file target accepts .csv as plain text via NL pipeline, not IMPORT_CSV (issue #24)", async ({
   extContext,
   popupUrl,
   mockBbdc,
@@ -196,17 +196,49 @@ test("upload-file target rejects non-.txt/.md file with zero writes (issue #24)"
   const page = await extContext.newPage();
   await page.goto(popupUrl);
 
-  const csvPath = "/tmp/word-radar-e2e-upload-reject.csv";
-  writeFileSync(csvPath, "lemma,flags\nnotafiletarget,0\n");
-  const totalBefore = Number(await page.getByTestId("total").textContent());
+  // 验收修订（用户决策）：上传入口的 .csv 走自然语言提词（extractWordEntries），
+  // 不做 IMPORT_CSV 的 lemma,flags 结构化解析——确认页措辞是「上传采集」
+  const csvPath = "/tmp/word-radar-e2e-upload-nl.csv";
+  writeFileSync(csvPath, "name,count\nglimmer,3\n");
+  mockBbdc.reset();
 
   const [chooser] = await Promise.all([
     page.waitForEvent("filechooser"),
     page.getByTestId("upload-file").click(),
   ]);
   await chooser.setFiles(csvPath);
+  await expect(page.getByTestId("confirm-summary")).toHaveText(
+    /本次共计上传采集 \d+ 个单词，其中新词 \d+ 个/,
+    { timeout: 10_000 },
+  );
+  // 确认前零网络（popup 打开本身的 check-login 恢复路径除外；不上传、不推送）
+  expect(
+    mockBbdc.requests.filter((r) => !r.url.includes("check-login")),
+  ).toHaveLength(0);
+  await expect(page.getByTestId("confirm-section")).toBeVisible();
+  await page.close();
+});
+
+test("upload-file target rejects non plain-text (e.g. .png) file with zero writes (issue #24)", async ({
+  extContext,
+  popupUrl,
+  mockBbdc,
+}) => {
+  const page = await extContext.newPage();
+  await page.goto(popupUrl);
+
+  // 验收修订：.csv 已是合法纯文本目标（走自然语言提词），改用 .png 做拒绝用例
+  const pngPath = "/tmp/word-radar-e2e-upload-reject.png";
+  writeFileSync(pngPath, "lemma,flags\nnotafiletarget,0\n");
+  const totalBefore = Number(await page.getByTestId("total").textContent());
+
+  const [chooser] = await Promise.all([
+    page.waitForEvent("filechooser"),
+    page.getByTestId("upload-file").click(),
+  ]);
+  await chooser.setFiles(pngPath);
   await expect(page.getByTestId("sync-status")).toHaveText(
-    /仅支持 \.txt \/ \.md/,
+    /仅支持纯文本文件/,
     { timeout: 10_000 },
   );
   // 零写入 + 不出现确认页；网络零增量（上一用例的推送循环可能仍在后台

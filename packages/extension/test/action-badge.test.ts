@@ -45,6 +45,13 @@ describe("composeBadge（issue #23）", () => {
       .toEqual({ text: "✓", color: BADGE_COLOR_OK });
   });
 
+  it("待确认批次 \"?\" 压过驻留的完成回执 \"✓\"（验收缺陷：CHECK_LOGIN 触发的空推送轮会瞬间 completed 且不回落 idle，✓ 永久驻留导致 ? 从未显示）", () => {
+    expect(composeBadge({
+      push: progress({ phase: "completed", total: 0, processed: 0 }),
+      hasPendingBatch: true,
+    })).toEqual({ text: "?", color: BADGE_COLOR_HINT });
+  });
+
   it("idle 但有待确认批次 → \"?\" 提示（灰）", () => {
     expect(composeBadge({ hasPendingBatch: true }))
       .toEqual({ text: "?", color: BADGE_COLOR_HINT });

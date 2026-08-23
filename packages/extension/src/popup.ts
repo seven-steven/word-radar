@@ -24,6 +24,7 @@ import {
 import {
   chromeSwChannel,
   confirmCollected,
+  consumeUploadTargetFlag,
   discardCollected,
   fetchCounts,
   fetchExportCsv,
@@ -34,7 +35,6 @@ import {
   uploadFile,
 } from "./lib/sw-channel.js";
 import { browserCsvFileGateway } from "./lib/csv-file.js";
-import { UPLOAD_TARGET_FLAG } from "./lib/collect-menu.js";
 import { defaultErrorLogStorage, formatErrorLog, readErrorLog } from "./lib/error-log.js";
 import type { PushStatus } from "./lib/messages.js";
 
@@ -404,30 +404,17 @@ function startPushStatusPolling(): void {
 
 // 打开即：拉一次计数 + 自动采集 + 拉一次登录态 + 拉一次推送状态；
 // 右键菜单「上传文件」目标（issue #24）：消费标记后跳过默认的当前页采集，
-// 直接进入文件选择器。
+// 直接进入文件选择器。标记消费经 SW 消息（写读同上下文）——popup 直读
+// storage 会撞上跨上下文最终一致传播的竞态（验收缺陷：选择器从未弹出）。
 void refreshCounts();
 void refreshLogin();
 void refreshPushStatus().then(startPushStatusPolling);
-consumeUploadTargetFlag().then((uploadRequested) => {
+consumeUploadTargetFlag(chromeSwChannel).then((uploadRequested) => {
   if (uploadRequested) {
     void uploadFileFromDisk();
   } else {
     void collect();
   }
 });
-
-/** 读并清掉右键菜单写的上传目标标记；读取失败视为未请求（默认网页采集）。 */
-async function consumeUploadTargetFlag(): Promise<boolean> {
-  try {
-    const items = await chrome.storage.local.get(UPLOAD_TARGET_FLAG);
-    const requested = items[UPLOAD_TARGET_FLAG] === true;
-    if (requested) {
-      await chrome.storage.local.remove(UPLOAD_TARGET_FLAG);
-    }
-    return requested;
-  } catch {
-    return false;
-  }
-}
 
 export {};
