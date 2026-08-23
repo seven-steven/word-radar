@@ -8,6 +8,7 @@ import {
   RETRY_PUSH,
   EXPORT_CSV,
   IMPORT_CSV,
+  UPLOAD_FILE,
   isBatchPreview,
   isExportCsvResponse,
   type BatchPreview,
@@ -21,6 +22,7 @@ import {
   type ImportCsvMessage,
   type MarkPushedMessage,
   type CheckLoginMessage,
+  type UploadFileMessage,
 } from "./messages.js";
 
 /**
@@ -42,6 +44,8 @@ export interface SwChannel {
   exportCsv(): Promise<unknown>;
   /** T11：把本地 CSV 文本交给 SW（解析后驻留待确认批次，确认才入库）。 */
   importCsv(csvText: string, fileName: string): Promise<unknown>;
+  /** issue #24：把本地 .txt/.md 文本交给 SW（同一提取管线，驻留待确认批次）。 */
+  uploadFile(text: string, fileName: string): Promise<unknown>;
   /** 确认待确认批次（issue #22）：SW 合并入词库并触发一轮推送。 */
   confirmCollected(): Promise<unknown>;
   /** 取消：丢弃 SW 内存中的待确认批次。 */
@@ -73,6 +77,10 @@ export const chromeSwChannel: SwChannel = {
   },
   importCsv(csvText: string, fileName: string) {
     const message: ImportCsvMessage = { type: IMPORT_CSV, csvText, fileName };
+    return chrome.runtime.sendMessage(message);
+  },
+  uploadFile(text: string, fileName: string) {
+    const message: UploadFileMessage = { type: UPLOAD_FILE, text, fileName };
     return chrome.runtime.sendMessage(message);
   },
   confirmCollected() {
@@ -239,6 +247,41 @@ export async function importCsv(
     return { ok: false, error: "import-unavailable" };
   } catch {
     return { ok: false, error: "import-unavailable" };
+  }
+}
+
+/** 上传文件采集应答（popup 侧收窄后的形态）：成功为待确认批次预览。 */
+export type UploadFileOutcome =
+  | ({ ok: true } & BatchPreview)
+  | { ok: false; error: string };
+
+/**
+ * issue #24 上传文件采集收窄（同过确认闸门）：
+ * - SW 返回 BatchPreview（提取成功，批次已驻留）→ `{ok:true,total,newCount}`
+ * - SW 返回 `{ok:false,error}`（非 .txt/.md 文件等）→ 原样透传
+ * - 任何其他应答 / 抛错 → `{ok:false}`
+ */
+export async function uploadFile(
+  channel: SwChannel,
+  text: string,
+  fileName: string,
+): Promise<UploadFileOutcome> {
+  try {
+    const raw = await channel.uploadFile(text, fileName);
+    if (isBatchPreview(raw)) {
+      return { ok: true, total: raw.total, newCount: raw.newCount };
+    }
+    if (
+      typeof raw === "object" &&
+      raw !== null &&
+      (raw as { ok?: unknown }).ok === false &&
+      typeof (raw as { error?: unknown }).error === "string"
+    ) {
+      return { ok: false, error: (raw as { error: string }).error };
+    }
+    return { ok: false, error: "upload-unavailable" };
+  } catch {
+    return { ok: false, error: "upload-unavailable" };
   }
 }
 

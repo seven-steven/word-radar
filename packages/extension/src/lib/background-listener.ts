@@ -1,4 +1,5 @@
 import {
+  extractWordEntries,
   parseWordListCsv,
   stringifyWordListCsv,
   type WordEntry,
@@ -11,6 +12,7 @@ import {
   isGetCountsMessage,
   isImportCsvMessage,
   isMarkPushedMessage,
+  isUploadFileMessage,
   isWordsCollectedMessage,
   isRetryPushMessage,
   isGetPushStatusMessage,
@@ -64,6 +66,11 @@ export interface BackgroundListenerDeps {
   pushCoordinator?: PushCoordinator;
   /** 错误日志（issue #25）：默认写 chrome.storage.local 环形缓冲。 */
   errorLogger?: ErrorLogger;
+  /**
+   * 文本提取管线（issue #24）：默认 core 的 extractWordEntries（与网页采集
+   * 同一管线）；注入仅用于单测。SW 只做纯提取，无网络请求。
+   */
+  extract?: (text: string) => WordEntry[];
 }
 
 /**
@@ -83,6 +90,8 @@ export interface BackgroundListenerDeps {
  *   零写入）→ countNew 算新词 diff → 驻留待确认批次（与采集批次同形态，
  *   覆盖任何旧批次）→ 应答 {total,newCount}；不写库、不推送，入库与
  *   推送仅由 CONFIRM_COLLECTED 触发
+ * - UPLOAD_FILE（issue #24）：.txt/.md 文本走同一 core 提取管线后驻留
+ *   待确认批次（同采集语义）；非法后缀零写入 + 错误日志 stage=upload
  *
  * 其他消息一律忽略（返回 false，不持有消息通道）。
  *
@@ -253,6 +262,31 @@ export function createBackgroundListener(deps: BackgroundListenerDeps) {
         .catch(() => undefined);
       return true;
     }
+    if (isUploadFileMessage(message)) {
+      // 上传文件采集（issue #24）：原始文本走与网页采集同一 core 提取管线，
+      // 提取结果只驻留待确认批次（不写库、不推送，确认动作是唯一入库路径）。
+      // 与 IMPORT_CSV 的区别：这是自然语言文本，不是 lemma,flags 结构化词表。
+      void handleUploadFile(message.text, message.fileName, {
+        repository: deps.repository,
+        extract: deps.extract ?? extractWordEntries,
+      })
+        .then((result) => {
+          if ("entries" in result) {
+            pendingBatch = result.entries;
+            renderBadge(); // 上传驻留待确认批次 → badge "?"（issue #23）
+            sendResponse(result.preview);
+          } else {
+            // 非法文件（issue #25）：零写入 + 错误写环形缓冲（stage=upload）
+            errorLogger.log({ stage: "upload", summary: result.error });
+            sendResponse(result);
+          }
+        }, (error: unknown) => {
+          errorLogger.log({ stage: "upload", summary: `上传采集失败：${errorSummary(error)}` });
+          sendResponse({ ok: false, error: "upload-failed" });
+        })
+        .catch(() => undefined);
+      return true;
+    }
     return false;
   };
 }
@@ -311,6 +345,28 @@ async function handleImportCsv(
     return { ok: false, error: `${fileName}: ${detail}` };
   }
   const newCount = await repository.countNew(entries);
+  return { entries, preview: { total: entries.length, newCount } };
+}
+
+/**
+ * 上传文件采集（issue #24）：校验 `.txt`/`.md` 后缀（合法采集目标）→
+ * core 提取管线（与网页采集同源）→ countNew 算新词 diff（零网络请求），
+ * 返回 {entries,preview} 由调用方驻留为待确认批次——不直接 mergeCollected。
+ */
+async function handleUploadFile(
+  text: string,
+  fileName: string,
+  deps: { repository: BackgroundRepository; extract: (text: string) => WordEntry[] },
+): Promise<
+  | { entries: WordEntry[]; preview: BatchPreview }
+  | { ok: false; error: string }
+> {
+  const lower = fileName.toLowerCase();
+  if (!lower.endsWith(".txt") && !lower.endsWith(".md")) {
+    return { ok: false, error: `${fileName}: 仅支持 .txt / .md 文本文件` };
+  }
+  const entries = deps.extract(text);
+  const newCount = await deps.repository.countNew(entries);
   return { entries, preview: { total: entries.length, newCount } };
 }
 

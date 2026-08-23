@@ -15,6 +15,11 @@ export interface CsvFileGateway {
    * 用户取消 / 未选文件 / 读取失败时 resolve null。
    */
   pickCsvText(): Promise<{ name: string; text: string } | null>;
+  /**
+   * 弹出文件选择器让用户挑一份 .txt/.md 文本文件（issue #24 上传文件采集），
+   * 读出原始文本；用户取消 / 未选文件 / 读取失败时 resolve null。
+   */
+  pickUploadText(): Promise<{ name: string; text: string } | null>;
 }
 
 export const browserCsvFileGateway: CsvFileGateway = {
@@ -32,26 +37,35 @@ export const browserCsvFileGateway: CsvFileGateway = {
   },
 
   pickCsvText() {
-    return new Promise((resolve) => {
-      const input = document.createElement("input");
-      input.type = "file";
-      input.accept = ".csv,text/csv";
-      input.addEventListener("change", () => {
-        const file = input.files?.[0];
-        if (!file) {
-          resolve(null);
-          return;
-        }
-        const reader = new FileReader();
-        reader.addEventListener("load", () => {
-          resolve({ name: file.name, text: String(reader.result ?? "") });
-        });
-        reader.addEventListener("error", () => resolve(null));
-        reader.readAsText(file);
-      });
-      // 用户在文件对话框点取消（Chrome 113+ 支持 cancel 事件）
-      input.addEventListener("cancel", () => resolve(null));
-      input.click();
-    });
+    return pickTextFile(".csv,text/csv");
+  },
+
+  pickUploadText() {
+    return pickTextFile(".txt,.md,text/plain,text/markdown");
   },
 };
+
+/** 通用文本文件选择：accept 过滤 + FileReader 读文本，取消/失败 resolve null。 */
+function pickTextFile(accept: string): Promise<{ name: string; text: string } | null> {
+  return new Promise((resolve) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = accept;
+    input.addEventListener("change", () => {
+      const file = input.files?.[0];
+      if (!file) {
+        resolve(null);
+        return;
+      }
+      const reader = new FileReader();
+      reader.addEventListener("load", () => {
+        resolve({ name: file.name, text: String(reader.result ?? "") });
+      });
+      reader.addEventListener("error", () => resolve(null));
+      reader.readAsText(file);
+    });
+    // 用户在文件对话框点取消（Chrome 113+ 支持 cancel 事件）
+    input.addEventListener("cancel", () => resolve(null));
+    input.click();
+  });
+}

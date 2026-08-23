@@ -122,6 +122,103 @@ test("CSV import goes through the confirmation gate (issue #22 review S-3)", asy
   await page.close();
 });
 
+test("upload-file target walks collect → confirm → push with .txt text (issue #24)", async ({
+  extContext,
+  popupUrl,
+  mockBbdc,
+}) => {
+  const page = await extContext.newPage();
+  await page.goto(popupUrl);
+
+  // 独有词汇，保证对持久词库是全新词
+  const txtPath = "/tmp/word-radar-e2e-upload.txt";
+  writeFileSync(txtPath, "The curious astronomer photographed a luminous nebula.\n");
+
+  const totalBefore = Number(await page.getByTestId("total").textContent());
+  mockBbdc.reset();
+
+  // 点「上传文件」→ 文件选择器 → 确认页展示「上传采集」措辞的批次预览
+  const [chooser] = await Promise.all([
+    page.waitForEvent("filechooser"),
+    page.getByTestId("upload-file").click(),
+  ]);
+  await chooser.setFiles(txtPath);
+  await expect(page.getByTestId("confirm-summary")).toHaveText(
+    /本次共计上传采集 \d+ 个单词，其中新词 \d+ 个/,
+    { timeout: 10_000 },
+  );
+  // 确认前：不落库、零网络请求（上传路径确认前无任何 bbdc/langeasy 请求）
+  await expect(page.getByTestId("total")).toHaveText(String(totalBefore));
+  expect(mockBbdc.requests).toHaveLength(0);
+
+  // 确认 → 合并入词库 → 计数刷新 → 推送启动（走确认即推送的唯一路径）
+  await page.getByTestId("confirm-push").click();
+  await expect
+    .poll(async () => Number(await page.getByTestId("total").textContent()))
+    .toBeGreaterThan(totalBefore);
+  // 推送触达 bbdc 加词接口（mock 全 200 → 逐词成功）
+  await expect
+    .poll(() => mockBbdc.addWordRequests().length, { timeout: 20_000 })
+    .toBeGreaterThan(0);
+  await expect(page.getByTestId("confirm-section")).toBeHidden();
+  // 等本轮推送跑完再收尾：持久 context 共享推送循环，把进行中的推送
+  // 泄漏给后续用例会让 push.spec 的 pending 计数与请求记录错位
+  await expect
+    .poll(
+      async () => page.getByTestId("push-status").getAttribute("data-phase"),
+      { timeout: 30_000 },
+    )
+    .toMatch(/idle|completed|paused/);
+  // 排空待推池：确认触发的一轮推送以 listPending 快照为准，并发中的批次
+  // 可能不在快照内（由下一次 check-login 恢复路径兜底）。这里手动 drain，
+  // 避免把进行中的待推泄漏给 push.spec（持久 context 共享推送循环）。
+  for (let round = 0; round < 15; round++) {
+    await page.reload();
+    await page.waitForTimeout(3_000);
+    const pending = Number(await page.getByTestId("pending").textContent());
+    const phase = await page.getByTestId("push-status").getAttribute("data-phase");
+    if (pending === 0 && phase !== "running") break;
+    if (pending > 0 && phase !== "running") {
+      await page.getByTestId("retry-push").click();
+    }
+    await page.waitForTimeout(3_000);
+  }
+  await expect(page.getByTestId("pending")).toHaveText(/^0$/);
+  await expect(page.getByTestId("push-status")).not.toHaveAttribute("data-phase", "running");
+  await page.close();
+});
+
+test("upload-file target rejects non-.txt/.md file with zero writes (issue #24)", async ({
+  extContext,
+  popupUrl,
+  mockBbdc,
+}) => {
+  const page = await extContext.newPage();
+  await page.goto(popupUrl);
+
+  const csvPath = "/tmp/word-radar-e2e-upload-reject.csv";
+  writeFileSync(csvPath, "lemma,flags\nnotafiletarget,0\n");
+  const totalBefore = Number(await page.getByTestId("total").textContent());
+
+  const [chooser] = await Promise.all([
+    page.waitForEvent("filechooser"),
+    page.getByTestId("upload-file").click(),
+  ]);
+  await chooser.setFiles(csvPath);
+  await expect(page.getByTestId("sync-status")).toHaveText(
+    /仅支持 \.txt \/ \.md/,
+    { timeout: 10_000 },
+  );
+  // 零写入 + 不出现确认页；网络零增量（上一用例的推送循环可能仍在后台
+  // 逐词进行——持久 context 共享，只断言本文件的词从未触达任何接口）
+  await expect(page.getByTestId("total")).toHaveText(String(totalBefore));
+  expect(
+    mockBbdc.requests.filter((r) => r.url.includes("notafiletarget")),
+  ).toHaveLength(0);
+  await expect(page.getByTestId("confirm-section")).toBeHidden();
+  await page.close();
+});
+
 test("export-log exports storage.local error ring buffer as text (issue #25)", async ({
   extContext,
   popupUrl,

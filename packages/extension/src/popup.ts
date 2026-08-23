@@ -31,8 +31,10 @@ import {
   fetchPushStatus,
   importCsv,
   retryPush,
+  uploadFile,
 } from "./lib/sw-channel.js";
 import { browserCsvFileGateway } from "./lib/csv-file.js";
+import { UPLOAD_TARGET_FLAG } from "./lib/collect-menu.js";
 import { defaultErrorLogStorage, formatErrorLog, readErrorLog } from "./lib/error-log.js";
 import type { PushStatus } from "./lib/messages.js";
 
@@ -62,6 +64,7 @@ const pushExistingEl = document.querySelector<HTMLElement>('[data-testid="push-e
 const pushFailedEl = document.querySelector<HTMLElement>('[data-testid="push-failed"]');
 const exportCsvButton = document.querySelector<HTMLButtonElement>('[data-testid="export-csv"]');
 const importCsvButton = document.querySelector<HTMLButtonElement>('[data-testid="import-csv"]');
+const uploadFileButton = document.querySelector<HTMLButtonElement>('[data-testid="upload-file"]');
 const syncStatusEl = document.querySelector<HTMLElement>('[data-testid="sync-status"]');
 const exportLogButton = document.querySelector<HTMLButtonElement>('[data-testid="export-log"]');
 const confirmSection = document.querySelector<HTMLElement>('[data-testid="confirm-section"]');
@@ -222,7 +225,34 @@ async function importCsvFromFile(): Promise<void> {
 }
 
 
-  async function refreshCounts(): Promise<void> {
+/**
+ * 上传文件采集（issue #24）：文件网关读本地 .txt/.md → SW 用与网页采集同一
+ * core 提取管线处理并驻留待确认批次（确认前零网络请求）→ 确认页展示
+ * 「本次共计上传采集 N 个单词，其中新词 M 个」。确认 = 合并 + 一轮推送
+ * （同采集）；取消丢弃批次。
+ */
+async function uploadFileFromDisk(): Promise<void> {
+  const picked = await browserCsvFileGateway.pickUploadText();
+  if (!picked) return; // 用户取消：静默
+  if (uploadFileButton) uploadFileButton.disabled = true;
+  renderSyncStatus(`上传采集 ${picked.name} 中…`);
+  hideConfirmPage();
+  try {
+    const outcome = await uploadFile(chromeSwChannel, picked.text, picked.name);
+    if (outcome.ok) {
+      // 批次已驻留 SW 内存：展示确认页（措辞用「上传采集」，计数语义与采集一致）
+      renderConfirmPage("上传采集", outcome.total, outcome.newCount);
+      if (statusEl) statusEl.textContent = "待确认";
+      renderSyncStatus(`已解析 ${picked.name}，待确认`);
+    } else {
+      renderSyncStatus(`上传采集失败：${outcome.error}`);
+    }
+  } finally {
+    if (uploadFileButton) uploadFileButton.disabled = false;
+  }
+}
+
+async function refreshCounts(): Promise<void> {
   const counts = await fetchCounts(chromeSwChannel);
   if (counts) {
     renderCounts(counts.total, counts.pending);
@@ -251,7 +281,7 @@ async function checkLogin(): Promise<void> {
  * source 仅影响措辞（采集 / 导入），计数语义与按钮行为完全一致（review S-3）。
  */
 function renderConfirmPage(
-  source: "采集" | "导入",
+  source: "采集" | "导入" | "上传采集",
   total: number,
   newCount: number,
 ): void {
@@ -346,6 +376,10 @@ importCsvButton?.addEventListener("click", () => {
   void importCsvFromFile();
 });
 
+uploadFileButton?.addEventListener("click", () => {
+  void uploadFileFromDisk();
+});
+
 exportLogButton?.addEventListener("click", () => {
   void exportLog();
 });
@@ -368,10 +402,32 @@ function startPushStatusPolling(): void {
   pushStatusTimer = window.setTimeout(tick, 0);
 }
 
-// 打开即：拉一次计数 + 自动采集 + 拉一次登录态 + 拉一次推送状态
+// 打开即：拉一次计数 + 自动采集 + 拉一次登录态 + 拉一次推送状态；
+// 右键菜单「上传文件」目标（issue #24）：消费标记后跳过默认的当前页采集，
+// 直接进入文件选择器。
 void refreshCounts();
 void refreshLogin();
 void refreshPushStatus().then(startPushStatusPolling);
-void collect();
+consumeUploadTargetFlag().then((uploadRequested) => {
+  if (uploadRequested) {
+    void uploadFileFromDisk();
+  } else {
+    void collect();
+  }
+});
+
+/** 读并清掉右键菜单写的上传目标标记；读取失败视为未请求（默认网页采集）。 */
+async function consumeUploadTargetFlag(): Promise<boolean> {
+  try {
+    const items = await chrome.storage.local.get(UPLOAD_TARGET_FLAG);
+    const requested = items[UPLOAD_TARGET_FLAG] === true;
+    if (requested) {
+      await chrome.storage.local.remove(UPLOAD_TARGET_FLAG);
+    }
+    return requested;
+  } catch {
+    return false;
+  }
+}
 
 export {};

@@ -37,6 +37,7 @@ export const RETRY_PUSH = "RETRY_PUSH" as const;
 export const GET_PUSH_STATUS = "GET_PUSH_STATUS" as const;
 export const EXPORT_CSV = "EXPORT_CSV" as const;
 export const IMPORT_CSV = "IMPORT_CSV" as const;
+export const UPLOAD_FILE = "UPLOAD_FILE" as const;
 
 export interface PushStatus {
   phase: "idle" | "running" | "paused" | "completed";
@@ -127,6 +128,28 @@ export interface ImportCsvMessage {
   fileName: string;
 }
 
+/**
+ * popup → background（issue #24）：上传一份本地 `.txt`/`.md` 文件的原始文本。
+ * 走与网页采集相同的 core 提取管线（extractWordEntries），提取结果只驻留
+ * 待确认批次（与采集/导入批次同形态），应答 `BatchPreview`；入库与推送仅由
+ * `CONFIRM_COLLECTED` 触发。与 IMPORT_CSV（lemma,flags CSV）语义不同：
+ * 这是自然语言文本，不是结构化词表。文件名不合法（非 .txt/.md）时零写入，
+ * 应答 {ok:false,error}。
+ */
+export interface UploadFileMessage {
+  type: typeof UPLOAD_FILE;
+  /** 文件的完整文本（popup 侧 FileReader 读出）。 */
+  text: string;
+  /** 源文件名：校验 .txt/.md 后缀 + 错误提示包装。 */
+  fileName: string;
+}
+export interface ImportCsvMessage {
+  type: typeof IMPORT_CSV;
+  csvText: string;
+  /** 源文件名，仅用于错误提示包装。 */
+  fileName: string;
+}
+
 /** service worker → popup 的导出应答。 */
 export type ExportCsvResponse =
   | { ok: true; csv: string }
@@ -157,7 +180,8 @@ export type ExtensionMessage =
   | RetryPushMessage
   | GetPushStatusMessage
   | ExportCsvMessage
-  | ImportCsvMessage;
+  | ImportCsvMessage
+  | UploadFileMessage;
 
 /**
  * content → popup 的同步应答：成功携带确认页预览（总数 + 新词数），
@@ -249,6 +273,17 @@ export function isImportCsvMessage(
     isObject(value) &&
     value.type === IMPORT_CSV &&
     typeof value.csvText === "string" &&
+    typeof value.fileName === "string"
+  );
+}
+
+export function isUploadFileMessage(
+  value: unknown,
+): value is UploadFileMessage {
+  return (
+    isObject(value) &&
+    value.type === UPLOAD_FILE &&
+    typeof value.text === "string" &&
     typeof value.fileName === "string"
   );
 }
