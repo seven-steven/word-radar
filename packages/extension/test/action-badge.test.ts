@@ -26,11 +26,10 @@ describe("composeBadge（issue #23）", () => {
   it("推送中 → x/y 数字进度（蓝），与更低优先级状态互斥", () => {
     expect(composeBadge({ push: progress({ phase: "running", total: 5, processed: 2 }) }))
       .toEqual({ text: "2/5", color: BADGE_COLOR_PROGRESS });
-    // 即便有待确认批次/未登录，running 优先
+    // 即便有待确认批次，running 优先
     expect(composeBadge({
       push: progress({ phase: "running", total: 5, processed: 2 }),
       hasPendingBatch: true,
-      loggedOut: true,
     })).toEqual({ text: "2/5", color: BADGE_COLOR_PROGRESS });
   });
 
@@ -51,11 +50,9 @@ describe("composeBadge（issue #23）", () => {
       .toEqual({ text: "?", color: BADGE_COLOR_HINT });
   });
 
-  it("idle + 未登录 → \"!\"（红，登录引导）；待确认提示优先于登录引导", () => {
-    expect(composeBadge({ loggedOut: true }))
-      .toEqual({ text: "!", color: BADGE_COLOR_ERROR });
-    expect(composeBadge({ hasPendingBatch: true, loggedOut: true }))
-      .toEqual({ text: "?", color: BADGE_COLOR_HINT });
+  it("idle + 未登录 → null（issue #26 修订：未登录不亮 badge，登录失效经推送 paused 的 \"!\" 表达）", () => {
+    // loggedOut 已从 ComposeBadgeInput 删除；idle 且无待确认批次即无任何 badge
+    expect(composeBadge({})).toBeNull();
   });
 
   it("无任何状态 → null（清空 badge）", () => {

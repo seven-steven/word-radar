@@ -64,6 +64,12 @@ export interface BackgroundListenerDeps {
   /** 注入 action badge 网关（默认 lazy 创建 chromeActionBadge）。 */
   actionBadge?: ActionBadgeGateway;
   pushCoordinator?: PushCoordinator;
+  /**
+   * SW 冷启动推送自动恢复（issue #26）：true 时构造即检查待推池，
+   * 非空且无轮在跑则自动起一轮推送（与登录恢复并列的恢复路径，
+   * 不是自动推送开关）。仅由 SW 入口 background.ts 传入；单测默认关闭。
+   */
+  resumeOnStart?: boolean;
   /** 错误日志（issue #25）：默认写 chrome.storage.local 环形缓冲。 */
   errorLogger?: ErrorLogger;
   /**
@@ -83,8 +89,8 @@ export interface BackgroundListenerDeps {
  * - DISCARD_COLLECTED：取消——丢弃内存中的待确认批次，不持有通道
  * - GET_COUNTS：返回当前计数
  * - MARK_PUSHED：标记指定 lemma 已推，返回最新计数
- * - CHECK_LOGIN（T09）：调 BbdcClient.checkLogin；成功 → 清除 badge；
- *   失败 → 设 badge "!" 并应答 {loggedIn:false}
+ * - CHECK_LOGIN（T09）：调 BbdcClient.checkLogin；应答 {loggedIn}。
+ *   登录状态不写 badge（issue #26）——未登录只在推送 paused 时经 "!" 表达
  * - EXPORT_CSV（T11）：getAll → core stringify，应答 {ok:true,csv}
  * - IMPORT_CSV（review S-3 改走确认闸门）：core parse（失败即应答错误，
  *   零写入）→ countNew 算新词 diff → 驻留待确认批次（与采集批次同形态，
@@ -119,15 +125,12 @@ export function createBackgroundListener(deps: BackgroundListenerDeps) {
    * DISCARD_COLLECTED / 确认后清空；SW 被杀即丢弃——永不持久化。
    */
   let pendingBatch: WordEntry[] | null = null;
-  /** badge 合成状态（issue #23）：待确认批次提示 + 登录引导标记。 */
-  let loginBadgeBad = false;
 
-  /** 按优先级合成并写入 badge：推送 x/y > 暂停/完成回执 > 待确认 ? > 未登录 !。 */
+  /** 按优先级合成并写入 badge：推送 x/y > 暂停/完成回执 > 待确认 ?。 */
   const renderBadge = (): void => {
     const spec = composeBadge({
       push: pushCoordinator.getStatus(),
       hasPendingBatch: pendingBatch !== null,
-      loggedOut: loginBadgeBad,
     });
     // badge 写失败不阻塞消息处理（SW 重启后 chrome.action 短暂不可用等）
     void (spec ? actionBadge.set(spec.text, spec.color) : actionBadge.set(null))
@@ -138,6 +141,11 @@ export function createBackgroundListener(deps: BackgroundListenerDeps) {
   const startPushRound = (): void => {
     void pushCoordinator.start();
   };
+
+  // SW 冷启动推送自动恢复（issue #26）：待推池非空且无轮在跑 → 自动起一轮。
+  if (deps.resumeOnStart === true) {
+    void resumePendingPush({ repository: deps.repository, pushCoordinator });
+  }
 
   return (
     message: unknown,
@@ -221,14 +229,12 @@ export function createBackgroundListener(deps: BackgroundListenerDeps) {
     }
     if (isCheckLoginMessage(message)) {
       handleCheckLogin(bbdcClient, pushCoordinator)
-        .then(({ loggedIn, loggedOut }) => {
-          // badge 状态经 renderBadge 合成（issue #23）：登录引导与其他 badge
-          // 状态（推送回执/待确认提示）按优先级共存，不再直接独占写入。
-          loginBadgeBad = loggedOut;
+        .then(({ loggedIn }) => {
+          // badge 与登录状态解耦（issue #26）：未登录不亮 badge，登录失效经
+          // 推送 paused 的 "!" 间接表达；此处仅同步一次合成状态（幂等清空）。
           renderBadge();
           sendResponse(loggedIn ? { loggedIn: true } : { loggedIn: false });
         }, () => {
-          loginBadgeBad = true;
           renderBadge();
           sendResponse({ ok: false, error: "check-login-failed" });
         })
@@ -371,26 +377,42 @@ async function handleUploadFile(
 }
 
 /**
- * T09 登录检查（badge 写入已收口到 renderBadge）：
- * 返回 {loggedIn, loggedOut}——loggedOut 同时覆盖「未登录」与「保守视为未登录」。
+ * T09 登录检查：返回 {loggedIn}。badge 与登录状态已解耦（issue #26）——
+ * 未登录不写 badge，登录失效由推送 paused 的 "!" 表达。
  */
 async function handleCheckLogin(
   bbdcClient: BackgroundBbdcClient,
   pushCoordinator: PushCoordinator,
-): Promise<{ loggedIn: boolean; loggedOut: boolean }> {
+): Promise<{ loggedIn: boolean }> {
   try {
     const result = await bbdcClient.checkLogin();
     if (result.loggedIn) {
       // 「确认即推送是唯一路径」指 采集/导入→推送 这条主路径（issue #22）；
       // 这里是登录恢复后对存量待推的重推，属于允许的恢复路径，不是自动推送开关。
       void pushCoordinator.start();
-      return { loggedIn: true, loggedOut: false };
+      return { loggedIn: true };
     }
-    return { loggedIn: false, loggedOut: true };
+    return { loggedIn: false };
   } catch {
     // 任何 BbdcAuthError / BbdcApiError / 网络错误：保守视为未登录
-    return { loggedIn: false, loggedOut: true };
+    return { loggedIn: false };
   }
+}
+
+/**
+ * 推送自动恢复（issue #26，spec「推送自动恢复」）：SW 冷启动时若待推池
+ * 非空且无推送轮在跑（status 为 idle），自动起一轮推送。覆盖浏览器启动、
+ * 扩展安装/更新、任何事件唤醒 SW 的场景；PushCoordinator.start() 自带
+ * 去重（已运行时返回同一 promise），调用方无需额外守卫。查库失败静默——
+ * 下次 SW 唤醒会再试。
+ */
+export async function resumePendingPush(
+  deps: { repository: Pick<BackgroundRepository, "listPending">; pushCoordinator: PushCoordinator },
+): Promise<void> {
+  const pending = await deps.repository.listPending().catch(() => undefined);
+  if (!pending || pending.length === 0) return;
+  if (deps.pushCoordinator.getStatus().phase !== "idle") return;
+  void deps.pushCoordinator.start();
 }
 
 // ---------------------------------------------------------------------------

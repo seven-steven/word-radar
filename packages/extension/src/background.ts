@@ -52,7 +52,9 @@ chrome.contextMenus.onClicked.addListener((info) => {
 void cleanupLegacyAutoPush();
 
 chrome.runtime.onMessage.addListener(
-  createBackgroundListener({ repository, bbdcClient }),
+  // resumeOnStart（issue #26）：SW 冷启动时待推池非空且无轮在跑 → 自动起
+  // 一轮推送（浏览器启动/扩展更新/事件唤醒 SW 都会执行本顶层模块）。
+  createBackgroundListener({ repository, bbdcClient, resumeOnStart: true }),
 );
 
 export {};

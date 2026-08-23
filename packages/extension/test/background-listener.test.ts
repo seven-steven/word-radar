@@ -234,7 +234,7 @@ describe("createBackgroundListener CHECK_LOGIN（T09 + T10）", () => {
     expect(push.start).toHaveBeenCalledTimes(1);
   });
 
-  it("check-login result_code 非 200 → 应答 {loggedIn:false} + 设 badge \"!\" + 不触发 push", async () => {
+  it("check-login result_code 非 200 → 应答 {loggedIn:false} + 不触发 push；badge 不亮（issue #26：未登录不写 badge）", async () => {
     const repository = fakeRepository();
     const bbdcClient = fakeBbdcClient({
       checkLogin: vi.fn(async () => ({ loggedIn: false, resultCode: 401 })),
@@ -252,12 +252,13 @@ describe("createBackgroundListener CHECK_LOGIN（T09 + T10）", () => {
     listener({ type: CHECK_LOGIN }, {}, sendResponse);
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
 
-    expect(badge.set).toHaveBeenLastCalledWith("!", "#b00000");
+    // idle + 无待确认批次 → 合成 null（幂等清空），绝不是 "!"
+    expect(badge.set).toHaveBeenLastCalledWith(null);
     expect(sendResponse).toHaveBeenCalledWith({ loggedIn: false });
     expect(push.start).not.toHaveBeenCalled();
   });
 
-  it("BbdcAuthError（HTTP 401/403）→ 保守视为未登录 + 设 badge \"!\"", async () => {
+  it("BbdcAuthError（HTTP 401/403）→ 保守视为未登录；badge 不亮", async () => {
     class FakeAuthError extends Error {}
     const repository = fakeRepository();
     const bbdcClient = fakeBbdcClient({
@@ -278,12 +279,12 @@ describe("createBackgroundListener CHECK_LOGIN（T09 + T10）", () => {
     listener({ type: CHECK_LOGIN }, {}, sendResponse);
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
 
-    expect(badge.set).toHaveBeenLastCalledWith("!", "#b00000");
+    expect(badge.set).toHaveBeenLastCalledWith(null);
     expect(sendResponse).toHaveBeenCalledWith({ loggedIn: false });
     expect(push.start).not.toHaveBeenCalled();
   });
 
-  it("未知错误（解析/网络）也保守视为未登录", async () => {
+  it("未知错误（解析/网络）也保守视为未登录；badge 不亮", async () => {
     const repository = fakeRepository();
     const bbdcClient = fakeBbdcClient({
       checkLogin: vi.fn(async () => {
@@ -303,7 +304,7 @@ describe("createBackgroundListener CHECK_LOGIN（T09 + T10）", () => {
     listener({ type: CHECK_LOGIN }, {}, sendResponse);
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
 
-    expect(badge.set).toHaveBeenLastCalledWith("!", "#b00000");
+    expect(badge.set).toHaveBeenLastCalledWith(null);
     expect(sendResponse).toHaveBeenCalledWith({ loggedIn: false });
     expect(push.start).not.toHaveBeenCalled();
   });
@@ -997,5 +998,67 @@ describe("createBackgroundListener 推送进度 + badge 回执（issue #23）", 
 
     listener({ type: DISCARD_COLLECTED }, {}, vi.fn());
     expect(badge.set).toHaveBeenLastCalledWith(null);
+  });
+});
+
+describe("createBackgroundListener 推送自动恢复（issue #26 resumeOnStart）", () => {
+  it("resumeOnStart：待推池非空且 idle → 构造即自动起一轮推送", async () => {
+    const repository = fakeRepository(); // 默认 listPending 返回 1 条待推
+    const push = fakePushCoordinator();
+
+    createBackgroundListener({ repository, pushCoordinator: push, resumeOnStart: true });
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+    expect(repository.listPending).toHaveBeenCalledTimes(1);
+    expect(push.start).toHaveBeenCalledTimes(1);
+  });
+
+  it("resumeOnStart：待推池为空 → 不起推送", async () => {
+    const repository = fakeRepository();
+    repository.listPending = vi.fn(async () => []);
+    const push = fakePushCoordinator();
+
+    createBackgroundListener({ repository, pushCoordinator: push, resumeOnStart: true });
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+    expect(push.start).not.toHaveBeenCalled();
+  });
+
+  it("resumeOnStart：推送轮已在跑（非 idle）→ 不重复起轮", async () => {
+    const repository = fakeRepository();
+    const push = fakePushCoordinator();
+    push.getStatus = vi.fn(() => ({
+      phase: "running", total: 2, processed: 0, succeeded: 0, existing: 0, failed: 0, pending: 2,
+    }));
+
+    createBackgroundListener({ repository, pushCoordinator: push, resumeOnStart: true });
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+    expect(push.start).not.toHaveBeenCalled();
+  });
+
+  it("resumeOnStart：查库失败静默（下次 SW 唤醒再试），不抛错", async () => {
+    const repository = fakeRepository();
+    repository.listPending = vi.fn(async () => {
+      throw new Error("db boom");
+    });
+    const push = fakePushCoordinator();
+
+    expect(() =>
+      createBackgroundListener({ repository, pushCoordinator: push, resumeOnStart: true }),
+    ).not.toThrow();
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    expect(push.start).not.toHaveBeenCalled();
+  });
+
+  it("默认（未传 resumeOnStart）：构造不查待推池——单测与既有路径不受影响", async () => {
+    const repository = fakeRepository();
+    const push = fakePushCoordinator();
+
+    createBackgroundListener({ repository, pushCoordinator: push });
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+    expect(repository.listPending).not.toHaveBeenCalled();
+    expect(push.start).not.toHaveBeenCalled();
   });
 });

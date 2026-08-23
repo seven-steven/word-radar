@@ -1,12 +1,13 @@
 /**
  * `chrome.action` 边界模块：把 badge 文本/颜色写入的 chrome.* 调用收在这里。
  *
- * badge 状态字（issue #23，spec §扩展行为）：
+ * badge 状态字（issue #23，issue #26 修订，spec §扩展行为）：
  * - 推送期间：`x/y` 数字进度（蓝）
  * - 推送完成：`✓` 变色回执（绿）
- * - 推送暂停（失败/登录失效）：`!` 变色回执（红）
+ * - 推送暂停（auth 失败/顶层异常，需用户关注）：`!` 变色回执（红）
  * - 有待确认批次：`?` 提示（灰）
- * - 未登录不背单词：`!`（红，登录引导）
+ * - 未登录不亮 badge（issue #26 修订）：推送已自动化，未登录只在导致
+ *   推送 paused 时经 `!` 表达；单词级重试耗尽也安静（留待推下轮重试）
  *
  * 上层依赖可注入的 `ActionBadge` 接口，便于单测；生产由 SW 持有 `chromeActionBadge`。
  * 状态优先级合成的纯逻辑在 `composeBadge`，与 chrome.* 解耦、可单测。
@@ -49,13 +50,11 @@ export interface ComposeBadgeInput {
   push?: PushProgress;
   /** SW 内存中是否存在待确认批次。 */
   hasPendingBatch?: boolean;
-  /** 上次 checkLogin 是否失败（登录引导）。 */
-  loggedOut?: boolean;
 }
 
 /**
  * 合成 badge 应显示的状态（纯函数，优先级从高到低）：
- * 推送运行 x/y > 暂停回执 ! > 完成回执 ✓ > 待确认批次 ? > 未登录 ! > 无。
+ * 推送运行 x/y > 暂停回执 ! > 完成回执 ✓ > 待确认批次 ? > 无。
  */
 export function composeBadge(input: ComposeBadgeInput): BadgeSpec | null {
   const phase = input.push?.phase ?? "idle";
@@ -70,9 +69,6 @@ export function composeBadge(input: ComposeBadgeInput): BadgeSpec | null {
   }
   if (input.hasPendingBatch) {
     return { text: "?", color: BADGE_COLOR_HINT };
-  }
-  if (input.loggedOut) {
-    return { text: "!", color: BADGE_COLOR_ERROR };
   }
   return null;
 }
