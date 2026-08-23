@@ -121,3 +121,29 @@ test("CSV import goes through the confirmation gate (issue #22 review S-3)", asy
   await expect(page.getByTestId("total")).toHaveText(String(totalBefore + 2));
   await page.close();
 });
+
+test("export-log exports storage.local error ring buffer as text (issue #25)", async ({
+  extContext,
+  popupUrl,
+}) => {
+  const page = await extContext.newPage();
+  await page.goto(popupUrl);
+
+  // 种子：直接写 storage.local（扩展页上下文 chrome.* 可用）
+  await page.evaluate(async () => {
+    await chrome.storage.local.set({
+      errorLog: [{ time: 1750000000000, stage: "push", word: "run", summary: "网络错误" }],
+    });
+  });
+
+  await page.getByTestId("export-log").click();
+  await expect(page.getByTestId("sync-status")).toHaveText(/已导出 1 条错误日志/);
+
+  // 清空后再导出：提示暂无
+  await page.evaluate(async () => {
+    await chrome.storage.local.remove("errorLog");
+  });
+  await page.getByTestId("export-log").click();
+  await expect(page.getByTestId("sync-status")).toHaveText(/暂无错误日志/);
+  await page.close();
+});

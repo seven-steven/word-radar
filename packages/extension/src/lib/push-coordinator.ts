@@ -6,6 +6,7 @@
  * 下一次运行会重新读取。
  */
 import { BbdcAuthError, type BbdcClient } from "./bbdc-client.js";
+import type { ErrorLogEvent } from "./error-log.js";
 import type { WordEntry } from "@word-radar/core";
 
 export type PushPhase = "idle" | "running" | "paused" | "completed";
@@ -35,6 +36,8 @@ export interface PushCoordinatorOptions {
   repository: PushRepository;
   sleep?: (milliseconds: number) => Promise<void>;
   onProgress?: (progress: PushProgress) => void;
+  /** 错误日志钩子（issue #25）：接口失败/重试耗尽/登录失效暂停时上报。 */
+  onError?: (event: ErrorLogEvent) => void;
 }
 
 const RETRY_DELAYS: readonly [number, number, number] = [0, 800, 2000];
@@ -45,6 +48,7 @@ export class PushCoordinator {
   private readonly repository: PushRepository;
   private readonly sleep: (milliseconds: number) => Promise<void>;
   private readonly onProgress?: (progress: PushProgress) => void;
+  private readonly onError?: (event: ErrorLogEvent) => void;
   private running: Promise<PushProgress> | null = null;
   private progress: PushProgress = emptyProgress();
 
@@ -53,6 +57,7 @@ export class PushCoordinator {
     this.repository = options.repository;
     this.sleep = options.sleep ?? defaultSleep;
     this.onProgress = options.onProgress;
+    this.onError = options.onError;
   }
 
   getStatus(): PushProgress {
@@ -90,8 +95,10 @@ export class PushCoordinator {
           }
         } catch (error) {
           if (isAuthError(error)) {
+            this.onError?.({ stage: "push-pause", word: entry.lemma, summary: errorMessage(error) });
             return this.pause(error);
           }
+          this.onError?.({ stage: "push", word: entry.lemma, summary: errorMessage(error) });
           this.update({
             ...this.progress,
             failed: this.progress.failed + 1,
@@ -111,7 +118,11 @@ export class PushCoordinator {
       this.update(final);
       return final;
     } catch (error) {
-      if (isAuthError(error)) return this.pause(error);
+      if (isAuthError(error)) {
+        this.onError?.({ stage: "push-pause", summary: errorMessage(error) });
+        return this.pause(error);
+      }
+      this.onError?.({ stage: "push", summary: errorMessage(error) });
       const paused = {
         ...this.progress,
         phase: "paused" as const,

@@ -33,6 +33,7 @@ import {
   retryPush,
 } from "./lib/sw-channel.js";
 import { browserCsvFileGateway } from "./lib/csv-file.js";
+import { defaultErrorLogStorage, formatErrorLog, readErrorLog } from "./lib/error-log.js";
 import type { PushStatus } from "./lib/messages.js";
 
 const BBDC_HOME_URL = "https://bbdc.cn/";
@@ -61,6 +62,7 @@ const pushFailedEl = document.querySelector<HTMLElement>('[data-testid="push-fai
 const exportCsvButton = document.querySelector<HTMLButtonElement>('[data-testid="export-csv"]');
 const importCsvButton = document.querySelector<HTMLButtonElement>('[data-testid="import-csv"]');
 const syncStatusEl = document.querySelector<HTMLElement>('[data-testid="sync-status"]');
+const exportLogButton = document.querySelector<HTMLButtonElement>('[data-testid="export-log"]');
 const confirmSection = document.querySelector<HTMLElement>('[data-testid="confirm-section"]');
 const confirmSummaryEl = document.querySelector<HTMLElement>('[data-testid="confirm-summary"]');
 const confirmPushButton = document.querySelector<HTMLButtonElement>('[data-testid="confirm-push"]');
@@ -134,10 +136,19 @@ function renderSyncStatus(text: string): void {
 
 /** 导出文件名：word-radar-YYYYMMDD-HHmm.csv（本地时区）。 */
 function csvExportFileName(now: Date = new Date()): string {
+  return exportFileName("csv", now);
+}
+
+/** 导出日志文件名：word-radar-YYYYMMDD-HHmm.log（本地时区，issue #25）。 */
+function logExportFileName(now: Date = new Date()): string {
+  return exportFileName("log", now);
+}
+
+function exportFileName(extension: string, now: Date): string {
   const pad = (value: number): string => String(value).padStart(2, "0");
   return (
     `word-radar-${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}` +
-    `-${pad(now.getHours())}${pad(now.getMinutes())}.csv`
+    `-${pad(now.getHours())}${pad(now.getMinutes())}.${extension}`
   );
 }
 
@@ -155,6 +166,28 @@ async function exportCsv(): Promise<void> {
     }
   } finally {
     if (exportCsvButton) exportCsvButton.disabled = false;
+  }
+}
+
+/**
+ * 导出日志（issue #25）：读 storage.local 环形缓冲的错误日志 → 可读文本下载。
+ * 直读 storage.local（扩展自身存储，无需消息转发、零新权限）。
+ */
+async function exportLog(): Promise<void> {
+  if (exportLogButton) exportLogButton.disabled = true;
+  renderSyncStatus("导出中…");
+  try {
+    const records = await readErrorLog(defaultErrorLogStorage());
+    if (records.length === 0) {
+      renderSyncStatus("暂无错误日志");
+      return;
+    }
+    browserCsvFileGateway.download(logExportFileName(), formatErrorLog(records));
+    renderSyncStatus(`已导出 ${records.length} 条错误日志`);
+  } catch {
+    renderSyncStatus("导出日志失败");
+  } finally {
+    if (exportLogButton) exportLogButton.disabled = false;
   }
 }
 
@@ -305,6 +338,10 @@ exportCsvButton?.addEventListener("click", () => {
 
 importCsvButton?.addEventListener("click", () => {
   void importCsvFromFile();
+});
+
+exportLogButton?.addEventListener("click", () => {
+  void exportLog();
 });
 
 // 推送进行中每 ~500ms 拉一次状态，结束即停。

@@ -458,3 +458,71 @@ describe("PushCoordinator 确认闸门后的推送输入（issue #22）", () => 
     expect(repository.listPending).not.toHaveBeenCalled();
   });
 });
+
+describe("PushCoordinator 错误日志钩子（issue #25）", () => {
+  it("单词推送失败（重试耗尽）：onError 收到 stage=push + 词 + 摘要", async () => {
+    const client = makeClient({
+      addWord: vi.fn(async () => {
+        throw new Error("network down");
+      }),
+    });
+    const repository = makeRepository([makeEntry("run")]);
+    const onError = vi.fn();
+    const coordinator = new PushCoordinator({ client, repository, sleep: makeSleep().sleep, onError });
+
+    const result = await coordinator.start();
+
+    expect(result.failed).toBe(1);
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(onError).toHaveBeenCalledWith({ stage: "push", word: "run", summary: "network down" });
+  });
+
+  it("登录失效暂停：onError 收到 stage=push-pause + 词", async () => {
+    const authError = new BbdcAuthError("bbdc HTTP 401", { kind: "http", status: 401 });
+    const client = makeClient({
+      checkExisting: vi.fn(async () => {
+        throw authError;
+      }),
+    });
+    const repository = makeRepository([makeEntry("run")]);
+    const onError = vi.fn();
+    const coordinator = new PushCoordinator({ client, repository, sleep: makeSleep().sleep, onError });
+
+    const result = await coordinator.start();
+
+    expect(result.phase).toBe("paused");
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(onError).toHaveBeenCalledWith({
+      stage: "push-pause",
+      word: "run",
+      summary: "bbdc HTTP 401",
+    });
+  });
+
+  it("checkLogin 登录失效：onError 收到 stage=push-pause（无词）", async () => {
+    const client = makeClient({
+      checkLogin: vi.fn(async () => {
+        throw new BbdcAuthError("not logged in", { kind: "http", status: 401 });
+      }),
+    });
+    const repository = makeRepository([makeEntry("run")]);
+    const onError = vi.fn();
+    const coordinator = new PushCoordinator({ client, repository, sleep: makeSleep().sleep, onError });
+
+    const result = await coordinator.start();
+
+    expect(result.phase).toBe("paused");
+    expect(onError).toHaveBeenCalledWith({ stage: "push-pause", summary: "not logged in" });
+  });
+
+  it("成功路径不上报 onError", async () => {
+    const client = makeClient();
+    const repository = makeRepository([makeEntry("run")]);
+    const onError = vi.fn();
+    const coordinator = new PushCoordinator({ client, repository, sleep: makeSleep().sleep, onError });
+
+    await coordinator.start();
+
+    expect(onError).not.toHaveBeenCalled();
+  });
+});

@@ -749,3 +749,91 @@ describe("createBackgroundListener 确认闸门（issue #22）", () => {
     expect(coordinator.start).not.toHaveBeenCalled();
   });
 });
+
+describe("createBackgroundListener 错误日志（issue #25）", () => {
+  const flush = async (): Promise<void> => {
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  };
+
+  function fakeErrorLogger(): { log: ReturnType<typeof vi.fn> } {
+    return { log: vi.fn() };
+  }
+
+  it("确认失败（mergeCollected 抛错）：应答 confirm-failed 且批次保留，错误写日志", async () => {
+    const repository = fakeRepository();
+    repository.mergeCollected = vi.fn(async () => {
+      throw new Error("idb write failed");
+    });
+    const errorLogger = fakeErrorLogger();
+    const coordinator = fakePushCoordinator();
+    const listener = createBackgroundListener({ repository, pushCoordinator: coordinator, errorLogger });
+
+    listener({ type: WORDS_COLLECTED, entries: [{ lemma: "run", flags: 0 }] }, {}, vi.fn());
+    await flush();
+
+    const sendResponse = vi.fn();
+    const keep = listener({ type: CONFIRM_COLLECTED }, {}, sendResponse);
+    expect(keep).toBe(true);
+    await flush();
+
+    expect(sendResponse).toHaveBeenCalledWith({ ok: false, error: "confirm-failed" });
+    expect(coordinator.start).not.toHaveBeenCalled();
+    expect(errorLogger.log).toHaveBeenCalledTimes(1);
+    const event = errorLogger.log.mock.calls[0]?.[0] as { stage: string; summary: string };
+    expect(event.stage).toBe("confirm");
+    expect(event.summary).toContain("idb write failed");
+    // 批次保留：再确认仍会尝试合并
+    listener({ type: CONFIRM_COLLECTED }, {}, vi.fn());
+    await flush();
+    expect(repository.mergeCollected).toHaveBeenCalledTimes(2);
+  });
+
+  it("IMPORT_CSV 解析失败：应答错误且错误（含文件名）写日志", async () => {
+    const repository = fakeRepository();
+    const errorLogger = fakeErrorLogger();
+    const listener = createBackgroundListener({ repository, pushCoordinator: fakePushCoordinator(), errorLogger });
+    const sendResponse = vi.fn();
+
+    const keep = listener(
+      {
+        type: IMPORT_CSV,
+        csvText: "lemma,flags\nbroken-no-flags\n",
+        fileName: "bad.csv",
+      },
+      {},
+      sendResponse,
+    );
+    expect(keep).toBe(true);
+    await flush();
+
+    expect(sendResponse.mock.calls[0]?.[0]).toMatchObject({ ok: false });
+    expect(errorLogger.log).toHaveBeenCalledTimes(1);
+    const event = errorLogger.log.mock.calls[0]?.[0] as { stage: string; summary: string };
+    expect(event.stage).toBe("import");
+    expect(event.summary).toContain("bad.csv");
+    expect(repository.mergeCollected).not.toHaveBeenCalled();
+  });
+
+  it("IMPORT_CSV 仓库查询失败：错误写日志", async () => {
+    const repository = fakeRepository();
+    repository.countNew = vi.fn(async () => {
+      throw new Error("countNew boom");
+    });
+    const errorLogger = fakeErrorLogger();
+    const listener = createBackgroundListener({ repository, pushCoordinator: fakePushCoordinator(), errorLogger });
+    const sendResponse = vi.fn();
+
+    listener(
+      { type: IMPORT_CSV, csvText: "lemma,flags\nrun,0\n", fileName: "a.csv" },
+      {},
+      sendResponse,
+    );
+    await flush();
+
+    expect(sendResponse).toHaveBeenCalledWith({ ok: false, error: "import-failed" });
+    expect(errorLogger.log).toHaveBeenCalledTimes(1);
+    const event = errorLogger.log.mock.calls[0]?.[0] as { stage: string; summary: string };
+    expect(event.stage).toBe("import");
+    expect(event.summary).toContain("countNew boom");
+  });
+});

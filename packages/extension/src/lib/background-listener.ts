@@ -24,6 +24,7 @@ import {
 import { createBbdcClient, type BbdcClient } from "./bbdc-client.js";
 import { chromeActionBadge } from "./action-badge.js";
 import { PushCoordinator } from "./push-coordinator.js";
+import { createErrorLogger, type ErrorLogger } from "./error-log.js";
 
 /** background 写入的 IndexedDB 仓储边界（service worker 独占）。 */
 export interface BackgroundRepository {
@@ -61,6 +62,8 @@ export interface BackgroundListenerDeps {
   /** 注入 action badge 网关（默认 lazy 创建 chromeActionBadge）。 */
   actionBadge?: ActionBadgeGateway;
   pushCoordinator?: PushCoordinator;
+  /** 错误日志（issue #25）：默认写 chrome.storage.local 环形缓冲。 */
+  errorLogger?: ErrorLogger;
 }
 
 /**
@@ -90,12 +93,15 @@ export interface BackgroundListenerDeps {
 export function createBackgroundListener(deps: BackgroundListenerDeps) {
   const bbdcClient = deps.bbdcClient ?? defaultBbdcClient();
   const actionBadge = deps.actionBadge ?? defaultActionBadge();
+  const errorLogger = deps.errorLogger ?? createErrorLogger();
   const pushCoordinator = deps.pushCoordinator ?? new PushCoordinator({
     client: bbdcClient,
     repository: deps.repository,
     // MV3 SW idle keepalive：纯 fetch 循环不会重置 SW 的 30s idle 计时器，
     // 长词表推送到一半 SW 会被静默杀掉。穿插一次扩展 API 调用即可重置。
     sleep: swKeepAliveSleep,
+    // 错误日志（issue #25）：推送失败/登录失效暂停写入环形缓冲。
+    onError: (event) => errorLogger.log(event),
   });
   /**
    * 待确认批次：只存活于内存（issue #22）。下一次 WORDS_COLLECTED 覆盖；
@@ -148,7 +154,14 @@ export function createBackgroundListener(deps: BackgroundListenerDeps) {
           sendResponse(counts);
           // 确认即推送：合并完成后非阻塞触发一轮推送全部待推（含 CSV 存量）
           startPushRound();
-        }, () => sendResponse({ ok: false, error: "confirm-failed" }))
+        }, (error: unknown) => {
+          // 确认失败（issue #25）：批次保留 + 错误写环形缓冲
+          errorLogger.log({
+            stage: "confirm",
+            summary: `合并入库失败（批次 ${batch.length} 词已保留待重试）：${errorSummary(error)}`,
+          });
+          sendResponse({ ok: false, error: "confirm-failed" });
+        })
         .catch(() => undefined);
       return true;
     }
@@ -199,9 +212,14 @@ export function createBackgroundListener(deps: BackgroundListenerDeps) {
             pendingBatch = result.entries;
             sendResponse(result.preview);
           } else {
+            // 解析失败（issue #25）：零写入 + 错误写环形缓冲
+            errorLogger.log({ stage: "import", summary: result.error });
             sendResponse(result);
           }
-        }, () => sendResponse({ ok: false, error: "import-failed" }))
+        }, (error: unknown) => {
+          errorLogger.log({ stage: "import", summary: `导入失败：${errorSummary(error)}` });
+          sendResponse({ ok: false, error: "import-failed" });
+        })
         .catch(() => undefined);
       return true;
     }
@@ -300,6 +318,10 @@ function defaultBbdcClient(): BackgroundBbdcClient {
 
 function defaultActionBadge(): ActionBadgeGateway {
   return chromeActionBadge;
+}
+
+function errorSummary(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 /**
