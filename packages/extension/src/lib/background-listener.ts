@@ -231,11 +231,9 @@ export function createBackgroundListener(deps: BackgroundListenerDeps) {
       handleCheckLogin(bbdcClient, pushCoordinator)
         .then(({ loggedIn }) => {
           // badge 与登录状态解耦（issue #26）：未登录不亮 badge，登录失效经
-          // 推送 paused 的 "!" 间接表达；此处仅同步一次合成状态（幂等清空）。
-          renderBadge();
+          // 推送 paused 的 "!" 表达；CHECK_LOGIN 不再写 badge。
           sendResponse(loggedIn ? { loggedIn: true } : { loggedIn: false });
         }, () => {
-          renderBadge();
           sendResponse({ ok: false, error: "check-login-failed" });
         })
         .catch(() => undefined);

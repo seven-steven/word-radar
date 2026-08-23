@@ -228,8 +228,8 @@ describe("createBackgroundListener CHECK_LOGIN（T09 + T10）", () => {
     expect(keepChannel).toBe(true);
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
     expect(bbdcClient.checkLogin).toHaveBeenCalledTimes(1);
-    // 已登录：renderBadge 合成结果为 null（清空 badge）
-    expect(badge.set).toHaveBeenLastCalledWith(null);
+    // CHECK_LOGIN 不再写 badge（issue #26）
+    expect(badge.set).not.toHaveBeenCalled();
     expect(sendResponse).toHaveBeenCalledWith({ loggedIn: true });
     expect(push.start).toHaveBeenCalledTimes(1);
   });
@@ -252,8 +252,8 @@ describe("createBackgroundListener CHECK_LOGIN（T09 + T10）", () => {
     listener({ type: CHECK_LOGIN }, {}, sendResponse);
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
 
-    // idle + 无待确认批次 → 合成 null（幂等清空），绝不是 "!"
-    expect(badge.set).toHaveBeenLastCalledWith(null);
+    // CHECK_LOGIN 不写 badge（issue #26）
+    expect(badge.set).not.toHaveBeenCalled();
     expect(sendResponse).toHaveBeenCalledWith({ loggedIn: false });
     expect(push.start).not.toHaveBeenCalled();
   });
@@ -279,7 +279,7 @@ describe("createBackgroundListener CHECK_LOGIN（T09 + T10）", () => {
     listener({ type: CHECK_LOGIN }, {}, sendResponse);
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
 
-    expect(badge.set).toHaveBeenLastCalledWith(null);
+    expect(badge.set).not.toHaveBeenCalled();
     expect(sendResponse).toHaveBeenCalledWith({ loggedIn: false });
     expect(push.start).not.toHaveBeenCalled();
   });
@@ -304,7 +304,7 @@ describe("createBackgroundListener CHECK_LOGIN（T09 + T10）", () => {
     listener({ type: CHECK_LOGIN }, {}, sendResponse);
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
 
-    expect(badge.set).toHaveBeenLastCalledWith(null);
+    expect(badge.set).not.toHaveBeenCalled();
     expect(sendResponse).toHaveBeenCalledWith({ loggedIn: false });
     expect(push.start).not.toHaveBeenCalled();
   });
