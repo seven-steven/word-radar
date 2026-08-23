@@ -350,6 +350,48 @@ describe("PushCoordinator 进度回调", () => {
     expect(phases[0]).toBe("running");
     expect(phases[phases.length - 1]).toBe("completed");
   });
+
+  it("进度事件按词发射且分类正确：成功/已存在/失败逐词累加，pending 递减（issue #23）", async () => {
+    const client = makeClient({
+      checkExisting: vi.fn(async (word: string) => {
+        if (word === "dup") return { exists: true };
+        if (word === "boom") throw new BbdcHttpError("bbdc HTTP 404", 404);
+        return { exists: false };
+      }),
+    });
+    const repository = makeRepository([
+      makeEntry("run"),   // 成功
+      makeEntry("dup"),   // 远端已存在
+      makeEntry("boom"),  // 4xx 不重试 → 失败
+    ]);
+    const { sleep } = makeSleep();
+    const events: Array<{ processed: number; succeeded: number; existing: number; failed: number; pending: number; current?: string }> = [];
+    const coordinator = new PushCoordinator({
+      client,
+      repository,
+      sleep,
+      onProgress: (p) => events.push({
+        processed: p.processed,
+        succeeded: p.succeeded,
+        existing: p.existing,
+        failed: p.failed,
+        pending: p.pending,
+        current: p.current,
+      }),
+    });
+
+    const result = await coordinator.start();
+
+    // 每词处理完成后各有一条 processed 递增的事件（current=undefined 的
+    // 词粒度事件），分类计数逐词累加、pending 递减
+    const perWord = events.filter((e) => e.processed > 0 && e.current === undefined);
+    expect(perWord.slice(0, 3).map((e) => e.processed)).toEqual([1, 2, 3]);
+    expect(perWord.slice(0, 3).map((e) => e.succeeded)).toEqual([1, 1, 1]);
+    expect(perWord.slice(0, 3).map((e) => e.existing)).toEqual([0, 1, 1]);
+    expect(perWord.slice(0, 3).map((e) => e.failed)).toEqual([0, 0, 1]);
+    expect(perWord.slice(0, 3).map((e) => e.pending)).toEqual([2, 1, 0]);
+    expect(result.phase).toBe("completed");
+  });
 });
 
 describe("PushCoordinator 初始 getStatus", () => {

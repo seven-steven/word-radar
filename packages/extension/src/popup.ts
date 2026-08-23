@@ -40,6 +40,7 @@ const BBDC_HOME_URL = "https://bbdc.cn/";
 
 const totalEl = document.querySelector<HTMLElement>('[data-testid="total"]');
 const pendingEl = document.querySelector<HTMLElement>('[data-testid="pending"]');
+const pushedEl = document.querySelector<HTMLElement>('[data-testid="pushed"]');
 const statusEl = document.querySelector<HTMLElement>('[data-testid="status"]');
 const versionEl = document.querySelector<HTMLElement>('[data-testid="version"]');
 const collectButton = document.querySelector<HTMLButtonElement>(
@@ -75,6 +76,11 @@ if (versionEl) {
 function renderCounts(total: number | null, pending: number | null): void {
   if (totalEl) totalEl.textContent = total === null ? "—" : String(total);
   if (pendingEl) pendingEl.textContent = pending === null ? "—" : String(pending);
+  // 已推送 = 词库总词数 - 待推（推送在 SW 逐词 markPushed，待推递减 → 已推送递增）
+  if (pushedEl) {
+    pushedEl.textContent =
+      total === null || pending === null ? "—" : String(Math.max(0, total - pending));
+  }
 }
 
 type LoginState = "unknown" | "logged-in" | "logged-out";
@@ -95,7 +101,7 @@ function renderLogin(state: LoginState): void {
 
 function renderPushStatus(status: PushStatus): void {
   const label = status.phase === "running"
-    ? `推送中 ${status.processed}/${status.total}${status.current ? `：${status.current}` : ""}`
+    ? `推送中 已推送 ${status.processed}/${status.total} · 待推 ${status.pending}`
     : status.phase === "paused"
       ? `推送已暂停${status.error ? `：${status.error}` : ""}`
       : status.phase === "completed"
@@ -350,14 +356,13 @@ function startPushStatusPolling(): void {
   if (pushStatusTimer !== undefined) return;
   const tick = async (): Promise<void> => {
     await refreshPushStatus();
+    // 词库计数（待推/已推送）随 SW 的逐词 markPushed 实时变化，轮询期间同步刷新
+    await refreshCounts();
     const phase = pushStatusEl?.dataset.phase;
     if (phase === "running") {
       pushStatusTimer = window.setTimeout(tick, 500);
     } else {
       pushStatusTimer = undefined;
-      // 推送结束（completed/paused）：词库 pending 已被 SW 改写，拉一次最新计数，
-      // 否则「待推 N」冻结在推送前的值（e2e 发现的产品 bug）。
-      await refreshCounts();
     }
   };
   pushStatusTimer = window.setTimeout(tick, 0);

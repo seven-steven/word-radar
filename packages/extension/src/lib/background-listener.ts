@@ -22,7 +22,7 @@ import {
   type PushStatus,
 } from "./messages.js";
 import { createBbdcClient, type BbdcClient } from "./bbdc-client.js";
-import { chromeActionBadge } from "./action-badge.js";
+import { chromeActionBadge, composeBadge } from "./action-badge.js";
 import { PushCoordinator } from "./push-coordinator.js";
 import { createErrorLogger, type ErrorLogger } from "./error-log.js";
 
@@ -52,7 +52,7 @@ export interface BackgroundBbdcClient {
 }
 
 export interface ActionBadgeGateway {
-  set(text: string | null): Promise<void>;
+  set(text: string | null, color?: string): Promise<void>;
 }
 
 export interface BackgroundListenerDeps {
@@ -100,6 +100,8 @@ export function createBackgroundListener(deps: BackgroundListenerDeps) {
     // MV3 SW idle keepalive：纯 fetch 循环不会重置 SW 的 30s idle 计时器，
     // 长词表推送到一半 SW 会被静默杀掉。穿插一次扩展 API 调用即可重置。
     sleep: swKeepAliveSleep,
+    // badge 进度（issue #23）：每词进度事件驱动 x/y 数字进度。
+    onProgress: () => renderBadge(),
     // 错误日志（issue #25）：推送失败/登录失效暂停写入环形缓冲。
     onError: (event) => errorLogger.log(event),
   });
@@ -108,6 +110,20 @@ export function createBackgroundListener(deps: BackgroundListenerDeps) {
    * DISCARD_COLLECTED / 确认后清空；SW 被杀即丢弃——永不持久化。
    */
   let pendingBatch: WordEntry[] | null = null;
+  /** badge 合成状态（issue #23）：待确认批次提示 + 登录引导标记。 */
+  let loginBadgeBad = false;
+
+  /** 按优先级合成并写入 badge：推送 x/y > 暂停/完成回执 > 待确认 ? > 未登录 !。 */
+  const renderBadge = (): void => {
+    const spec = composeBadge({
+      push: pushCoordinator.getStatus(),
+      hasPendingBatch: pendingBatch !== null,
+      loggedOut: loginBadgeBad,
+    });
+    // badge 写失败不阻塞消息处理（SW 重启后 chrome.action 短暂不可用等）
+    void (spec ? actionBadge.set(spec.text, spec.color) : actionBadge.set(null))
+      .catch(() => undefined);
+  };
 
   /** 合并入库后触发一轮推送（确认即推送是唯一路径，无自动推送开关）。 */
   const startPushRound = (): void => {
@@ -135,6 +151,7 @@ export function createBackgroundListener(deps: BackgroundListenerDeps) {
       void handleWordsCollected(message.entries, deps.repository)
         .then((preview) => {
           pendingBatch = message.entries;
+          renderBadge(); // 待确认批次 → badge "?" 提示（issue #23）
           sendResponse(preview);
         }, () => sendResponse({ ok: false, error: "preview-failed" }))
         .catch(() => undefined);
@@ -154,6 +171,7 @@ export function createBackgroundListener(deps: BackgroundListenerDeps) {
           sendResponse(counts);
           // 确认即推送：合并完成后非阻塞触发一轮推送全部待推（含 CSV 存量）
           startPushRound();
+          renderBadge(); // 批次清空：badge 转入推送 x/y 或回执（issue #23）
         }, (error: unknown) => {
           // 确认失败（issue #25）：批次保留 + 错误写环形缓冲
           errorLogger.log({
@@ -167,6 +185,7 @@ export function createBackgroundListener(deps: BackgroundListenerDeps) {
     }
     if (isDiscardCollectedMessage(message)) {
       pendingBatch = null;
+      renderBadge(); // 批次丢弃：撤销 "?" 提示
       return false;
     }
     if (isGetCountsMessage(message)) {
@@ -192,8 +211,18 @@ export function createBackgroundListener(deps: BackgroundListenerDeps) {
       return false;
     }
     if (isCheckLoginMessage(message)) {
-      handleCheckLogin(bbdcClient, actionBadge, pushCoordinator)
-        .then(sendResponse, () => sendResponse({ ok: false, error: "check-login-failed" }))
+      handleCheckLogin(bbdcClient, pushCoordinator)
+        .then(({ loggedIn, loggedOut }) => {
+          // badge 状态经 renderBadge 合成（issue #23）：登录引导与其他 badge
+          // 状态（推送回执/待确认提示）按优先级共存，不再直接独占写入。
+          loginBadgeBad = loggedOut;
+          renderBadge();
+          sendResponse(loggedIn ? { loggedIn: true } : { loggedIn: false });
+        }, () => {
+          loginBadgeBad = true;
+          renderBadge();
+          sendResponse({ ok: false, error: "check-login-failed" });
+        })
         .catch(() => undefined);
       return true;
     }
@@ -210,6 +239,7 @@ export function createBackgroundListener(deps: BackgroundListenerDeps) {
         .then((result) => {
           if ("entries" in result) {
             pendingBatch = result.entries;
+            renderBadge(); // 导入驻留待确认批次 → badge "?"（issue #23）
             sendResponse(result.preview);
           } else {
             // 解析失败（issue #25）：零写入 + 错误写环形缓冲
@@ -284,27 +314,26 @@ async function handleImportCsv(
   return { entries, preview: { total: entries.length, newCount } };
 }
 
+/**
+ * T09 登录检查（badge 写入已收口到 renderBadge）：
+ * 返回 {loggedIn, loggedOut}——loggedOut 同时覆盖「未登录」与「保守视为未登录」。
+ */
 async function handleCheckLogin(
   bbdcClient: BackgroundBbdcClient,
-  actionBadge: ActionBadgeGateway,
   pushCoordinator: PushCoordinator,
-): Promise<CheckLoginResponse> {
+): Promise<{ loggedIn: boolean; loggedOut: boolean }> {
   try {
     const result = await bbdcClient.checkLogin();
     if (result.loggedIn) {
-      // 已登录：清空 badge（用户之前若被标"!"，现在撤销）
-      await actionBadge.set(null);
       // 「确认即推送是唯一路径」指 采集/导入→推送 这条主路径（issue #22）；
       // 这里是登录恢复后对存量待推的重推，属于允许的恢复路径，不是自动推送开关。
       void pushCoordinator.start();
-      return { loggedIn: true };
+      return { loggedIn: true, loggedOut: false };
     }
-    await actionBadge.set("!");
-    return { loggedIn: false };
+    return { loggedIn: false, loggedOut: true };
   } catch {
-    // 任何 BbdcAuthError / BbdcApiError / 网络错误：保守视为未登录 + 提示 badge
-    await actionBadge.set("!");
-    return { loggedIn: false };
+    // 任何 BbdcAuthError / BbdcApiError / 网络错误：保守视为未登录
+    return { loggedIn: false, loggedOut: true };
   }
 }
 

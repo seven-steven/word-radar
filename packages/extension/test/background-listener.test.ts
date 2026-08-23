@@ -228,7 +228,8 @@ describe("createBackgroundListener CHECK_LOGIN（T09 + T10）", () => {
     expect(keepChannel).toBe(true);
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
     expect(bbdcClient.checkLogin).toHaveBeenCalledTimes(1);
-    expect(badge.set).toHaveBeenCalledWith(null);
+    // 已登录：renderBadge 合成结果为 null（清空 badge）
+    expect(badge.set).toHaveBeenLastCalledWith(null);
     expect(sendResponse).toHaveBeenCalledWith({ loggedIn: true });
     expect(push.start).toHaveBeenCalledTimes(1);
   });
@@ -251,7 +252,7 @@ describe("createBackgroundListener CHECK_LOGIN（T09 + T10）", () => {
     listener({ type: CHECK_LOGIN }, {}, sendResponse);
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
 
-    expect(badge.set).toHaveBeenCalledWith("!");
+    expect(badge.set).toHaveBeenLastCalledWith("!", "#b00000");
     expect(sendResponse).toHaveBeenCalledWith({ loggedIn: false });
     expect(push.start).not.toHaveBeenCalled();
   });
@@ -277,7 +278,7 @@ describe("createBackgroundListener CHECK_LOGIN（T09 + T10）", () => {
     listener({ type: CHECK_LOGIN }, {}, sendResponse);
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
 
-    expect(badge.set).toHaveBeenCalledWith("!");
+    expect(badge.set).toHaveBeenLastCalledWith("!", "#b00000");
     expect(sendResponse).toHaveBeenCalledWith({ loggedIn: false });
     expect(push.start).not.toHaveBeenCalled();
   });
@@ -302,7 +303,7 @@ describe("createBackgroundListener CHECK_LOGIN（T09 + T10）", () => {
     listener({ type: CHECK_LOGIN }, {}, sendResponse);
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
 
-    expect(badge.set).toHaveBeenCalledWith("!");
+    expect(badge.set).toHaveBeenLastCalledWith("!", "#b00000");
     expect(sendResponse).toHaveBeenCalledWith({ loggedIn: false });
     expect(push.start).not.toHaveBeenCalled();
   });
@@ -835,5 +836,166 @@ describe("createBackgroundListener 错误日志（issue #25）", () => {
     const event = errorLogger.log.mock.calls[0]?.[0] as { stage: string; summary: string };
     expect(event.stage).toBe("import");
     expect(event.summary).toContain("countNew boom");
+  });
+});
+
+describe("createBackgroundListener 推送进度 + badge 回执（issue #23）", () => {
+  const flush = async (ms = 0): Promise<void> => {
+    await new Promise<void>((resolve) => setTimeout(resolve, ms));
+  };
+
+  /** 慢速 client：每个请求延迟 ms，模拟真实网络下的长推送轮。 */
+  function slowBbdcClient(ms: number, overrides: Partial<BackgroundBbdcClient> = {}): BackgroundBbdcClient {
+    const delay = async <T>(value: T): Promise<T> => {
+      await flush(ms);
+      return value;
+    };
+    return fakeBbdcClient({
+      checkExisting: vi.fn(async () => delay({ exists: false })),
+      lookupDefinition: vi.fn(async () => delay(null)),
+      addWord: vi.fn(async () => delay(undefined)),
+      ...overrides,
+    });
+  }
+
+  /** 真实 PushCoordinator（不注入 mock）：驱动 listener 内部推送轮。 */
+  function listenerWithRealCoordinator(
+    repository: ReturnType<typeof fakeRepository>,
+    bbdcClient: BackgroundBbdcClient,
+    badge: ReturnType<typeof fakeActionBadge>,
+  ) {
+    return createBackgroundListener({ repository, bbdcClient, actionBadge: badge });
+  }
+
+  /** 采集（等批次驻留）→ 确认，推送轮非阻塞启动。 */
+  async function confirmBatch(
+    listener: ReturnType<typeof createBackgroundListener>,
+    entries: WordEntry[],
+  ): Promise<void> {
+    listener({ type: WORDS_COLLECTED, entries }, {}, vi.fn());
+    await flush(); // WORDS_COLLECTED 异步驻留批次，确认前必须等它落位
+    listener({ type: CONFIRM_COLLECTED }, {}, vi.fn());
+    await flush(); // 确认异步链（合并 → 触发推送轮）完成，phase 离开 idle
+  }
+
+  function queryStatus(
+    listener: ReturnType<typeof createBackgroundListener>,
+  ): PushStatus {
+    let status: PushStatus | undefined;
+    listener({ type: GET_PUSH_STATUS }, {}, (value: PushStatus) => {
+      status = value;
+    });
+    expect(status).toBeDefined();
+    return status as PushStatus;
+  }
+
+  /** 轮询等待推送轮离开 running（真实 coordinator 默认 400ms 词间节奏）。 */
+  async function waitForTerminal(
+    listener: ReturnType<typeof createBackgroundListener>,
+    timeoutMs = 8_000,
+  ): Promise<PushStatus> {
+    const start = Date.now();
+    for (;;) {
+      const status = queryStatus(listener);
+      if (status.phase !== "running") return status;
+      if (Date.now() - start > timeoutMs) throw new Error(`push still running: ${JSON.stringify(status)}`);
+      await flush(100);
+    }
+  }
+
+  it("推送中 GET_PUSH_STATUS 反映实时进度；重开弹窗（再次查询）连上同一轮的当前进度", async () => {
+    const repository = fakeRepository();
+    repository.mergeCollected = vi.fn(async () => ({ total: 3, pending: 3 }));
+    repository.listPending = vi.fn(async () => [
+      { lemma: "a", flags: 0 },
+      { lemma: "b", flags: 0 },
+      { lemma: "c", flags: 0 },
+    ]);
+    const badge = fakeActionBadge();
+    const listener = listenerWithRealCoordinator(repository, slowBbdcClient(15), badge);
+
+    await confirmBatch(listener, [{ lemma: "a", flags: 0 }]);
+
+    // 轮次进行中多次查询（模拟 popup 关闭再重开）：phase=running 且
+    // processed 单调不减、计数持续前进
+    const seen: number[] = [];
+    for (let i = 0; i < 12 && seen.filter((v, idx, arr) => idx === 0 || v > arr[idx - 1]).length < 3; i += 1) {
+      const status = queryStatus(listener);
+      expect(status.phase === "running" || status.phase === "completed").toBe(true);
+      if (status.phase === "running") {
+        seen.push(status.processed);
+        expect(status.total).toBe(3);
+        expect(status.processed + status.pending).toBe(3);
+        expect(status.succeeded + status.existing + status.failed).toBe(status.processed);
+      }
+      await flush(20);
+    }
+    expect(seen.length).toBeGreaterThanOrEqual(2); // 至少两次 running 快照（重开连上）
+
+    // 推送在 SW 侧自行跑完（popup 早已"关闭"）
+    const final = await waitForTerminal(listener);
+    expect(final.phase).toBe("completed");
+    expect(final.processed).toBe(3);
+    expect(final.succeeded).toBe(3);
+  });
+
+  it("badge：待确认批次 \"?\" → 推送中 x/y → 完成 \"✓\"（绿）", async () => {
+    const repository = fakeRepository();
+    repository.mergeCollected = vi.fn(async () => ({ total: 2, pending: 2 }));
+    repository.listPending = vi.fn(async () => [
+      { lemma: "a", flags: 0 },
+      { lemma: "b", flags: 0 },
+    ]);
+    const badge = fakeActionBadge();
+    const listener = listenerWithRealCoordinator(repository, slowBbdcClient(10), badge);
+
+    // 采集驻留 → badge "?"
+    listener({ type: WORDS_COLLECTED, entries: [{ lemma: "a", flags: 0 }] }, {}, vi.fn());
+    await flush();
+    expect(badge.set).toHaveBeenLastCalledWith("?", "#888888");
+
+    // 确认 → 推送轮启动 → badge 逐步 x/y
+    listener({ type: CONFIRM_COLLECTED }, {}, vi.fn());
+    await flush(30);
+    const texts = badge.set.mock.calls.map((call) => call[0]);
+    expect(texts.some((t) => /^\d+\/2$/.test(String(t)))).toBe(true);
+
+    await waitForTerminal(listener);
+    expect(badge.set).toHaveBeenLastCalledWith("✓", "#0a7d2c");
+  });
+
+  it("badge：登录失效暂停 → \"!\"（红）回执", async () => {
+    const repository = fakeRepository();
+    repository.mergeCollected = vi.fn(async () => ({ total: 1, pending: 1 }));
+    repository.listPending = vi.fn(async () => [{ lemma: "a", flags: 0 }]);
+    const badge = fakeActionBadge();
+    const bbdcClient = slowBbdcClient(5, {
+      checkExisting: vi.fn(async () => {
+        throw new (await import("../src/lib/bbdc-client.js")).BbdcAuthError("401", {
+          kind: "http",
+          status: 401,
+        });
+      }),
+    });
+    const listener = listenerWithRealCoordinator(repository, bbdcClient, badge);
+
+    await confirmBatch(listener, [{ lemma: "a", flags: 0 }]);
+    const final = await waitForTerminal(listener);
+
+    expect(final.phase).toBe("paused");
+    expect(badge.set).toHaveBeenLastCalledWith("!", "#b00000");
+  });
+
+  it("badge：取消丢弃待确认批次 → \"?\" 提示撤销", async () => {
+    const repository = fakeRepository();
+    const badge = fakeActionBadge();
+    const listener = listenerWithRealCoordinator(repository, slowBbdcClient(5), badge);
+
+    listener({ type: WORDS_COLLECTED, entries: [{ lemma: "a", flags: 0 }] }, {}, vi.fn());
+    await flush();
+    expect(badge.set).toHaveBeenLastCalledWith("?", "#888888");
+
+    listener({ type: DISCARD_COLLECTED }, {}, vi.fn());
+    expect(badge.set).toHaveBeenLastCalledWith(null);
   });
 });
