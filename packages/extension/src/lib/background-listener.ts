@@ -67,7 +67,8 @@ export interface BackgroundListenerDeps {
  * service worker 的消息分发器（确认闸门定稿，issue #22）：
  * - WORDS_COLLECTED：批次只驻留内存（待确认批次），不写库不推送；
  *   用词库 lemma diff 算新词数，应答 {total,newCount}（零网络请求）
- * - CONFIRM_COLLECTED：确认——批次合并入词库，随后非阻塞触发一轮推送
+ * - CONFIRM_COLLECTED：确认——批次合并入词库（成功才清空待确认批次，
+ *   失败保留以便重试），随后非阻塞触发一轮推送
  *   （覆盖整个待推池，含 CSV 导入的存量）；应答最新计数
  * - DISCARD_COLLECTED：取消——丢弃内存中的待确认批次，不持有通道
  * - GET_COUNTS：返回当前计数
@@ -75,7 +76,10 @@ export interface BackgroundListenerDeps {
  * - CHECK_LOGIN（T09）：调 BbdcClient.checkLogin；成功 → 清除 badge；
  *   失败 → 设 badge "!" 并应答 {loggedIn:false}
  * - EXPORT_CSV（T11）：getAll → core stringify，应答 {ok:true,csv}
- * - IMPORT_CSV（T11）：core parse（失败即应答错误，零写入）→ 合并 → 应答新计数
+ * - IMPORT_CSV（review S-3 改走确认闸门）：core parse（失败即应答错误，
+ *   零写入）→ countNew 算新词 diff → 驻留待确认批次（与采集批次同形态，
+ *   覆盖任何旧批次）→ 应答 {total,newCount}；不写库、不推送，入库与
+ *   推送仅由 CONFIRM_COLLECTED 触发
  *
  * 其他消息一律忽略（返回 false，不持有消息通道）。
  *
@@ -136,9 +140,11 @@ export function createBackgroundListener(deps: BackgroundListenerDeps) {
         sendResponse({ ok: false, error: "no-pending-batch" });
         return false;
       }
-      pendingBatch = null;
+      // 不在此清空批次（review St-1）：mergeCollected 失败时批次必须保留，
+      // 用户重按「确认推送」即可重试；仅在合并成功后清空。
       void handleConfirm(batch, deps.repository)
         .then((counts) => {
+          pendingBatch = null; // 合并成功，批次生命周期结束
           sendResponse(counts);
           // 确认即推送：合并完成后非阻塞触发一轮推送全部待推（含 CSV 存量）
           startPushRound();
@@ -185,11 +191,16 @@ export function createBackgroundListener(deps: BackgroundListenerDeps) {
       return true;
     }
     if (isImportCsvMessage(message)) {
-      handleImportCsv(message.csvText, message.fileName, deps.repository)
-        .then((response) => {
-          sendResponse(response);
-          // 导入合并完成后非阻塞触发一轮推送（待推池不区分来源）
-          if (!("ok" in response && response.ok === false)) startPushRound();
+      // CSV 导入同过确认闸门（review S-3）：解析 + 新词 diff → 驻留待确认
+      // 批次 → 应答预览。不写库、不推送；入库与推送仅由确认动作触发。
+      void handleImportCsv(message.csvText, message.fileName, deps.repository)
+        .then((result) => {
+          if ("entries" in result) {
+            pendingBatch = result.entries;
+            sendResponse(result.preview);
+          } else {
+            sendResponse(result);
+          }
         }, () => sendResponse({ ok: false, error: "import-failed" }))
         .catch(() => undefined);
       return true;
@@ -230,16 +241,20 @@ async function handleExportCsv(
 }
 
 /**
- * T11 导入：先整体解析（core parseWordListCsv），解析失败直接应答
- * {ok:false,error}（包装文件名 + core 报的行号），不产生任何写入；
- * 解析成功才走 mergeCollected（同词 flags 按位或：已推不洗回待推，
- * 新词按 CSV 自带 flags 值进库），随后非阻塞触发一轮推送。
+ * T11 导入（review S-3 改走确认闸门）：先整体解析（core parseWordListCsv），
+ * 解析失败直接返回 {ok:false,error}（包装文件名 + core 报的行号），不产生
+ * 任何写入、不覆盖待确认批次；解析成功算新词 diff（同采集预览，零网络），
+ * 返回 {entries,preview} 由调用方驻留为待确认批次——不直接 mergeCollected。
+ * （确认后的合并语义：同词 flags 按位或，已推不洗回待推。）
  */
 async function handleImportCsv(
   csvText: string,
   fileName: string,
   repository: BackgroundRepository,
-): Promise<ImportCsvResponse> {
+): Promise<
+  | { entries: WordEntry[]; preview: BatchPreview }
+  | { ok: false; error: string }
+> {
   let entries: WordEntry[];
   try {
     entries = parseWordListCsv(csvText);
@@ -247,7 +262,8 @@ async function handleImportCsv(
     const detail = error instanceof Error ? error.message : String(error);
     return { ok: false, error: `${fileName}: ${detail}` };
   }
-  return repository.mergeCollected(entries);
+  const newCount = await repository.countNew(entries);
+  return { entries, preview: { total: entries.length, newCount } };
 }
 
 async function handleCheckLogin(
@@ -260,6 +276,8 @@ async function handleCheckLogin(
     if (result.loggedIn) {
       // 已登录：清空 badge（用户之前若被标"!"，现在撤销）
       await actionBadge.set(null);
+      // 「确认即推送是唯一路径」指 采集/导入→推送 这条主路径（issue #22）；
+      // 这里是登录恢复后对存量待推的重推，属于允许的恢复路径，不是自动推送开关。
       void pushCoordinator.start();
       return { loggedIn: true };
     }

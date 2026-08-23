@@ -23,7 +23,7 @@ function fakeChannel(overrides: Partial<SwChannel> = {}): SwChannel {
     })),
     retryPush: vi.fn(async () => undefined),
     exportCsv: vi.fn(async () => ({ ok: true, csv: "lemma,flags\nrun,0\n" })),
-    importCsv: vi.fn(async () => ({ total: 8, pending: 5 })),
+    importCsv: vi.fn(async () => ({ total: 8, newCount: 5 })),
     ...overrides,
   };
 }
@@ -153,7 +153,7 @@ describe("fetchExportCsv（popup 侧）", () => {
 });
 
 describe("importCsv（popup 侧）", () => {
-  it("向 SW 发 IMPORT_CSV（带文本与文件名）并把 Counts 包成 {ok:true,counts}", async () => {
+  it("向 SW 发 IMPORT_CSV（带文本与文件名）并把 BatchPreview 包成 {ok:true,total,newCount}", async () => {
     const channel = fakeChannel();
 
     const outcome = await importCsv(channel, "lemma,flags\nrun,0\n", "words.csv");
@@ -162,7 +162,8 @@ describe("importCsv（popup 侧）", () => {
       "lemma,flags\nrun,0\n",
       "words.csv",
     );
-    expect(outcome).toEqual({ ok: true, counts: { total: 8, pending: 5 } });
+    // review S-3：导入应答是待确认批次预览，不再是合并后的 Counts
+    expect(outcome).toEqual({ ok: true, total: 8, newCount: 5 });
   });
 
   it("SW 报 {ok:false,error}（坏 CSV）时原样透传错误", async () => {

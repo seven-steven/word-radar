@@ -19,7 +19,7 @@ export type { Counts };
  *   + `CONFIRM_COLLECTED`（确认：批次合并入词库 + 触发一轮推送全部待推）
  *   + `DISCARD_COLLECTED`（取消：丢弃待确认批次）
  * - popup → background（T11）：`EXPORT_CSV`（导出词库为 CSV 文本）
- *   + `IMPORT_CSV`（CSV 文本与词库合并，flags 按位或）
+ *   + `IMPORT_CSV`（CSV 文本同过确认闸门：驻留待确认批次，不直接入库）
  *
  * background 是 WORDS_COLLECTED / GET_COUNTS / MARK_PUSHED / CONFIRM_COLLECTED /
  * DISCARD_COLLECTED / EXPORT_CSV / IMPORT_CSV 的唯一接收方
@@ -115,10 +115,10 @@ export interface ExportCsvMessage {
 }
 
 /**
- * popup → background（T11）：导入一份 CSV 文本，与现有词库同词合并、
- * flags 按位或（已推词不会被洗回待推；新词按 CSV 自带 flags 值进库）。
+ * popup → background（T11，review S-3 改走确认闸门）：导入一份 CSV 文本。
+ * 解析 + 新词 diff 后只驻留待确认批次（与采集批次同形态），应答
+ * `BatchPreview`；合并入库与推送仅由 `CONFIRM_COLLECTED` 触发。
  * 解析失败时不产生任何写入，应答 {ok:false,error}（含文件名与行号）。
- * 应答：成功返回最新 `Counts`，失败返回 `{ok:false,error}`。
  */
 export interface ImportCsvMessage {
   type: typeof IMPORT_CSV;
@@ -132,8 +132,8 @@ export type ExportCsvResponse =
   | { ok: true; csv: string }
   | { ok: false; error: string };
 
-/** service worker → popup 的导入应答：成功为最新计数，失败为错误。 */
-export type ImportCsvResponse = Counts | { ok: false; error: string };
+/** service worker → popup 的导入应答：成功为待确认批次预览，失败为错误。 */
+export type ImportCsvResponse = BatchPreview | { ok: false; error: string };
 
 /**
  * service worker → popup 的登录检查应答：

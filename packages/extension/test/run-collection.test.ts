@@ -57,12 +57,21 @@ describe("runCollection 编排", () => {
     });
   });
 
-  it("SW 应答畸形（非 {total,newCount}）时保守按全部为新词", async () => {
+  it("SW 应答畸形（非 {total,newCount}）时不谎报预览：应答 {ok:false,请重新采集}", async () => {
     const broadcast = vi.fn(async () => undefined); // SW 重启竞态：ack 丢失
 
     const response = await runCollection({ collectText: () => "run", broadcast });
 
-    expect(response).toEqual({ ok: true, total: 1, newCount: 1 });
+    // review S-4：批次未驻留时确认页语义已失效，不能按 newCount=total 谎报
+    expect(response).toEqual({ ok: false, error: "请重新采集" });
+  });
+
+  it("SW 应答缺 newCount 字段同样归入请重新采集", async () => {
+    const broadcast = vi.fn(async () => ({ total: 1 }));
+
+    const response = await runCollection({ collectText: () => "run", broadcast });
+
+    expect(response).toEqual({ ok: false, error: "请重新采集" });
   });
 
   it("broadcast 抛错时不吞掉", async () => {

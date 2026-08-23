@@ -4,6 +4,8 @@
  * 零网络请求）。点「确认推送」→ SW 把待确认批次合并入词库并触发一轮推送
  * 全部待推；点「取消」或关闭弹窗 → 什么都不发生（批次只在内存，不持久化）。
  * 确认即推送是唯一路径，无自动推送开关（issue #22）。
+ * 打开 popup 时的 checkLogin 若发现已登录，会触发一轮存量待推重推——
+ * 那是允许的恢复路径，不与「唯一路径」冲突（见 docs/spec.md 扩展行为）。
  *
  * chrome.* 调用收在两个边界模块里：
  * - active-tab.ts：popup → content（COLLECT_WORDS / 应答）+ 新标签页打开
@@ -157,8 +159,9 @@ async function exportCsv(): Promise<void> {
 }
 
 /**
- * T11 导入：文件网关读本地 CSV → SW 合并（flags 按位或，坏文件零写入）→
- * 成功直接用返回的计数刷新显示；失败显示含文件名与行号的错误。
+ * T11 导入（review S-3 改走确认闸门）：文件网关读本地 CSV → SW 解析并
+ * 驻留待确认批次（坏文件零写入）→ 确认页展示「本次共计导入 N 个单词，
+ * 其中新词 M 个」。确认 = 合并入库 + 一轮推送（同采集）；取消丢弃批次。
  */
 async function importCsvFromFile(): Promise<void> {
   const picked = await browserCsvFileGateway.pickCsvText();
@@ -168,12 +171,9 @@ async function importCsvFromFile(): Promise<void> {
   try {
     const outcome = await importCsv(chromeSwChannel, picked.text, picked.name);
     if (outcome.ok) {
-      renderCounts(outcome.counts.total, outcome.counts.pending);
-      renderSyncStatus(
-        `导入完成：累计 ${outcome.counts.total} / 待推 ${outcome.counts.pending}`,
-      );
-      // 导入可能带来新的待推词，推送状态随即变化
-      await refreshPushStatus();
+      // 批次已驻留 SW 内存：展示确认页（措辞用「导入」，计数语义与采集一致）
+      renderConfirmPage("导入", outcome.total, outcome.newCount);
+      renderSyncStatus(`已解析 ${picked.name}，待确认`);
     } else {
       renderSyncStatus(`导入失败：${outcome.error}`);
     }
@@ -207,10 +207,17 @@ async function checkLogin(): Promise<void> {
   }
 }
 
-/** 确认页：展示待确认批次的总数 / 新词数，并挂起确认 / 取消按钮。 */
-function renderConfirmPage(total: number, newCount: number): void {
+/**
+ * 确认页：展示待确认批次的总数 / 新词数，并挂起确认 / 取消按钮。
+ * source 仅影响措辞（采集 / 导入），计数语义与按钮行为完全一致（review S-3）。
+ */
+function renderConfirmPage(
+  source: "采集" | "导入",
+  total: number,
+  newCount: number,
+): void {
   if (confirmSummaryEl) {
-    confirmSummaryEl.textContent = `本次共计采集 ${total} 个单词，其中新词 ${newCount} 个`;
+    confirmSummaryEl.textContent = `本次共计${source} ${total} 个单词，其中新词 ${newCount} 个`;
   }
   if (confirmSection) confirmSection.hidden = false;
   if (confirmPushButton) confirmPushButton.disabled = false;
@@ -228,7 +235,7 @@ async function collect(): Promise<void> {
     const outcome = await requestCollection(chromeTabsGateway);
     if (outcome.ok) {
       // 确认闸门：采集结果只在 SW 内存（待确认批次），此处仅展示预览
-      renderConfirmPage(outcome.total, outcome.newCount);
+      renderConfirmPage("采集", outcome.total, outcome.newCount);
       if (statusEl) statusEl.textContent = "待确认";
     } else if (statusEl) {
       statusEl.textContent = outcome.error;

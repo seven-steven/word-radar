@@ -27,9 +27,11 @@ export async function runCollection(deps: RunCollectionDeps): Promise<CollectRes
   const text = deps.collectText();
   const entries = extract(text);
   const ack = await deps.broadcast({ type: WORDS_COLLECTED, entries });
-  const total = entries.length;
-  // SW 应答 {total,newCount}；ack 异常（SW 重启竞态等）时保守按全部为新词，
-  // 确认页仍可用，diff 数值以 SW 正常应答为准。
-  const newCount = isBatchPreview(ack) ? ack.newCount : total;
-  return { ok: true, total, newCount };
+  // SW 应答必须是有放回驻留批次的合法 BatchPreview；ack 异常（SW 重启竞态等）
+  // 意味着 SW 内存中没有待确认批次，确认页语义已失效——不能谎报
+  // newCount=total（review S-4），显式要求用户重新采集。
+  if (!isBatchPreview(ack)) {
+    return { ok: false, error: "请重新采集" };
+  }
+  return { ok: true, total: entries.length, newCount: ack.newCount };
 }

@@ -11,7 +11,7 @@ import "fake-indexeddb/auto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { parseWordListCsv } from "@word-radar/core";
 import { createBackgroundListener } from "../src/lib/background-listener.js";
-import { EXPORT_CSV, IMPORT_CSV } from "../src/lib/messages.js";
+import { CONFIRM_COLLECTED, EXPORT_CSV, IMPORT_CSV } from "../src/lib/messages.js";
 import { DB_NAME, createWordRepository } from "../src/lib/word-repository.js";
 import type { PushCoordinator } from "../src/lib/push-coordinator.js";
 
@@ -97,8 +97,8 @@ describe("CSV 导出（EXPORT_CSV）", () => {
   });
 });
 
-describe("CSV 导入（IMPORT_CSV）", () => {
-  it("导入含已推词的 CSV：原已推词状态不变，新词以 flags=0 进入待推", async () => {
+describe("CSV 导入（IMPORT_CSV，review S-3 同过确认闸门）", () => {
+  it("导入含已推词的 CSV：确认后原已推词状态不变，新词以 flags=0 进入待推", async () => {
     const repository = createWordRepository();
     await repository.mergeCollected([{ lemma: "run", flags: 0 }]);
     await repository.markPushed(["run"]);
@@ -108,13 +108,23 @@ describe("CSV 导入（IMPORT_CSV）", () => {
     });
 
     // CSV 里 run 为 flags=0（试图洗回待推），newword 为新词
-    const counts = (await sendMessage(listener, {
+    const preview = (await sendMessage(listener, {
       type: IMPORT_CSV,
       csvText: "lemma,flags\nrun,0\nnewword,0\n",
       fileName: "in.csv",
-    })) as { total: number; pending: number };
+    })) as { total: number; newCount: number };
 
+    // 只驻留批次：预览新词数 = 与词库的 lemma diff（run 已在库，newword 不在）
+    expect(preview).toEqual({ total: 2, newCount: 1 });
+    // 确认前不落库
+    expect(await repository.getAll()).toEqual([{ lemma: "run", flags: 1 }]);
+
+    const counts = (await sendMessage(listener, { type: CONFIRM_COLLECTED })) as {
+      total: number;
+      pending: number;
+    };
     expect(counts).toEqual({ total: 2, pending: 1 });
+
     const all = await repository.getAll();
     expect(all.find((e) => e.lemma === "run")?.flags).toBe(1); // 已推不变回待推
     expect(all.find((e) => e.lemma === "newword")?.flags).toBe(0);
@@ -133,6 +143,7 @@ describe("CSV 导入（IMPORT_CSV）", () => {
       csvText: "lemma,flags\nrun,2\nother,1\n",
       fileName: "in.csv",
     });
+    await sendMessage(listener, { type: CONFIRM_COLLECTED });
 
     const all = await repository.getAll();
     expect(all.find((e) => e.lemma === "run")?.flags).toBe(3); // 1 | 2
@@ -172,19 +183,21 @@ describe("CSV 导入（IMPORT_CSV）", () => {
       type: IMPORT_CSV,
       csvText: "lemma,flags\n",
       fileName: "empty.csv",
-    })) as { total: number; pending: number };
+    })) as { total: number; newCount: number };
     const emptyText = (await sendMessage(listener, {
       type: IMPORT_CSV,
       csvText: "",
       fileName: "empty.csv",
-    })) as { total: number; pending: number };
+    })) as { total: number; newCount: number };
 
-    expect(headerOnly).toEqual({ total: 1, pending: 1 });
-    expect(emptyText).toEqual({ total: 1, pending: 1 });
+    expect(headerOnly).toEqual({ total: 0, newCount: 0 });
+    expect(emptyText).toEqual({ total: 0, newCount: 0 });
+    // 确认空批次后词库仍不变
+    await sendMessage(listener, { type: CONFIRM_COLLECTED });
     expect(await repository.getAll()).toEqual([{ lemma: "run", flags: 0 }]);
   });
 
-  it("导出 → 导入 全往返后词库一致（含已推位）", async () => {
+  it("导出 → 导入 → 确认 全往返后词库一致（含已推位）", async () => {
     const repository = createWordRepository();
     await repository.mergeCollected([
       { lemma: "run", flags: 0 },
@@ -202,15 +215,21 @@ describe("CSV 导入（IMPORT_CSV）", () => {
       csv: string;
     };
 
-    // 清空后导入导出的 CSV，词库应完全恢复
+    // 清空后导入导出的 CSV 并确认，词库应完全恢复
     await repository.clear();
-    const counts = (await sendMessage(listener, {
+    const preview = (await sendMessage(listener, {
       type: IMPORT_CSV,
       csvText: exported.csv,
       fileName: "backup.csv",
-    })) as { total: number; pending: number };
+    })) as { total: number; newCount: number };
+    expect(preview).toEqual({ total: 3, newCount: 3 }); // 库已清空，全部为新词
 
+    const counts = (await sendMessage(listener, { type: CONFIRM_COLLECTED })) as {
+      total: number;
+      pending: number;
+    };
     expect(counts).toEqual({ total: 3, pending: 2 });
+
     const all = await repository.getAll();
     expect(all.find((e) => e.lemma === "garden")?.flags).toBe(1);
     expect(all.find((e) => e.lemma === "run")?.flags).toBe(0);

@@ -8,7 +8,9 @@ import {
   RETRY_PUSH,
   EXPORT_CSV,
   IMPORT_CSV,
+  isBatchPreview,
   isExportCsvResponse,
+  type BatchPreview,
   type CheckLoginResponse,
   type ConfirmCollectedMessage,
   type Counts,
@@ -38,7 +40,7 @@ export interface SwChannel {
   retryPush(): Promise<unknown>;
   /** T11：请求 SW 导出整个词库为 CSV 文本。 */
   exportCsv(): Promise<unknown>;
-  /** T11：把本地 CSV 文本交给 SW 与词库合并。 */
+  /** T11：把本地 CSV 文本交给 SW（解析后驻留待确认批次，确认才入库）。 */
   importCsv(csvText: string, fileName: string): Promise<unknown>;
   /** 确认待确认批次（issue #22）：SW 合并入词库并触发一轮推送。 */
   confirmCollected(): Promise<unknown>;
@@ -205,14 +207,14 @@ export async function fetchExportCsv(
   }
 }
 
-/** T11 导入应答（popup 侧收窄后的形态）。 */
+/** T11 导入应答（popup 侧收窄后的形态）：成功为待确认批次预览。 */
 export type ImportCsvOutcome =
-  | { ok: true; counts: Counts }
+  | ({ ok: true } & BatchPreview)
   | { ok: false; error: string };
 
 /**
- * T11 导入收窄：
- * - SW 返回 Counts（导入成功）→ `{ok:true,counts}`
+ * T11 导入收窄（review S-3：导入同过确认闸门）：
+ * - SW 返回 BatchPreview（解析成功，批次已驻留）→ `{ok:true,total,newCount}`
  * - SW 返回 `{ok:false,error}`（坏 CSV：含文件名 + 行号）→ 原样透传
  * - 任何其他应答 / 抛错 → `{ok:false}`
  */
@@ -223,7 +225,9 @@ export async function importCsv(
 ): Promise<ImportCsvOutcome> {
   try {
     const raw = await channel.importCsv(csvText, fileName);
-    if (isCounts(raw)) return { ok: true, counts: raw };
+    if (isBatchPreview(raw)) {
+      return { ok: true, total: raw.total, newCount: raw.newCount };
+    }
     if (
       typeof raw === "object" &&
       raw !== null &&

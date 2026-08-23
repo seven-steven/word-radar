@@ -420,8 +420,9 @@ describe("createBackgroundListener T11 CSV 导入/导出", () => {
     expect(sendResponse).toHaveBeenCalledWith({ ok: false, error: "export-failed" });
   });
 
-  it("IMPORT_CSV：解析后调 mergeCollected（flags 按 CSV 值传入）并应答新计数；非阻塞触发推送", async () => {
+  it("IMPORT_CSV：解析成功只驻留待确认批次（countNew 算 diff），不合并、不推送，应答 {total,newCount}；持有通道", async () => {
     const repository = fakeRepository();
+    repository.countNew = vi.fn(async () => 1);
     const push = fakePushCoordinator();
     const listener = createBackgroundListener({ repository, pushCoordinator: push });
     const sendResponse = vi.fn();
@@ -434,12 +435,14 @@ describe("createBackgroundListener T11 CSV 导入/导出", () => {
 
     expect(keepChannel).toBe(true);
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
-    expect(repository.mergeCollected).toHaveBeenCalledWith([
+    // review S-3：导入同过确认闸门，不直接入库，也不自动触发推送
+    expect(repository.countNew).toHaveBeenCalledWith([
       { lemma: "run", flags: 0 },
       { lemma: "other", flags: 1 },
     ]);
-    expect(sendResponse).toHaveBeenCalledWith({ total: 2, pending: 2 });
-    expect(push.start).toHaveBeenCalledTimes(1);
+    expect(repository.mergeCollected).not.toHaveBeenCalled();
+    expect(push.start).not.toHaveBeenCalled();
+    expect(sendResponse).toHaveBeenCalledWith({ total: 2, newCount: 1 });
   });
 
   it("IMPORT_CSV 坏 CSV：应答 {ok:false} 且错误含文件名与行号；不产生任何写入", async () => {
@@ -466,11 +469,12 @@ describe("createBackgroundListener T11 CSV 导入/导出", () => {
     expect(response.ok).toBe(false);
     expect(response.error).toContain("broken.csv");
     expect(response.error).toContain("line 3");
+    expect(repository.countNew).not.toHaveBeenCalled();
     expect(repository.mergeCollected).not.toHaveBeenCalled();
     expect(push.start).not.toHaveBeenCalled();
   });
 
-  it("IMPORT_CSV 空 CSV（仅表头）：按空列表合并，不报错", async () => {
+  it("IMPORT_CSV 空 CSV（仅表头）：应答 {total:0,newCount:0}，仍只驻留不合并", async () => {
     const repository = fakeRepository();
     const push = fakePushCoordinator();
     const listener = createBackgroundListener({ repository, pushCoordinator: push });
@@ -483,13 +487,13 @@ describe("createBackgroundListener T11 CSV 导入/导出", () => {
     );
 
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
-    expect(repository.mergeCollected).toHaveBeenCalledWith([]);
-    expect(sendResponse).toHaveBeenCalledWith({ total: 0, pending: 0 });
+    expect(repository.mergeCollected).not.toHaveBeenCalled();
+    expect(sendResponse).toHaveBeenCalledWith({ total: 0, newCount: 0 });
   });
 
-  it("IMPORT_CSV 仓库写入失败时应答 {ok:false,error}", async () => {
+  it("IMPORT_CSV 仓库查询失败（countNew 抛错）时应答 {ok:false,error}", async () => {
     const repository = fakeRepository();
-    repository.mergeCollected = vi.fn(async () => {
+    repository.countNew = vi.fn(async () => {
       throw new Error("db boom");
     });
     const listener = createBackgroundListener({ repository });
@@ -503,6 +507,7 @@ describe("createBackgroundListener T11 CSV 导入/导出", () => {
 
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
     expect(sendResponse).toHaveBeenCalledWith({ ok: false, error: "import-failed" });
+    expect(repository.mergeCollected).not.toHaveBeenCalled();
   });
 });
 describe("createBackgroundListener 确认闸门（issue #22）", () => {
@@ -647,7 +652,79 @@ describe("createBackgroundListener 确认闸门（issue #22）", () => {
     expect(coordinator.start).toHaveBeenCalledTimes(1);
   });
 
-  it("IMPORT_CSV 合并完成后仍触发一轮推送（待推池不区分来源，无开关）", async () => {
+  it("合并失败时保留待确认批次（review St-1）：应答 confirm-failed、不推送；重试确认成功后才清空", async () => {
+    const repository = fakeRepository();
+    repository.mergeCollected = vi.fn(async () => {
+      throw new Error("db boom");
+    });
+    const coordinator = fakePushCoordinator();
+    const listener = createBackgroundListener({
+      repository,
+      pushCoordinator: coordinator,
+    });
+
+    listener(
+      { type: WORDS_COLLECTED, entries: [{ lemma: "run", flags: 0 }] },
+      {},
+      vi.fn(),
+    );
+    await flush();
+
+    // 第一次确认：合并失败
+    const failResponse = vi.fn();
+    listener({ type: CONFIRM_COLLECTED }, {}, failResponse);
+    await flush();
+    expect(failResponse).toHaveBeenCalledWith({ ok: false, error: "confirm-failed" });
+    expect(coordinator.start).not.toHaveBeenCalled();
+
+    // 批次仍在：修复仓库后重试确认成功，批次才被清空
+    const retryMerge = vi.fn(async () => ({ total: 1, pending: 1 }));
+    repository.mergeCollected = retryMerge;
+    const okResponse = vi.fn();
+    listener({ type: CONFIRM_COLLECTED }, {}, okResponse);
+    await flush();
+    expect(retryMerge).toHaveBeenCalledTimes(1);
+    expect(retryMerge).toHaveBeenCalledWith([
+      { lemma: "run", flags: 0 },
+    ]);
+    expect(okResponse).toHaveBeenCalledWith({ total: 1, pending: 1 });
+    expect(coordinator.start).toHaveBeenCalledTimes(1);
+
+    // 成功后批次清空
+    const third = vi.fn();
+    listener({ type: CONFIRM_COLLECTED }, {}, third);
+    expect(third).toHaveBeenCalledWith({ ok: false, error: "no-pending-batch" });
+  });
+
+  it("IMPORT_CSV 后确认：合并导入批次 + 触发一轮推送（导入不自动推送，确认才推）", async () => {
+    const repository = fakeRepository();
+    repository.mergeCollected = vi.fn(async () => ({ total: 1, pending: 1 }));
+    const coordinator = fakePushCoordinator();
+    const listener = createBackgroundListener({
+      repository,
+      pushCoordinator: coordinator,
+    });
+
+    listener(
+      { type: IMPORT_CSV, csvText: "lemma,flags\nrun,0\n", fileName: "a.csv" },
+      {},
+      vi.fn(),
+    );
+    await flush();
+    // review S-3：导入只驻留批次，合并不发生、推送不触发
+    expect(repository.mergeCollected).not.toHaveBeenCalled();
+    expect(coordinator.start).not.toHaveBeenCalled();
+
+    listener({ type: CONFIRM_COLLECTED }, {}, vi.fn());
+    await flush();
+    expect(repository.mergeCollected).toHaveBeenCalledTimes(1);
+    expect(repository.mergeCollected).toHaveBeenCalledWith([
+      { lemma: "run", flags: 0 },
+    ]);
+    expect(coordinator.start).toHaveBeenCalledTimes(1);
+  });
+
+  it("IMPORT_CSV 后取消：丢弃导入批次，不合并不推送", async () => {
     const repository = fakeRepository();
     const coordinator = fakePushCoordinator();
     const listener = createBackgroundListener({
@@ -662,7 +739,13 @@ describe("createBackgroundListener 确认闸门（issue #22）", () => {
     );
     await flush();
 
-    expect(repository.mergeCollected).toHaveBeenCalledTimes(1);
-    expect(coordinator.start).toHaveBeenCalledTimes(1);
+    listener({ type: DISCARD_COLLECTED }, {}, vi.fn());
+    const sendResponse = vi.fn();
+    listener({ type: CONFIRM_COLLECTED }, {}, sendResponse);
+    await flush();
+
+    expect(sendResponse).toHaveBeenCalledWith({ ok: false, error: "no-pending-batch" });
+    expect(repository.mergeCollected).not.toHaveBeenCalled();
+    expect(coordinator.start).not.toHaveBeenCalled();
   });
 });
