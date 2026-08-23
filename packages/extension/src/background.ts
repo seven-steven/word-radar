@@ -9,10 +9,6 @@
  * - 独占所有 HTTP（BbdcClient）
  */
 import { createBackgroundListener } from "./lib/background-listener.js";
-import {
-  setupCollectMenu,
-  handleCollectMenuClick,
-} from "./lib/collect-menu.js";
 import { createBbdcClient } from "./lib/bbdc-client.js";
 import { createWordRepository } from "./lib/word-repository.js";
 import { cleanupLegacyAutoPush } from "./lib/settings.js";
@@ -28,24 +24,6 @@ const bbdcClient = createBbdcClient({ fetch: globalThis.fetch.bind(globalThis) }
 
 chrome.runtime.onInstalled.addListener(() => {
   void chrome.storage.local.set({ [HEARTBEAT_KEY]: true });
-  // 采集目标菜单（issue #24）：右键图标出现「上传文件」目标
-  void setupCollectMenu(chrome.contextMenus);
-});
-
-// context menu 跨 SW 重启持久，但浏览器重启后 onInstalled 不触发——
-// onStartup 时补注册（setupCollectMenu 幂等）。
-chrome.runtime.onStartup.addListener(() => {
-  void setupCollectMenu(chrome.contextMenus);
-});
-
-// 右键菜单点「上传文件」：写标记 + best-effort 弹出 popup（popup 消费标记
-// 直接进入文件选择器，跳过默认的当前页采集）。
-chrome.contextMenus.onClicked.addListener((info) => {
-  void handleCollectMenuClick(info, {
-    menus: chrome.contextMenus,
-    storage: chrome.storage.local,
-    action: chrome.action,
-  });
 });
 
 // 「自动推送」开关已移除（issue #22）：每次 SW 启动清理旧存储键（幂等）。

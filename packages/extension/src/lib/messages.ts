@@ -38,7 +38,6 @@ export const GET_PUSH_STATUS = "GET_PUSH_STATUS" as const;
 export const EXPORT_CSV = "EXPORT_CSV" as const;
 export const IMPORT_CSV = "IMPORT_CSV" as const;
 export const UPLOAD_FILE = "UPLOAD_FILE" as const;
-export const CONSUME_UPLOAD_TARGET = "CONSUME_UPLOAD_TARGET" as const;
 
 /**
  * 上传文件采集允许的纯文本后缀（issue #24 验收修订：放宽到各类纯文本）。
@@ -148,24 +147,6 @@ export interface ImportCsvMessage {
 }
 
 /**
- * popup → background（issue #24）：消费右键菜单「上传文件」目标标记。
- *
- * 标记由 collect-menu 写入 storage.local（菜单点击发生在 SW 上下文）；
- * 但 chrome.storage 跨上下文传播是最终一致的——popup 若直读 storage，
- * 可能赶在提交落地前读到空值（真机验收 #24：选择器从未弹出）。
- * 改由 popup 发本消息、SW 在同一上下文里读并清掉标记（写读同上下文，
- * 严格有序），应答 `ConsumeUploadTargetResponse`。
- */
-export interface ConsumeUploadTargetMessage {
-  type: typeof CONSUME_UPLOAD_TARGET;
-}
-
-/** service worker → popup 的标记消费应答：true 表示本次打开走上传文件目标。 */
-export type ConsumeUploadTargetResponse =
-  | { ok: true; uploadRequested: boolean }
-  | { ok: false; error: string };
-
-/**
  * popup → background（issue #24 验收修订）：上传一份本地纯文本文件
  * （后缀见 UPLOAD_TEXT_SUFFIXES：txt/md/markdown/csv/log/text/json）。
  * 走与网页采集相同的 core 提取管线（extractWordEntries），提取结果只驻留
@@ -214,8 +195,7 @@ export type ExtensionMessage =
   | GetPushStatusMessage
   | ExportCsvMessage
   | ImportCsvMessage
-  | UploadFileMessage
-  | ConsumeUploadTargetMessage;
+  | UploadFileMessage;
 
 /**
  * content → popup 的同步应答：成功携带确认页预览（总数 + 新词数），
@@ -320,12 +300,6 @@ export function isUploadFileMessage(
     typeof value.text === "string" &&
     typeof value.fileName === "string"
   );
-}
-
-export function isConsumeUploadTargetMessage(
-  value: unknown,
-): value is ConsumeUploadTargetMessage {
-  return isObject(value) && value.type === CONSUME_UPLOAD_TARGET;
 }
 
 export function isExportCsvResponse(value: unknown): value is ExportCsvResponse {

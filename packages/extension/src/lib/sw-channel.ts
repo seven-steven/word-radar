@@ -9,7 +9,6 @@ import {
   EXPORT_CSV,
   IMPORT_CSV,
   UPLOAD_FILE,
-  CONSUME_UPLOAD_TARGET,
   isBatchPreview,
   isExportCsvResponse,
   type BatchPreview,
@@ -23,7 +22,6 @@ import {
   type ImportCsvMessage,
   type MarkPushedMessage,
   type CheckLoginMessage,
-  type ConsumeUploadTargetMessage,
   type UploadFileMessage,
 } from "./messages.js";
 
@@ -48,8 +46,6 @@ export interface SwChannel {
   importCsv(csvText: string, fileName: string): Promise<unknown>;
   /** issue #24：把本地纯文本（UPLOAD_TEXT_SUFFIXES）交给 SW（同一提取管线，驻留待确认批次）。 */
   uploadFile(text: string, fileName: string): Promise<unknown>;
-  /** issue #24 验收缺陷修复：在 SW 上下文消费右键菜单的上传目标标记。 */
-  consumeUploadTarget(): Promise<unknown>;
   /** 确认待确认批次（issue #22）：SW 合并入词库并触发一轮推送。 */
   confirmCollected(): Promise<unknown>;
   /** 取消：丢弃 SW 内存中的待确认批次。 */
@@ -85,10 +81,6 @@ export const chromeSwChannel: SwChannel = {
   },
   uploadFile(text: string, fileName: string) {
     const message: UploadFileMessage = { type: UPLOAD_FILE, text, fileName };
-    return chrome.runtime.sendMessage(message);
-  },
-  consumeUploadTarget() {
-    const message: ConsumeUploadTargetMessage = { type: CONSUME_UPLOAD_TARGET };
     return chrome.runtime.sendMessage(message);
   },
   confirmCollected() {
@@ -290,25 +282,6 @@ export async function uploadFile(
     return { ok: false, error: "upload-unavailable" };
   } catch {
     return { ok: false, error: "upload-unavailable" };
-  }
-}
-
-/**
- * issue #24 验收缺陷修复：消费右键菜单「上传文件」目标标记。
- * 经 SW 消息读并清掉（写读同上下文，严格有序）——popup 直读 storage 会撞上
- * chrome.storage 跨上下文最终一致传播的竞态。
- * SW 不可达 / 应答异常 → false（回退默认的当前页采集）。
- */
-export async function consumeUploadTargetFlag(channel: SwChannel): Promise<boolean> {
-  try {
-    const raw = await channel.consumeUploadTarget();
-    return (
-      typeof raw === "object" &&
-      raw !== null &&
-      (raw as { uploadRequested?: unknown }).uploadRequested === true
-    );
-  } catch {
-    return false;
   }
 }
 

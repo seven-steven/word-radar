@@ -24,7 +24,6 @@ import {
 import {
   chromeSwChannel,
   confirmCollected,
-  consumeUploadTargetFlag,
   discardCollected,
   fetchCounts,
   fetchExportCsv,
@@ -402,20 +401,11 @@ function startPushStatusPolling(): void {
   pushStatusTimer = window.setTimeout(tick, 0);
 }
 
-// 打开即：拉一次计数 + 自动采集 + 拉一次登录态 + 拉一次推送状态；
-// 右键菜单「上传文件」目标（issue #24）：消费标记后跳过默认的当前页采集，
-// 显示提示引导用户手动点击「上传文件」按钮（不再尝试自动点击 input 元素，
-// 避免 Chromium 用户手势规则导致的静默失败）。标记消费经 SW 消息（写读同上下文）。
+// 打开即：拉一次计数 + 自动采集当前页 + 拉一次登录态 + 拉一次推送状态。
+// （上传文件入口是 popup 内的「上传文件」按钮，不做右键菜单目标。）
 void refreshCounts();
 void refreshLogin();
 void refreshPushStatus().then(startPushStatusPolling);
-consumeUploadTargetFlag(chromeSwChannel).then((uploadRequested) => {
-  if (uploadRequested) {
-    // 显示提示信息，引导用户手动点击「上传文件」按钮
-    renderSyncStatus("已选择采集目标：上传文件——请点击「上传文件」选择文件");
-  } else {
-    void collect();
-  }
-});
+void collect();
 
 export {};

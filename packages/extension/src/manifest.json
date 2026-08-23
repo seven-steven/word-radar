@@ -23,5 +23,5 @@
     "type": "module"
   },
   "host_permissions": ["https://bbdc.cn/*", "https://langeasy.com.cn/*"],
-  "permissions": ["storage", "activeTab", "scripting", "contextMenus"]
+  "permissions": ["storage", "activeTab", "scripting"]
 }

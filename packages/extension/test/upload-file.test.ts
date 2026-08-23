@@ -1,10 +1,9 @@
 /**
  * issue #24 上传文件采集单测：
  * - background-listener 的 UPLOAD_FILE 分支：文本走同一提取管线 → 驻留待确认
- *   批次（不合并、不推送、零网络）；非 .txt/.md 后缀零写入 + 错误日志
+ *   批次（不合并、不推送、零网络）；非法后缀零写入 + 错误日志
  *   stage=upload；确认后与采集批次同语义合并。
  * - sw-channel 的 uploadFile 收窄。
- * - collect-menu 的菜单注册与点击接线（标记 + best-effort openPopup）。
  */
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -15,19 +14,12 @@ import {
 } from "../src/lib/background-listener.js";
 import {
   CONFIRM_COLLECTED,
-  CONSUME_UPLOAD_TARGET,
   UPLOAD_FILE,
   type PushStatus,
 } from "../src/lib/messages.js";
 import type { PushCoordinator } from "../src/lib/push-coordinator.js";
 import type { WordEntry } from "@word-radar/core";
-import {
-  setupCollectMenu,
-  handleCollectMenuClick,
-  UPLOAD_TARGET_FLAG,
-  UPLOAD_TARGET_MENU_ID,
-} from "../src/lib/collect-menu.js";
-import { uploadFile, consumeUploadTargetFlag } from "../src/lib/sw-channel.js";
+import { uploadFile } from "../src/lib/sw-channel.js";
 
 function fakeRepository(): BackgroundRepository & {
   mergeCollected: ReturnType<typeof vi.fn>;
@@ -275,177 +267,5 @@ describe("sw-channel uploadFile 收窄（issue #24）", () => {
         "a.txt",
       ),
     ).resolves.toEqual({ ok: false, error: "upload-unavailable" });
-  });
-});
-
-describe("createBackgroundListener CONSUME_UPLOAD_TARGET（issue #24 验收缺陷修复）", () => {
-  function fakeUploadTargetStorage(items: Record<string, unknown> = {}) {
-    return {
-      items,
-      get: vi.fn(async (key: string) => ({ [key]: items[key] })),
-      remove: vi.fn(async (key: string) => {
-        delete items[key];
-      }),
-    };
-  }
-
-  function listenerWithStorage(storage: ReturnType<typeof fakeUploadTargetStorage>) {
-    return createBackgroundListener({
-      repository: fakeRepository(),
-      bbdcClient: fakeBbdcClient(),
-      actionBadge: fakeActionBadge(),
-      pushCoordinator: fakePushCoordinator(),
-      uploadTargetStorage: storage,
-    });
-  }
-
-  it("标记为 true：SW 读并清掉（同一上下文，严格有序），应答 {ok:true,uploadRequested:true}", async () => {
-    const storage = fakeUploadTargetStorage({ [UPLOAD_TARGET_FLAG]: true });
-    const listener = listenerWithStorage(storage);
-    const sendResponse = vi.fn();
-
-    const keep = listener({ type: CONSUME_UPLOAD_TARGET }, {}, sendResponse);
-    expect(keep).toBe(true);
-    await flush();
-
-    expect(storage.get).toHaveBeenCalledWith(UPLOAD_TARGET_FLAG);
-    expect(storage.remove).toHaveBeenCalledWith(UPLOAD_TARGET_FLAG);
-    expect(sendResponse).toHaveBeenCalledWith({ ok: true, uploadRequested: true });
-  });
-
-  it("无标记：不清 storage，应答 {ok:true,uploadRequested:false}", async () => {
-    const storage = fakeUploadTargetStorage();
-    const listener = listenerWithStorage(storage);
-    const sendResponse = vi.fn();
-
-    listener({ type: CONSUME_UPLOAD_TARGET }, {}, sendResponse);
-    await flush();
-
-    expect(storage.remove).not.toHaveBeenCalled();
-    expect(sendResponse).toHaveBeenCalledWith({ ok: true, uploadRequested: false });
-  });
-
-  it("storage 抛错：应答 {ok:false,error}（popup 收窄为 false，回退默认采集）", async () => {
-    const storage = fakeUploadTargetStorage();
-    storage.get = vi.fn(async () => {
-      throw new Error("storage gone");
-    });
-    const listener = listenerWithStorage(storage);
-    const sendResponse = vi.fn();
-
-    listener({ type: CONSUME_UPLOAD_TARGET }, {}, sendResponse);
-    await flush();
-
-    expect(sendResponse).toHaveBeenCalledWith({
-      ok: false,
-      error: "consume-upload-target-failed",
-    });
-  });
-});
-
-describe("sw-channel consumeUploadTargetFlag 收窄（issue #24）", () => {
-  it("{ok:true,uploadRequested:true} → true", async () => {
-    const channel = { consumeUploadTarget: vi.fn(async () => ({ ok: true, uploadRequested: true })) };
-    await expect(consumeUploadTargetFlag(channel)).resolves.toBe(true);
-    expect(channel.consumeUploadTarget).toHaveBeenCalledTimes(1);
-  });
-
-  it("uploadRequested:false / 异常应答 / 抛错 → false（回退默认网页采集）", async () => {
-    await expect(
-      consumeUploadTargetFlag({
-        consumeUploadTarget: vi.fn(async () => ({ ok: true, uploadRequested: false })),
-      }),
-    ).resolves.toBe(false);
-    await expect(
-      consumeUploadTargetFlag({ consumeUploadTarget: vi.fn(async () => "garbage") }),
-    ).resolves.toBe(false);
-    await expect(
-      consumeUploadTargetFlag({
-        consumeUploadTarget: vi.fn(async () => {
-          throw new Error("sw gone");
-        }),
-      }),
-    ).resolves.toBe(false);
-  });
-});
-
-describe("collect-menu（issue #24 右键采集目标菜单）", () => {
-  it("setupCollectMenu：removeAll 后注册「上传文件」目标，contexts 含 action", async () => {
-    const menus = {
-      removeAll: vi.fn(async () => undefined),
-      create: vi.fn(),
-    };
-    await setupCollectMenu(menus);
-    expect(menus.removeAll).toHaveBeenCalledTimes(1);
-    expect(menus.create).toHaveBeenCalledWith({
-      id: UPLOAD_TARGET_MENU_ID,
-      title: "上传文件",
-      contexts: ["action"],
-    });
-  });
-
-  it("点「上传文件」：写 storage 标记 + best-effort openPopup", async () => {
-    const storage = { set: vi.fn(async () => undefined) };
-    const openPopup = vi.fn(async () => undefined);
-    await handleCollectMenuClick(
-      { menuItemId: UPLOAD_TARGET_MENU_ID },
-      { menus: { removeAll: vi.fn(), create: vi.fn() }, storage, action: { openPopup } },
-    );
-    expect(storage.set).toHaveBeenCalledWith({ collectTargetUploadFile: true });
-    expect(openPopup).toHaveBeenCalledTimes(1);
-  });
-
-  it("openPopup 严格等 storage.set 写入完成后才调用（防 popup 打开赶在提交落地前）", async () => {
-    let resolveSet: () => void = () => undefined;
-    const storage = {
-      set: vi.fn(async () => {
-        await new Promise<void>((resolve) => {
-          resolveSet = resolve;
-        });
-      }),
-    };
-    const openPopup = vi.fn(async () => undefined);
-    const pending = handleCollectMenuClick(
-      { menuItemId: UPLOAD_TARGET_MENU_ID },
-      { menus: { removeAll: vi.fn(), create: vi.fn() }, storage, action: { openPopup } },
-    );
-
-    // 写入未落地：popup 不得被打开
-    await flush();
-    expect(openPopup).not.toHaveBeenCalled();
-
-    resolveSet();
-    await pending;
-    expect(openPopup).toHaveBeenCalledTimes(1);
-  });
-
-  it("openPopup 抛错时静默降级：标记已写，不向上抛", async () => {
-    const storage = { set: vi.fn(async () => undefined) };
-    const openPopup = vi.fn(async () => {
-      throw new Error("no user gesture");
-    });
-    await expect(
-      handleCollectMenuClick(
-        { menuItemId: UPLOAD_TARGET_MENU_ID },
-        { menus: { removeAll: vi.fn(), create: vi.fn() }, storage, action: { openPopup } },
-      ),
-    ).resolves.toBeUndefined();
-    expect(storage.set).toHaveBeenCalled();
-  });
-
-  it("无 openPopup（旧 Chrome）或点其他菜单项：只写标记 / 什么都不做", async () => {
-    const storage = { set: vi.fn(async () => undefined) };
-    await handleCollectMenuClick(
-      { menuItemId: UPLOAD_TARGET_MENU_ID },
-      { menus: { removeAll: vi.fn(), create: vi.fn() }, storage, action: {} },
-    );
-    expect(storage.set).toHaveBeenCalledTimes(1);
-
-    storage.set.mockClear();
-    await handleCollectMenuClick(
-      { menuItemId: "other-item" },
-      { menus: { removeAll: vi.fn(), create: vi.fn() }, storage, action: {} },
-    );
-    expect(storage.set).not.toHaveBeenCalled();
   });
 });

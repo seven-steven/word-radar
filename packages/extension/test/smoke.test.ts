@@ -19,13 +19,13 @@ describe("@word-radar/extension", () => {
     // 权限锁定（spec §Out of Scope 基础上的一处扩权，2026-08-19 用户拍板）：
     // storage + activeTab/scripting —— 后两者用于「旧标签未注入时 executeScript 补注入」
     // （popup 打开即用户手势，activeTab 只作用于当前标签，无 <all_urls> host 权限）。
-    // contextMenus（issue #24）：右键图标出「采集目标」菜单的最小权限，无网站访问。
-    // 仍不申请 cookies/notifications/tabs 等敏感权限。
+    // contextMenus 已随右键「采集目标」菜单一并移除（issue #24 用户决策：
+    // 上传文件只走 popup 内按钮）。仍不申请 cookies/notifications/tabs 等
+    // 敏感权限。
     expect(manifest.permissions).toEqual([
       "storage",
       "activeTab",
       "scripting",
-      "contextMenus",
     ]);
     const perms = manifest.permissions ?? [];
     for (const forbidden of ["cookies", "notifications", "tabs"]) {
