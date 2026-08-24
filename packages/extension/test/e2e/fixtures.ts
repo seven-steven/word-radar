@@ -16,7 +16,7 @@
  *   若不生效，回退：本地 mock server + host 重定向，见 run-e2e.mjs 顶部注释。
  */
 import { test as base, expect, chromium } from "@playwright/test";
-import type { BrowserContext } from "@playwright/test";
+import type { BrowserContext, Page, Route } from "@playwright/test";
 import { createServer, type Server } from "node:http";
 import { cp, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -146,21 +146,20 @@ export const test = base.extend<E2eTestFixtures, E2eWorkerFixtures>({
     let addWordResult = 200;
     let checkLoginResult = 200;
 
-    await extContext.route("**/*", async (route) => {
+    // 只拦 bbdc / langeasy 域（issue #27）：早先用 "**/*" + route.continue() 全量
+    // 兜底，所有真实外网请求（含 raw.githubusercontent.com 页面导航）都被代理进
+    // Playwright Node 路由层，全量套件负载下偶发卡死 → raw-csp 用例超时漂移。
+    // 收窄 pattern 后外网请求完全不经过本 handler。
+    const handler = async (route: Route): Promise<void> => {
       const req = route.request();
       const url = new URL(req.url());
       const host = url.hostname;
-      const isBbdc = host === "bbdc.cn" || host === "www.bbdc.cn";
-      const isLexis = host === "langeasy.com.cn";
-      if (!isBbdc && !isLexis) {
-        await route.continue();
-        return;
-      }
       requests.push({
         url: req.url(),
         method: req.method(),
         body: req.postData() ?? undefined,
       });
+      const isLexis = host === "langeasy.com.cn";
       const json = (body: unknown): Promise<void> =>
         route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
 
@@ -182,7 +181,17 @@ export const test = base.extend<E2eTestFixtures, E2eWorkerFixtures>({
         return;
       }
       await json({ result_code: 200, data_body: { list: [] } });
-    });
+    };
+    // 四条 pattern 覆盖裸域与子域（www.bbdc.cn 等）；Playwright glob 单段 `*`
+    // 不跨 `.`，须分别注册。
+    for (const pattern of [
+      "**://bbdc.cn/**",
+      "**://*.bbdc.cn/**",
+      "**://langeasy.com.cn/**",
+      "**://*.langeasy.com.cn/**",
+    ]) {
+      await extContext.route(pattern, handler);
+    }
 
     const mock: MockBbdc = {
       requests,
@@ -229,7 +238,32 @@ export const test = base.extend<E2eTestFixtures, E2eWorkerFixtures>({
   }, { scope: "worker" }],
 });
 
-test.afterEach(async ({ swConsole }, testInfo) => {
+/** 跨用例清理基准：本用例开始前已存在的页面（worker 级 context 共享）。 */
+let pagesBefore: Page[] = [];
+
+test.beforeEach(async ({ extContext }) => {
+  pagesBefore = [...extContext.pages()];
+});
+
+test.afterEach(async ({ extContext, swConsole }, testInfo) => {
+  // 跨用例清理（issue #27，#23 unroute 先例的同类推广）：持久 context 整套
+  // run 共享，任何中途失败/跳过的用例都会把路由与页面泄漏给后续用例
+  //（失败点漂移的放大器）。
+  // 1) 摘掉用例内注册的临时路由（pattern 与 mockBbdc 的四条 host pattern
+  //    不相交，只会移除 push.spec 等注册的 **/api/user-new-word* 残留）。
+  try {
+    await extContext.unroute("**/api/user-new-word*");
+  } catch {
+    // context 已收尾等极端场景下忽略
+  }
+  // 2) 关掉本用例新开且未关的页面（失败现场跳出 close 的兜底）；
+  //    保留至少一页，避免关掉最后一页连带收掉 persistent context。
+  const before = new Set(pagesBefore);
+  const leftover = extContext.pages().filter((p) => !before.has(p));
+  const all = extContext.pages();
+  const toClose = leftover.length === all.length && all.length > 0 ? leftover.slice(1) : leftover;
+  await Promise.allSettled(toClose.map((p) => p.close()));
+
   if (testInfo.status !== testInfo.expectedStatus) {
     // 失败现场：SW console 随 testInfo 落进 outputDir（trace.zip 同目录）
     await testInfo.attach("sw-console", {

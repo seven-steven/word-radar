@@ -119,6 +119,21 @@ test("CSV import goes through the confirmation gate (issue #22 review S-3)", asy
   await page.getByTestId("cancel-collect").click();
   await expect(page.getByTestId("confirm-section")).toBeHidden();
   await expect(page.getByTestId("total")).toHaveText(String(totalBefore + 2));
+
+  // 排空本用例确认触发的推送（issue #27）：确认入库的词进入待推池，若不等
+  // 推送跑完就关页，下一个用例的 popup boot（check-login 恢复路径）会替本
+  // 用例发起推送 —— 污染后续「确认前零网络」断言（失败点漂移的放大器）。
+  for (let round = 0; round < 15; round += 1) {
+    const pending = Number(await page.getByTestId("pending").textContent());
+    const phase = await page.getByTestId("push-status").getAttribute("data-phase");
+    if (pending === 0 && phase !== "running") break;
+    if (pending > 0 && phase !== "running") {
+      await page.getByTestId("retry-push").click();
+    }
+    await page.waitForTimeout(3_000);
+  }
+  await expect(page.getByTestId("pending")).toHaveText(/^0$/);
+  await expect(page.getByTestId("push-status")).not.toHaveAttribute("data-phase", "running");
   await page.close();
 });
 
