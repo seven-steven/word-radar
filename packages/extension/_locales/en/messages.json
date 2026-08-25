@@ -1,0 +1,14 @@
+{
+  "extName": {
+    "message": "WordRadar",
+    "description": "Extension name"
+  },
+  "extDescription": {
+    "message": "Extract English words from web pages with one click and automatically add them to your 不背单词 (BBDC) wordbook.",
+    "description": "Extension description in English"
+  },
+  "extTooltip": {
+    "message": "WordRadar",
+    "description": "Extension tooltip text"
+  }
+}

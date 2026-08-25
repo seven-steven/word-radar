@@ -1,0 +1,14 @@
+{
+  "extName": {
+    "message": "单词雷达",
+    "description": "扩展名称"
+  },
+  "extDescription": {
+    "message": "把网页里的英文生词一键提取出来，自动加到「不背单词」生词本。",
+    "description": "扩展描述（中文）"
+  },
+  "extTooltip": {
+    "message": "单词雷达",
+    "description": "扩展提示文本"
+  }
+}
