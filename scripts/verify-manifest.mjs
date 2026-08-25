@@ -20,7 +20,7 @@ const OUT_DIR = resolve(REPO_ROOT, "dist");
 
 const ICON_SIZES = ["16", "48", "128"];
 const I18N_PLACEHOLDER_PATTERN = /^__MSG_(\w+)__$/;
-const I18N_REQUIRED_LOCALES = ["en", "zh_CN"];
+const I18N_REQUIRED_LOCALES = ["en", "zh_CN", "zh_TW"];
 
 /**
  * 校验三方版本一致性 + MV3 形态（对 src 与 zip 内 manifest 各查一遍）。
@@ -142,19 +142,36 @@ function checkI18nStructureSrc(manifest) {
   }
 
   // Check key consistency across locales using the parsed data
-  if (messageKeys.size > 0 && localeData["en"] && localeData["zh_CN"]) {
+  if (messageKeys.size > 0 && localeData["en"] && localeData["zh_CN"] && localeData["zh_TW"]) {
     const enKeys = new Set(Object.keys(localeData["en"]));
-    const zhKeys = new Set(Object.keys(localeData["zh_CN"]));
+    const zhCnKeys = new Set(Object.keys(localeData["zh_CN"]));
+    const zhTwKeys = new Set(Object.keys(localeData["zh_TW"]));
 
+    // Check all Chinese keys match English
     for (const key of enKeys) {
-      if (!zhKeys.has(key)) {
+      if (!zhCnKeys.has(key)) {
         errors.push(`src _locales: key "${key}" exists in en but missing in zh_CN`);
       }
+      if (!zhTwKeys.has(key)) {
+        errors.push(`src _locales: key "${key}" exists in en but missing in zh_TW`);
+      }
     }
-    for (const key of zhKeys) {
+
+    // Check for extra keys in Chinese locales
+    for (const key of zhCnKeys) {
       if (!enKeys.has(key)) {
         errors.push(`src _locales: key "${key}" exists in zh_CN but missing in en`);
       }
+    }
+    for (const key of zhTwKeys) {
+      if (!enKeys.has(key)) {
+        errors.push(`src _locales: key "${key}" exists in zh_TW but missing in en`);
+      }
+    }
+
+    // Verify zh_CN and zh_TW have identical key sets
+    if (zhCnKeys.size !== zhTwKeys.size) {
+      errors.push(`src _locales: zh_CN has ${zhCnKeys.size} keys but zh_TW has ${zhTwKeys.size} keys`);
     }
   }
 
@@ -198,19 +215,36 @@ function checkI18nInZip(zipBuffer, manifest) {
   }
 
   // Check key consistency across locales in the zip
-  if (messageKeys.size > 0 && localeData["en"] && localeData["zh_CN"]) {
+  if (messageKeys.size > 0 && localeData["en"] && localeData["zh_CN"] && localeData["zh_TW"]) {
     const enKeys = new Set(Object.keys(localeData["en"]));
-    const zhKeys = new Set(Object.keys(localeData["zh_CN"]));
+    const zhCnKeys = new Set(Object.keys(localeData["zh_CN"]));
+    const zhTwKeys = new Set(Object.keys(localeData["zh_TW"]));
 
+    // Check all Chinese keys match English
     for (const key of enKeys) {
-      if (!zhKeys.has(key)) {
+      if (!zhCnKeys.has(key)) {
         errors.push(`zip _locales: key "${key}" exists in en but missing in zh_CN`);
       }
+      if (!zhTwKeys.has(key)) {
+        errors.push(`zip _locales: key "${key}" exists in en but missing in zh_TW`);
+      }
     }
-    for (const key of zhKeys) {
+
+    // Check for extra keys in Chinese locales
+    for (const key of zhCnKeys) {
       if (!enKeys.has(key)) {
         errors.push(`zip _locales: key "${key}" exists in zh_CN but missing in en`);
       }
+    }
+    for (const key of zhTwKeys) {
+      if (!enKeys.has(key)) {
+        errors.push(`zip _locales: key "${key}" exists in zh_TW but missing in en`);
+      }
+    }
+
+    // Verify zh_CN and zh_TW have identical key sets
+    if (zhCnKeys.size !== zhTwKeys.size) {
+      errors.push(`zip _locales: zh_CN has ${zhCnKeys.size} keys but zh_TW has ${zhTwKeys.size} keys`);
     }
   }
 

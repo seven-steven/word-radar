@@ -63,7 +63,7 @@ pnpm package
 2. 右上角开启「开发者模式」。
 3. 点击「加载已解压的扩展程序」。
 4. 选择 `packages/extension/dist` 目录（或把 `dist/word-radar-extension.zip` 解压到任意目录后选择该目录）。
-5. 工具栏出现 WordRadar 图标，即加载成功。
+5. 工具栏出现 单词雷达 WordRadar 图标，即加载成功。
 
 ### 加载扩展（Edge）
 
@@ -71,7 +71,7 @@ pnpm package
 2. 左侧开启「开发人员模式」。
 3. 点击「加载解压缩的扩展」。
 4. 选择 `packages/extension/dist` 目录。
-5. 工具栏出现 WordRadar 图标，即加载成功。
+5. 工具栏出现 单词雷达 WordRadar 图标，即加载成功。
 
 ### 日常用法
 

@@ -1,0 +1,242 @@
+{
+  "extName": {
+    "message": "单词雷达",
+    "description": "扩展名称"
+  },
+  "extDescription": {
+    "message": "把网页里的英文生词一键提取出来，自动加到「不背单词」生词本。",
+    "description": "扩展描述（中文）"
+  },
+  "extTooltip": {
+    "message": "单词雷达",
+    "description": "扩展提示文本"
+  },
+  "popupTitle": {
+    "message": "WordRadar",
+    "description": "弹窗页面标题"
+  },
+  "popupHeading": {
+    "message": "WordRadar",
+    "description": "弹窗主标题"
+  },
+  "countTotal": {
+    "message": "词库总词数",
+    "description": "词库总词数标签"
+  },
+  "countPushed": {
+    "message": "已推送",
+    "description": "已推送词数标签"
+  },
+  "countPending": {
+    "message": "待推",
+    "description": "待推词数标签"
+  },
+  "statusCollecting": {
+    "message": "采集中…",
+    "description": "采集中的初始状态文案"
+  },
+  "btnRecollect": {
+    "message": "重新采集",
+    "description": "重新采集按钮"
+  },
+  "btnConfirmPush": {
+    "message": "确认推送",
+    "description": "确认推送按钮"
+  },
+  "btnCancel": {
+    "message": "取消",
+    "description": "取消按钮"
+  },
+  "pushStatusIdle": {
+    "message": "推送状态：空闲",
+    "description": "推送空闲状态文案"
+  },
+  "pushSuccess": {
+    "message": "成功",
+    "description": "推送成功标签"
+  },
+  "pushExisting": {
+    "message": "已存在",
+    "description": "已存在标签"
+  },
+  "pushFailed": {
+    "message": "失败",
+    "description": "失败标签"
+  },
+  "btnRetryPending": {
+    "message": "重试待推",
+    "description": "重试待推按钮"
+  },
+  "btnExportCsv": {
+    "message": "导出 CSV",
+    "description": "导出CSV按钮"
+  },
+  "btnImportCsv": {
+    "message": "导入 CSV",
+    "description": "导入CSV按钮"
+  },
+  "btnUploadFile": {
+    "message": "上传文件",
+    "description": "上传文件按钮"
+  },
+  "btnExportLog": {
+    "message": "导出日志",
+    "description": "导出日志按钮"
+  },
+  "loginStatusUnknown": {
+    "message": "登录状态：未知",
+    "description": "登录状态未知文案"
+  },
+  "btnCheckLogin": {
+    "message": "检查登录",
+    "description": "检查登录按钮"
+  },
+  "btnOpenBbdc": {
+    "message": "打开不背单词",
+    "description": "打开不背单词按钮"
+  },
+  "sourceCollect": {
+    "message": "采集",
+    "description": "来源：网页采集"
+  },
+  "sourceImport": {
+    "message": "导入",
+    "description": "来源：CSV导入"
+  },
+  "sourceUpload": {
+    "message": "上传采集",
+    "description": "来源：文件上传采集"
+  },
+  "statusLoggedIn": {
+    "message": "已登录不背单词",
+    "description": "登录状态：已登录"
+  },
+  "statusLoggedOut": {
+    "message": "未登录不背单词",
+    "description": "登录状态：未登录"
+  },
+  "pushRunning": {
+    "message": "推送中 已推送 $1/$2 · 待推 $3",
+    "description": "推送进行中状态，参数：已推送数、总数、待推数"
+  },
+  "pushPaused": {
+    "message": "推送已暂停",
+    "description": "推送已暂停（无错误）"
+  },
+  "pushPausedWithError": {
+    "message": "推送已暂停：$1",
+    "description": "推送已暂停（有错误），参数：错误信息"
+  },
+  "pushCompleted": {
+    "message": "推送完成",
+    "description": "推送完成状态"
+  },
+  "pushIdle": {
+    "message": "推送状态：空闲",
+    "description": "推送空闲状态"
+  },
+  "exporting": {
+    "message": "导出中…",
+    "description": "导出进行中"
+  },
+  "exportCsvSuccess": {
+    "message": "已导出 CSV",
+    "description": "CSV导出成功"
+  },
+  "exportFailed": {
+    "message": "导出失败：$1",
+    "description": "导出失败，参数：错误信息"
+  },
+  "noErrorLogs": {
+    "message": "暂无错误日志",
+    "description": "无错误日志"
+  },
+  "exportedLogCount": {
+    "message": "已导出 $1 条错误日志",
+    "description": "已导出错误日志条数，参数：条数"
+  },
+  "exportLogFailed": {
+    "message": "导出日志失败",
+    "description": "导出日志失败"
+  },
+  "importingFile": {
+    "message": "导入 $1 中…",
+    "description": "导入文件进行中，参数：文件名"
+  },
+  "importParsedPending": {
+    "message": "已解析 $1，待确认",
+    "description": "导入解析完成待确认，参数：文件名"
+  },
+  "importFailed": {
+    "message": "导入失败：$1",
+    "description": "导入失败，参数：错误信息"
+  },
+  "uploadCollectingFile": {
+    "message": "上传采集 $1 中…",
+    "description": "上传采集进行中，参数：文件名"
+  },
+  "uploadParsedPending": {
+    "message": "已解析 $1，待确认",
+    "description": "上传采集解析完成待确认，参数：文件名"
+  },
+  "uploadFailed": {
+    "message": "上传采集失败：$1",
+    "description": "上传采集失败，参数：错误信息"
+  },
+  "confirmSummary": {
+    "message": "本次共计$1 $2 个单词，其中新词 $3 个",
+    "description": "确认页摘要，参数：来源（采集/导入/上传采集）、总数、新词数"
+  },
+  "pendingConfirm": {
+    "message": "待确认",
+    "description": "待确认状态"
+  },
+  "confirmFailed": {
+    "message": "确认失败：$1",
+    "description": "确认失败，参数：错误信息"
+  },
+  "confirmedPushStarted": {
+    "message": "已确认，推送已启动",
+    "description": "确认成功，推送已启动"
+  },
+  "cancelled": {
+    "message": "已取消",
+    "description": "已取消"
+  },
+  "checkingLogin": {
+    "message": "检查中…",
+    "description": "检查登录状态中"
+  },
+  "errorNoActiveTab": {
+    "message": "找不到活动标签页",
+    "description": "找不到活动标签页错误"
+  },
+  "errorCannotInject": {
+    "message": "此页面无法采集：chrome:// 等特殊页不支持注入",
+    "description": "无法注入错误"
+  },
+  "errorInvalidContentResponse": {
+    "message": "content script 未返回有效结果",
+    "description": "content script响应无效错误"
+  },
+  "errorRecollectNeeded": {
+    "message": "请重新采集",
+    "description": "需要重新采集错误"
+  },
+  "errorOnlyTextFiles": {
+    "message": "$1: 仅支持纯文本文件（$2）",
+    "description": "仅支持纯文本文件错误，参数：文件名、支持的后缀列表"
+  },
+  "errorConfirmMergeFailed": {
+    "message": "合并入库失败（批次 $1 词已保留待重试）：$2",
+    "description": "确认合并失败错误，参数：批次词数、错误详情"
+  },
+  "errorImportFailed": {
+    "message": "导入失败：$1",
+    "description": "导入失败错误，参数：错误详情"
+  },
+  "errorUploadFailed": {
+    "message": "上传采集失败：$1",
+    "description": "上传采集失败错误，参数：错误详情"
+  }
+}
