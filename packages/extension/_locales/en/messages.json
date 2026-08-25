@@ -10,5 +10,233 @@
   "extTooltip": {
     "message": "WordRadar",
     "description": "Extension tooltip text"
+  },
+  "popupTitle": {
+    "message": "WordRadar",
+    "description": "Popup page title"
+  },
+  "popupHeading": {
+    "message": "WordRadar",
+    "description": "Popup main heading"
+  },
+  "countTotal": {
+    "message": "Total Words",
+    "description": "Label for total word count"
+  },
+  "countPushed": {
+    "message": "Pushed",
+    "description": "Label for pushed word count"
+  },
+  "countPending": {
+    "message": "Pending",
+    "description": "Label for pending word count"
+  },
+  "statusCollecting": {
+    "message": "Collecting…",
+    "description": "Initial status text when collecting words"
+  },
+  "btnRecollect": {
+    "message": "Recollect",
+    "description": "Button to start collection again"
+  },
+  "btnConfirmPush": {
+    "message": "Confirm Push",
+    "description": "Button to confirm and push collected words"
+  },
+  "btnCancel": {
+    "message": "Cancel",
+    "description": "Button to cancel collection"
+  },
+  "pushStatusIdle": {
+    "message": "Push Status: Idle",
+    "description": "Push status when idle"
+  },
+  "pushSuccess": {
+    "message": "Success",
+    "description": "Label for successful pushes"
+  },
+  "pushExisting": {
+    "message": "Existing",
+    "description": "Label for words already in wordbook"
+  },
+  "pushFailed": {
+    "message": "Failed",
+    "description": "Label for failed pushes"
+  },
+  "btnRetryPending": {
+    "message": "Retry Pending",
+    "description": "Button to retry pending words"
+  },
+  "btnExportCsv": {
+    "message": "Export CSV",
+    "description": "Button to export word library as CSV"
+  },
+  "btnImportCsv": {
+    "message": "Import CSV",
+    "description": "Button to import CSV file"
+  },
+  "btnUploadFile": {
+    "message": "Upload File",
+    "description": "Button to upload file for collection"
+  },
+  "btnExportLog": {
+    "message": "Export Log",
+    "description": "Button to export error log"
+  },
+  "loginStatusUnknown": {
+    "message": "Login Status: Unknown",
+    "description": "Login status when unknown"
+  },
+  "btnCheckLogin": {
+    "message": "Check Login",
+    "description": "Button to check login status"
+  },
+  "btnOpenBbdc": {
+    "message": "Open 不背单词",
+    "description": "Button to open 不背单词 website"
+  },
+  "sourceCollect": {
+    "message": "Collect",
+    "description": "Source: web page collection"
+  },
+  "sourceImport": {
+    "message": "Import",
+    "description": "Source: CSV import"
+  },
+  "sourceUpload": {
+    "message": "Upload",
+    "description": "Source: file upload collection"
+  },
+  "statusLoggedIn": {
+    "message": "Logged into 不背单词",
+    "description": "Login status: logged in"
+  },
+  "statusLoggedOut": {
+    "message": "Not logged into 不背单词",
+    "description": "Login status: logged out"
+  },
+  "pushRunning": {
+    "message": "Pushing: pushed $1/$2 · $3 pending",
+    "description": "Push in progress status, params: pushed count, total, pending count"
+  },
+  "pushPaused": {
+    "message": "Push paused",
+    "description": "Push paused (no error)"
+  },
+  "pushPausedWithError": {
+    "message": "Push paused: $1",
+    "description": "Push paused (with error), params: error message"
+  },
+  "pushCompleted": {
+    "message": "Push completed",
+    "description": "Push completed status"
+  },
+  "pushIdle": {
+    "message": "Push Status: Idle",
+    "description": "Push idle status"
+  },
+  "exporting": {
+    "message": "Exporting…",
+    "description": "Export in progress"
+  },
+  "exportCsvSuccess": {
+    "message": "CSV exported",
+    "description": "CSV export successful"
+  },
+  "exportFailed": {
+    "message": "Export failed: $1",
+    "description": "Export failed, params: error message"
+  },
+  "noErrorLogs": {
+    "message": "No error logs",
+    "description": "No error logs available"
+  },
+  "exportedLogCount": {
+    "message": "Exported $1 error log entries",
+    "description": "Exported error log count, params: count"
+  },
+  "exportLogFailed": {
+    "message": "Failed to export log",
+    "description": "Export log failed"
+  },
+  "importingFile": {
+    "message": "Importing $1…",
+    "description": "Importing file in progress, params: filename"
+  },
+  "importParsedPending": {
+    "message": "Parsed $1, awaiting confirmation",
+    "description": "Import parsed awaiting confirmation, params: filename"
+  },
+  "importFailed": {
+    "message": "Import failed: $1",
+    "description": "Import failed, params: error message"
+  },
+  "uploadCollectingFile": {
+    "message": "Collecting $1…",
+    "description": "Upload collection in progress, params: filename"
+  },
+  "uploadParsedPending": {
+    "message": "Parsed $1, awaiting confirmation",
+    "description": "Upload collection parsed awaiting confirmation, params: filename"
+  },
+  "uploadFailed": {
+    "message": "Upload collection failed: $1",
+    "description": "Upload collection failed, params: error message"
+  },
+  "confirmSummary": {
+    "message": "Collected $2 words via $1 ($3 new)",
+    "description": "Confirmation page summary, params: source (Collect/Import/Upload), total, new count"
+  },
+  "pendingConfirm": {
+    "message": "Awaiting confirmation",
+    "description": "Awaiting confirmation status"
+  },
+  "confirmFailed": {
+    "message": "Confirmation failed: $1",
+    "description": "Confirmation failed, params: error message"
+  },
+  "confirmedPushStarted": {
+    "message": "Confirmed, push started",
+    "description": "Confirmation successful, push started"
+  },
+  "cancelled": {
+    "message": "Cancelled",
+    "description": "Cancelled"
+  },
+  "checkingLogin": {
+    "message": "Checking…",
+    "description": "Checking login status"
+  },
+  "errorNoActiveTab": {
+    "message": "No active tab found",
+    "description": "No active tab error"
+  },
+  "errorCannotInject": {
+    "message": "Cannot collect from this page: chrome:// and other special pages do not support injection",
+    "description": "Cannot inject error"
+  },
+  "errorInvalidContentResponse": {
+    "message": "Content script did not return a valid response",
+    "description": "Content script response invalid error"
+  },
+  "errorRecollectNeeded": {
+    "message": "Please collect again",
+    "description": "Need to recollect error"
+  },
+  "errorOnlyTextFiles": {
+    "message": "$1: Only plain text files supported ($2)",
+    "description": "Only text files error, params: filename, supported extensions list"
+  },
+  "errorConfirmMergeFailed": {
+    "message": "Confirm merge failed (batch $1 words retained for retry): $2",
+    "description": "Confirm merge failed error, params: batch word count, error details"
+  },
+  "errorImportFailed": {
+    "message": "Import failed: $1",
+    "description": "Import failed error, params: error details"
+  },
+  "errorUploadFailed": {
+    "message": "Upload collection failed: $1",
+    "description": "Upload collection failed error, params: error details"
   }
 }

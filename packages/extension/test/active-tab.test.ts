@@ -43,7 +43,7 @@ describe("requestCollection（popup 侧）", () => {
     expect(gateway.injectIntoTab).not.toHaveBeenCalled();
     expect(gateway.sendToTab).not.toHaveBeenCalled();
     expect(outcome.ok).toBe(false);
-    if (!outcome.ok) expect(outcome.error).toContain("活动标签页");
+    if (!outcome.ok) expect(outcome.error).toBe("No active tab found");
   });
 
   it("注入失败（chrome:// 等不可注入页）时归一为友好错误，不再 sendMessage", async () => {
@@ -59,7 +59,7 @@ describe("requestCollection（popup 侧）", () => {
 
     expect(sendToTab).not.toHaveBeenCalled();
     expect(outcome.ok).toBe(false);
-    if (!outcome.ok) expect(outcome.error).toContain("特殊页");
+    if (!outcome.ok) expect(outcome.error).toBe("Cannot collect from this page: chrome:// and other special pages do not support injection");
   });
 
   it("注入成功但 sendMessage 仍失败时归一为同一错误", async () => {
@@ -72,7 +72,7 @@ describe("requestCollection（popup 侧）", () => {
     const outcome = await requestCollection(gateway);
 
     expect(outcome.ok).toBe(false);
-    if (!outcome.ok) expect(outcome.error).toContain("无法采集");
+    if (!outcome.ok) expect(outcome.error).toBe("Cannot collect from this page: chrome:// and other special pages do not support injection");
   });
 
   it("应答形态非法时归一为错误", async () => {
@@ -83,6 +83,7 @@ describe("requestCollection（popup 侧）", () => {
     const outcome = await requestCollection(gateway);
 
     expect(outcome.ok).toBe(false);
+    if (!outcome.ok) expect(outcome.error).toBe("Content script did not return a valid response");
   });
 
   it("content 端 {ok:false} 应答原样透传", async () => {

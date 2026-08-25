@@ -28,6 +28,7 @@ import { createBbdcClient, type BbdcClient } from "./bbdc-client.js";
 import { chromeActionBadge, composeBadge } from "./action-badge.js";
 import { PushCoordinator } from "./push-coordinator.js";
 import { createErrorLogger, type ErrorLogger } from "./error-log.js";
+import { t1, t2 } from "./i18n.js";
 
 /** background 写入的 IndexedDB 仓储边界（service worker 独占）。 */
 export interface BackgroundRepository {
@@ -196,7 +197,7 @@ export function createBackgroundListener(deps: BackgroundListenerDeps) {
           // 确认失败（issue #25）：批次保留 + 错误写环形缓冲
           errorLogger.log({
             stage: "confirm",
-            summary: `合并入库失败（批次 ${batch.length} 词已保留待重试）：${errorSummary(error)}`,
+            summary: t2("errorConfirmMergeFailed", batch.length, errorSummary(error)),
           });
           sendResponse({ ok: false, error: "confirm-failed" });
         })
@@ -263,7 +264,7 @@ export function createBackgroundListener(deps: BackgroundListenerDeps) {
             sendResponse(result);
           }
         }, (error: unknown) => {
-          errorLogger.log({ stage: "import", summary: `导入失败：${errorSummary(error)}` });
+          errorLogger.log({ stage: "import", summary: t1("errorImportFailed", errorSummary(error)) });
           sendResponse({ ok: false, error: "import-failed" });
         })
         .catch(() => undefined);
@@ -288,7 +289,7 @@ export function createBackgroundListener(deps: BackgroundListenerDeps) {
             sendResponse(result);
           }
         }, (error: unknown) => {
-          errorLogger.log({ stage: "upload", summary: `上传采集失败：${errorSummary(error)}` });
+          errorLogger.log({ stage: "upload", summary: t1("errorUploadFailed", errorSummary(error)) });
           sendResponse({ ok: false, error: "upload-failed" });
         })
         .catch(() => undefined);
@@ -376,7 +377,7 @@ async function handleUploadFile(
   const allowed = UPLOAD_TEXT_SUFFIXES.some((suffix) => lower.endsWith(`.${suffix}`));
   if (!allowed) {
     const list = UPLOAD_TEXT_SUFFIXES.map((suffix) => `.${suffix}`).join(" / ");
-    return { ok: false, error: `${fileName}: 仅支持纯文本文件（${list}）` };
+    return { ok: false, error: t2("errorOnlyTextFiles", fileName, list) };
   }
   const entries = deps.extract(text);
   const newCount = await deps.repository.countNew(entries);

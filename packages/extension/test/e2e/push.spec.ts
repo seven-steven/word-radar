@@ -29,7 +29,7 @@ test("confirm merges the batch and pushes the whole pending pool to mocked bbdc"
   await article.bringToFront();
   await popup.getByTestId("collect").click();
   await expect(popup.getByTestId("confirm-summary")).toHaveText(
-    /本次共计采集 \d+ 个单词，其中新词 [1-9]\d* 个/,
+    /Collected \d+ words via Collect \([1-9]\d* new\)/,
     { timeout: 15_000 },
   );
 
@@ -107,7 +107,7 @@ test("auth failure pauses the push and shows error state", async ({
   await article.bringToFront();
   await popup.getByTestId("collect").click();
   await expect(popup.getByTestId("confirm-summary")).toHaveText(
-    /本次共计采集 \d+ 个单词，其中新词 [1-9]\d* 个/,
+    /Collected \d+ words via Collect \([1-9]\d* new\)/,
     { timeout: 15_000 },
   );
 
@@ -170,7 +170,7 @@ test("push progress updates live in popup and badge shows x/y then ✓ (issue #2
   await article.bringToFront();
   await popup.getByTestId("collect").click();
   await expect(popup.getByTestId("confirm-summary")).toHaveText(
-    /本次共计采集 \d+ 个单词，其中新词 [1-9]\d* 个/,
+    /Collected \d+ words via Collect \([1-9]\d* new\)/,
     { timeout: 15_000 },
   );
 
@@ -180,7 +180,7 @@ test("push progress updates live in popup and badge shows x/y then ✓ (issue #2
   // 等目标推送轮启动（跳过 boot checkLogin 触发的空待推恢复轮 0/0）
   await expect(async () => {
     const text = await popup.getByTestId("push-status").textContent();
-    const match = text?.match(/已推送 (\d+)\/(\d+)/);
+    const match = text?.match(/pushed (\d+)\/(\d+)/);
     expect(match && Number(match[2]) >= 6).toBeTruthy();
   }).toPass({ timeout: 15_000 });
   // 推送期间采样（popup 前台保证 500ms 轮询不被节流）：
@@ -191,7 +191,7 @@ test("push progress updates live in popup and badge shows x/y then ✓ (issue #2
   let sawBadgeProgress = false;
   for (;;) {
     const text = await popup.getByTestId("push-status").textContent();
-    const match = text?.match(/已推送 (\d+)\/(\d+)/);
+    const match = text?.match(/pushed (\d+)\/(\d+)/);
     if (!match) break; // 推送结束（completed/paused 文案不含 x/y）
     const processed = Number(match[1]);
     const total = Number(match[2]);

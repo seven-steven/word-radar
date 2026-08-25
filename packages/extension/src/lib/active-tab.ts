@@ -4,6 +4,7 @@ import {
   type CollectResponse,
   type CollectWordsMessage,
 } from "./messages.js";
+import { t, t1 } from "./i18n.js";
 
 /**
  * popup 侧的 Chrome tabs API 边界：全部 chrome.* 调用收在这个小模块，
@@ -73,17 +74,17 @@ export async function requestCollection(
 ): Promise<CollectOutcome> {
   const tabId = await gateway.queryActiveTabId();
   if (tabId === undefined) {
-    return { ok: false, error: "找不到活动标签页" };
+    return { ok: false, error: t("errorNoActiveTab") };
   }
   let raw: unknown;
   try {
     await gateway.injectIntoTab(tabId);
     raw = await gateway.sendToTab(tabId, { type: COLLECT_WORDS });
   } catch {
-    return { ok: false, error: "此页面无法采集：chrome:// 等特殊页不支持注入" };
+    return { ok: false, error: t("errorCannotInject") };
   }
   if (!isCollectResponse(raw)) {
-    return { ok: false, error: "content script 未返回有效结果" };
+    return { ok: false, error: t("errorInvalidContentResponse") };
   }
   return narrowToOutcome(raw);
 }

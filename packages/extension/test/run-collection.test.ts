@@ -63,7 +63,7 @@ describe("runCollection 编排", () => {
     const response = await runCollection({ collectText: () => "run", broadcast });
 
     // review S-4：批次未驻留时确认页语义已失效，不能按 newCount=total 谎报
-    expect(response).toEqual({ ok: false, error: "请重新采集" });
+    expect(response).toEqual({ ok: false, error: "Please collect again" });
   });
 
   it("SW 应答缺 newCount 字段同样归入请重新采集", async () => {
@@ -71,7 +71,7 @@ describe("runCollection 编排", () => {
 
     const response = await runCollection({ collectText: () => "run", broadcast });
 
-    expect(response).toEqual({ ok: false, error: "请重新采集" });
+    expect(response).toEqual({ ok: false, error: "Please collect again" });
   });
 
   it("broadcast 抛错时不吞掉", async () => {

@@ -195,6 +195,7 @@ describe("createBackgroundListener UPLOAD_FILE（issue #24）", () => {
     await flush();
     expect(extract).not.toHaveBeenCalled();
     expect(repository.countNew).not.toHaveBeenCalled();
+    // Now the test mock does real substitution, so we can assert on the actual error message content
     expect(sendResponse.mock.calls[0]?.[0]).toEqual({
       ok: false,
       error: expect.stringContaining("photo.png"),

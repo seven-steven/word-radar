@@ -5,6 +5,7 @@ import {
   type CollectResponse,
   type WordsCollectedMessage,
 } from "./messages.js";
+import { t } from "./i18n.js";
 
 /**
  * 采集编排（content script 的核心动作，可注入依赖便于单测）：
@@ -31,7 +32,7 @@ export async function runCollection(deps: RunCollectionDeps): Promise<CollectRes
   // 意味着 SW 内存中没有待确认批次，确认页语义已失效——不能谎报
   // newCount=total（review S-4），显式要求用户重新采集。
   if (!isBatchPreview(ack)) {
-    return { ok: false, error: "请重新采集" };
+    return { ok: false, error: t("errorRecollectNeeded") };
   }
   return { ok: true, total: entries.length, newCount: ack.newCount };
 }

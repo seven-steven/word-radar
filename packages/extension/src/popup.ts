@@ -14,6 +14,9 @@
  * 本地文件操作收在 csv-file.ts（下载 / 文件选择，可注入）。
  *
  * 词库读写 + HTTP 调用 全部发生在 service worker；popup 不直连 IndexedDB、不发 HTTP。
+ *
+ * i18n 静态文本国际化（issue #30）：通过 data-i18n 属性标记静态文本元素，
+ * 在 popup 启动时用 chrome.i18n.getMessage() 回填，并动态设置 <html lang>。
  */
 import { CORE_VERSION } from "@word-radar/core";
 import {
@@ -36,8 +39,42 @@ import {
 import { browserCsvFileGateway } from "./lib/csv-file.js";
 import { defaultErrorLogStorage, formatErrorLog, readErrorLog } from "./lib/error-log.js";
 import type { PushStatus } from "./lib/messages.js";
+import { t, t1, t2, t3, t4 } from "./lib/i18n.js";
 
 const BBDC_HOME_URL = "https://bbdc.cn/";
+
+/**
+ * i18n 初始化（issue #30）：为所有带有 data-i18n 属性的元素回填本地化文本，
+ * 并设置 <html lang> 属性匹配当前 locale。
+ */
+function initI18n(): void {
+  // 设置 html lang 属性
+  const htmlLang = chrome.i18n.getUILanguage?.() || "zh-CN";
+  const htmlElement = document.documentElement;
+  if (htmlElement) {
+    // Chrome returns language codes like "zh-CN", "en-US", etc.
+    htmlElement.setAttribute("lang", htmlLang);
+  }
+
+  // 回填所有带有 data-i18n 属性的元素（包括 <title> 标签）
+  const i18nElements = document.querySelectorAll<HTMLElement>("[data-i18n]");
+  for (const element of i18nElements) {
+    const key = element.getAttribute("data-i18n");
+    if (key) {
+      const message = chrome.i18n.getMessage(key);
+      if (message) {
+        element.textContent = message;
+      }
+    }
+  }
+}
+
+// 在 DOM 就绪后立即执行 i18n 初始化
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", initI18n);
+} else {
+  initI18n();
+}
 
 const totalEl = document.querySelector<HTMLElement>('[data-testid="total"]');
 const pendingEl = document.querySelector<HTMLElement>('[data-testid="pending"]');
@@ -92,10 +129,10 @@ function renderLogin(state: LoginState): void {
   loginStatusEl.dataset.state = state;
   loginStatusEl.textContent =
     state === "logged-in"
-      ? "已登录不背单词"
+      ? t("statusLoggedIn")
       : state === "logged-out"
-        ? "未登录不背单词"
-        : "登录状态：未知";
+        ? t("statusLoggedOut")
+        : t("loginStatusUnknown");
   if (openBbdcButton) {
     openBbdcButton.hidden = state !== "logged-out";
   }
@@ -103,12 +140,14 @@ function renderLogin(state: LoginState): void {
 
 function renderPushStatus(status: PushStatus): void {
   const label = status.phase === "running"
-    ? `推送中 已推送 ${status.processed}/${status.total} · 待推 ${status.pending}`
+    ? t3("pushRunning", status.processed, status.total, status.pending)
     : status.phase === "paused"
-      ? `推送已暂停${status.error ? `：${status.error}` : ""}`
+      ? status.error
+        ? t1("pushPausedWithError", status.error)
+        : t("pushPaused")
       : status.phase === "completed"
-        ? "推送完成"
-        : "推送状态：空闲";
+        ? t("pushCompleted")
+        : t("pushIdle");
   if (pushStatusEl) pushStatusEl.textContent = label;
   if (pushStatusEl) pushStatusEl.dataset.phase = status.phase;
   if (pushSucceededEl) pushSucceededEl.textContent = String(status.succeeded);
@@ -163,14 +202,14 @@ function exportFileName(extension: string, now: Date): string {
 /** T11 导出：向 SW 要 CSV 文本，交给文件网关触发浏览器下载。 */
 async function exportCsv(): Promise<void> {
   if (exportCsvButton) exportCsvButton.disabled = true;
-  renderSyncStatus("导出中…");
+  renderSyncStatus(t("exporting"));
   try {
     const outcome = await fetchExportCsv(chromeSwChannel);
     if (outcome.ok) {
       browserCsvFileGateway.download(csvExportFileName(), outcome.csv);
-      renderSyncStatus("已导出 CSV");
+      renderSyncStatus(t("exportCsvSuccess"));
     } else {
-      renderSyncStatus(`导出失败：${outcome.error}`);
+      renderSyncStatus(t1("exportFailed", outcome.error));
     }
   } finally {
     if (exportCsvButton) exportCsvButton.disabled = false;
@@ -183,17 +222,17 @@ async function exportCsv(): Promise<void> {
  */
 async function exportLog(): Promise<void> {
   if (exportLogButton) exportLogButton.disabled = true;
-  renderSyncStatus("导出中…");
+  renderSyncStatus(t("exporting"));
   try {
     const records = await readErrorLog(defaultErrorLogStorage());
     if (records.length === 0) {
-      renderSyncStatus("暂无错误日志");
+      renderSyncStatus(t("noErrorLogs"));
       return;
     }
     browserCsvFileGateway.download(logExportFileName(), formatErrorLog(records));
-    renderSyncStatus(`已导出 ${records.length} 条错误日志`);
+    renderSyncStatus(t1("exportedLogCount", records.length));
   } catch {
-    renderSyncStatus("导出日志失败");
+    renderSyncStatus(t("exportLogFailed"));
   } finally {
     if (exportLogButton) exportLogButton.disabled = false;
   }
@@ -208,15 +247,15 @@ async function importCsvFromFile(): Promise<void> {
   const picked = await browserCsvFileGateway.pickCsvText();
   if (!picked) return; // 用户取消：静默
   if (importCsvButton) importCsvButton.disabled = true;
-  renderSyncStatus(`导入 ${picked.name} 中…`);
+  renderSyncStatus(t1("importingFile", picked.name));
   try {
     const outcome = await importCsv(chromeSwChannel, picked.text, picked.name);
     if (outcome.ok) {
       // 批次已驻留 SW 内存：展示确认页（措辞用「导入」，计数语义与采集一致）
-      renderConfirmPage("导入", outcome.total, outcome.newCount);
-      renderSyncStatus(`已解析 ${picked.name}，待确认`);
+      renderConfirmPage("sourceImport", outcome.total, outcome.newCount);
+      renderSyncStatus(t1("importParsedPending", picked.name));
     } else {
-      renderSyncStatus(`导入失败：${outcome.error}`);
+      renderSyncStatus(t1("importFailed", outcome.error));
     }
   } finally {
     if (importCsvButton) importCsvButton.disabled = false;
@@ -234,17 +273,17 @@ async function uploadFileFromDisk(): Promise<void> {
   const picked = await browserCsvFileGateway.pickUploadText();
   if (!picked) return; // 用户取消：静默
   if (uploadFileButton) uploadFileButton.disabled = true;
-  renderSyncStatus(`上传采集 ${picked.name} 中…`);
+  renderSyncStatus(t1("uploadCollectingFile", picked.name));
   hideConfirmPage();
   try {
     const outcome = await uploadFile(chromeSwChannel, picked.text, picked.name);
     if (outcome.ok) {
       // 批次已驻留 SW 内存：展示确认页（措辞用「上传采集」，计数语义与采集一致）
-      renderConfirmPage("上传采集", outcome.total, outcome.newCount);
-      if (statusEl) statusEl.textContent = "待确认";
-      renderSyncStatus(`已解析 ${picked.name}，待确认`);
+      renderConfirmPage("sourceUpload", outcome.total, outcome.newCount);
+      if (statusEl) statusEl.textContent = t("pendingConfirm");
+      renderSyncStatus(t1("uploadParsedPending", picked.name));
     } else {
-      renderSyncStatus(`上传采集失败：${outcome.error}`);
+      renderSyncStatus(t1("uploadFailed", outcome.error));
     }
   } finally {
     if (uploadFileButton) uploadFileButton.disabled = false;
@@ -266,7 +305,7 @@ async function refreshLogin(): Promise<void> {
 }
 
 async function checkLogin(): Promise<void> {
-  if (loginStatusEl) loginStatusEl.textContent = "检查中…";
+  if (loginStatusEl) loginStatusEl.textContent = t("checkingLogin");
   if (checkLoginButton) checkLoginButton.disabled = true;
   try {
     await refreshLogin();
@@ -277,15 +316,16 @@ async function checkLogin(): Promise<void> {
 
 /**
  * 确认页：展示待确认批次的总数 / 新词数，并挂起确认 / 取消按钮。
- * source 仅影响措辞（采集 / 导入），计数语义与按钮行为完全一致（review S-3）。
+ * sourceKey 仅影响措辞（采集 / 导入 / 上传采集），计数语义与按钮行为完全一致（review S-3）。
  */
 function renderConfirmPage(
-  source: "采集" | "导入" | "上传采集",
+  sourceKey: "sourceCollect" | "sourceImport" | "sourceUpload",
   total: number,
   newCount: number,
 ): void {
   if (confirmSummaryEl) {
-    confirmSummaryEl.textContent = `本次共计${source} ${total} 个单词，其中新词 ${newCount} 个`;
+    const source = t(sourceKey);
+    confirmSummaryEl.textContent = t3("confirmSummary", source, total, newCount);
   }
   if (confirmSection) confirmSection.hidden = false;
   if (confirmPushButton) confirmPushButton.disabled = false;
@@ -296,15 +336,15 @@ function hideConfirmPage(): void {
 }
 
 async function collect(): Promise<void> {
-  if (statusEl) statusEl.textContent = "采集中…";
+  if (statusEl) statusEl.textContent = t("statusCollecting");
   if (collectButton) collectButton.disabled = true;
   hideConfirmPage();
   try {
     const outcome = await requestCollection(chromeTabsGateway);
     if (outcome.ok) {
       // 确认闸门：采集结果只在 SW 内存（待确认批次），此处仅展示预览
-      renderConfirmPage("采集", outcome.total, outcome.newCount);
-      if (statusEl) statusEl.textContent = "待确认";
+      renderConfirmPage("sourceCollect", outcome.total, outcome.newCount);
+      if (statusEl) statusEl.textContent = t("pendingConfirm");
     } else if (statusEl) {
       statusEl.textContent = outcome.error;
     }
@@ -321,13 +361,13 @@ async function confirmPush(): Promise<void> {
     const outcome = await confirmCollected(chromeSwChannel);
     if (outcome.ok) {
       renderCounts(outcome.counts.total, outcome.counts.pending);
-      if (statusEl) statusEl.textContent = "已确认，推送已启动";
+      if (statusEl) statusEl.textContent = t("confirmedPushStarted");
       hideConfirmPage();
       // 确认即推送：拉起进度轮询（推送在 SW，popup 关闭不中断）
       await refreshPushStatus();
       startPushStatusPolling();
     } else {
-      if (statusEl) statusEl.textContent = `确认失败：${outcome.error}`;
+      if (statusEl) statusEl.textContent = t1("confirmFailed", outcome.error);
     }
   } finally {
     if (confirmPushButton) confirmPushButton.disabled = false;
@@ -339,7 +379,7 @@ async function confirmPush(): Promise<void> {
 async function cancelCollect(): Promise<void> {
   await discardCollected(chromeSwChannel);
   hideConfirmPage();
-  if (statusEl) statusEl.textContent = "已取消";
+  if (statusEl) statusEl.textContent = t("cancelled");
 }
 
 collectButton?.addEventListener("click", () => {

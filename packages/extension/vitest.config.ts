@@ -9,5 +9,7 @@ export default defineConfig({
     // e2e 用例为 test/e2e/*.spec.ts，不匹配 include（*.test.ts），
     // 由 Playwright 单独驱动（pnpm e2e），无需在此排除。
     include: ["test/**/*.test.ts"],
+    // 加载测试 setup 文件，mock chrome APIs
+    setupFiles: ["./test/setup.ts"],
   },
 });

@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>WordRadar</title>
+    <title data-i18n="popupTitle">WordRadar</title>
     <style>
       body {
         margin: 0;
@@ -119,58 +119,58 @@
   </head>
   <body>
     <main>
-      <h1>WordRadar</h1>
+      <h1 data-i18n="popupHeading">WordRadar</h1>
       <div class="counts">
         <div class="count-item">
-          <span class="count-label">词库总词数</span>
+          <span class="count-label" data-i18n="countTotal">词库总词数</span>
           <span class="count-value" data-testid="total">—</span>
         </div>
         <div class="count-item">
-          <span class="count-label">已推送</span>
+          <span class="count-label" data-i18n="countPushed">已推送</span>
           <span class="count-value" data-testid="pushed">—</span>
         </div>
         <div class="count-item">
-          <span class="count-label">待推</span>
+          <span class="count-label" data-i18n="countPending">待推</span>
           <span class="count-value" data-testid="pending">—</span>
         </div>
       </div>
-      <p data-testid="status">采集中…</p>
-      <button type="button" data-testid="collect">重新采集</button>
+      <p data-testid="status" data-i18n="statusCollecting">采集中…</p>
+      <button type="button" data-testid="collect" data-i18n="btnRecollect">重新采集</button>
       <!-- 确认闸门（issue #22）：待确认批次只存活于内存，确认才入库+推送 -->
       <section class="confirm" data-testid="confirm-section" hidden>
         <p class="confirm-summary" data-testid="confirm-summary"></p>
         <div class="confirm-actions">
-          <button type="button" data-testid="confirm-push">确认推送</button>
-          <button type="button" data-testid="cancel-collect">取消</button>
+          <button type="button" data-testid="confirm-push" data-i18n="btnConfirmPush">确认推送</button>
+          <button type="button" data-testid="cancel-collect" data-i18n="btnCancel">取消</button>
         </div>
       </section>
       <section class="push">
-        <div class="push-stats" data-testid="push-status">推送状态：空闲</div>
+        <div class="push-stats" data-testid="push-status" data-i18n="pushStatusIdle">推送状态：空闲</div>
         <div class="push-stats">
-          成功 <span data-testid="push-succeeded">0</span> ·
-          已存在 <span data-testid="push-existing">0</span> ·
-          失败 <span data-testid="push-failed">0</span>
+          <span data-i18n="pushSuccess">成功</span> <span data-testid="push-succeeded">0</span> ·
+          <span data-i18n="pushExisting">已存在</span> <span data-testid="push-existing">0</span> ·
+          <span data-i18n="pushFailed">失败</span> <span data-testid="push-failed">0</span>
         </div>
-        <button type="button" data-testid="retry-push">重试待推</button>
+        <button type="button" data-testid="retry-push" data-i18n="btnRetryPending">重试待推</button>
       </section>
       <section class="sync">
         <div class="sync-actions">
-          <button type="button" data-testid="export-csv">导出 CSV</button>
-          <button type="button" data-testid="import-csv">导入 CSV</button>
+          <button type="button" data-testid="export-csv" data-i18n="btnExportCsv">导出 CSV</button>
+          <button type="button" data-testid="import-csv" data-i18n="btnImportCsv">导入 CSV</button>
           <!-- 上传文件采集（issue #24）：.txt/.md 文本走同一提取管线与确认闸门 -->
-          <button type="button" data-testid="upload-file">上传文件</button>
+          <button type="button" data-testid="upload-file" data-i18n="btnUploadFile">上传文件</button>
           <!-- 导出日志（issue #25）：storage.local 环形缓冲错误日志 → 可读文本 -->
-          <button type="button" data-testid="export-log">导出日志</button>
+          <button type="button" data-testid="export-log" data-i18n="btnExportLog">导出日志</button>
         </div>
         <p class="sync-status" data-testid="sync-status"></p>
       </section>
       <section class="login">
         <div class="login-row">
-          <span class="login-status" data-testid="login-status" data-state="unknown">登录状态：未知</span>
+          <span class="login-status" data-testid="login-status" data-state="unknown" data-i18n="loginStatusUnknown">登录状态：未知</span>
         </div>
         <div class="login-actions">
-          <button type="button" data-testid="check-login">检查登录</button>
-          <button type="button" data-testid="open-bbdc" hidden>打开不背单词</button>
+          <button type="button" data-testid="check-login" data-i18n="btnCheckLogin">检查登录</button>
+          <button type="button" data-testid="open-bbdc" hidden data-i18n="btnOpenBbdc">打开不背单词</button>
         </div>
       </section>
       <p data-testid="version"></p>

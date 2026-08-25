@@ -25,7 +25,7 @@ test("collects words from a raw-like pre-only page", async ({
   await raw.bringToFront();
   await popup.getByTestId("collect").click();
   await expect(popup.getByTestId("confirm-summary")).toHaveText(
-    /本次共计采集 \d+ 个单词，其中新词 \d+ 个/,
+    /Collected \d+ words via Collect \(\d+ new\)/,
     { timeout: 15_000 },
   );
   await popup.close();
@@ -46,7 +46,7 @@ test("shows 不可注入 error when active tab is an extension page", async ({
   const popup = await extContext.newPage();
   await popup.goto(popupUrl);
   await expect(popup.getByTestId("status")).toHaveText(
-    /此页面无法采集.*特殊页不支持注入/s,
+    /Cannot collect from this page: chrome:\/\/ and other special pages do not support injection/s,
     { timeout: 15_000 },
   );
   await popup.close();
