@@ -3,8 +3,8 @@
  * 四个 render 视图初始渲染 + 按钮 → SW 消息回路。
  * 覆盖 popup.ts 胶水层（CONTEXT.md「已知未覆盖」盲区）。
  *
- * i18n 国际化（issue #30）：e2e 测试需要根据浏览器实际 locale 断言文案。
- * Chromium 浏览器默认使用 en-US locale，因此断言应使用英文本地化文案。
+ * i18n 国际化（issue #28）：测试 Chromium 在 fixtures.ts 钉死 zh-CN locale，
+ * 断言按中文渲染（也持续验证「中文环境显示中文」这一 issue #28 的主诉）。
  */
 import { writeFileSync } from "node:fs";
 import { test, expect } from "./fixtures.js";
@@ -25,8 +25,8 @@ test("popup renders counts and version on open", async ({ extContext, popupUrl }
   // 确认页在采集应答前隐藏
   await expect(page.getByTestId("confirm-section")).toBeHidden();
 
-  // i18n（issue #30）：静态文本已本地化，检查按钮文本为英文
-  await expect(page.getByTestId("collect")).toHaveText("Recollect");
+  // i18n（issue #28）：zh-CN locale 下静态文本为中文
+  await expect(page.getByTestId("collect")).toHaveText("重新采集");
 
   await page.close();
 });
@@ -48,8 +48,8 @@ test("check-login button round-trips through service worker", async ({
     mockBbdc.requests.some((r) => r.url.includes("/api/check-login")),
   ).toBe(true);
 
-  // i18n（issue #30）：检查按钮文本保持英文
-  await expect(page.getByTestId("check-login")).toHaveText("Check Login");
+  // i18n（issue #28）：zh-CN 按钮文案
+  await expect(page.getByTestId("check-login")).toHaveText("检查登录");
 
   await page.close();
 });
@@ -69,8 +69,8 @@ test("logged-out state shows the open-bbdc button", async ({
   );
   await expect(page.getByTestId("open-bbdc")).toBeVisible();
 
-  // i18n（issue #30）：检查按钮文本保持英文
-  await expect(page.getByTestId("open-bbdc")).toHaveText("Open 不背单词");
+  // i18n（issue #28）：zh-CN 按钮文案
+  await expect(page.getByTestId("open-bbdc")).toHaveText("打开不背单词");
 
   await page.close();
 });
@@ -86,8 +86,8 @@ test("push status renders with numeric counters", async ({ extContext, popupUrl 
   );
   await expect(page.getByTestId("push-succeeded")).toHaveText(/^\d+$/);
 
-  // i18n（issue #30）：检查静态按钮文本为英文
-  await expect(page.getByTestId("retry-push")).toHaveText("Retry Pending");
+  // i18n（issue #28）：zh-CN 按钮文案
+  await expect(page.getByTestId("retry-push")).toHaveText("重试待推");
 
   await page.close();
 });
@@ -112,9 +112,9 @@ test("CSV import goes through the confirmation gate (issue #22 review S-3)", asy
   ]);
   await chooser.setFiles(csvPath);
 
-  // i18n（issue #30）：e2e 使用 en-US locale，动态文案已本地化为英文
+  // i18n（issue #28）：zh-CN 确认摘要，来源措辞「导入」
   await expect(page.getByTestId("confirm-summary")).toHaveText(
-    /Collected \d+ words via Import \(\d+ new\)/,
+    /本次共计导入 \d+ 个单词，其中新词 \d+ 个/,
     { timeout: 10_000 },
   );
   // 确认前不落库
@@ -133,9 +133,9 @@ test("CSV import goes through the confirmation gate (issue #22 review S-3)", asy
     page.getByTestId("import-csv").click(),
   ]);
   await chooser2.setFiles(csvPath);
-  // i18n（issue #30）：e2e 使用 en-US locale，动态文案已本地化为英文
+  // i18n（issue #28）：zh-CN 确认摘要，词已在库 → 新词 0
   await expect(page.getByTestId("confirm-summary")).toHaveText(
-    /Collected \d+ words via Import \(0 new\)/, // 词已在库
+    /本次共计导入 \d+ 个单词，其中新词 0 个/, // 词已在库
     { timeout: 10_000 },
   );
   await page.getByTestId("cancel-collect").click();
@@ -180,9 +180,9 @@ test("upload-file target walks collect → confirm → push with .txt text (issu
     page.getByTestId("upload-file").click(),
   ]);
   await chooser.setFiles(txtPath);
-  // i18n（issue #30）：e2e 使用 en-US locale，动态文案已本地化为英文
+  // i18n（issue #28）：zh-CN 确认摘要，来源措辞「上传采集」
   await expect(page.getByTestId("confirm-summary")).toHaveText(
-    /Collected \d+ words via Upload \(\d+ new\)/,
+    /本次共计上传采集 \d+ 个单词，其中新词 \d+ 个/,
     { timeout: 10_000 },
   );
   // 确认前：不落库、零网络请求（上传路径确认前无任何 bbdc/langeasy 请求）
@@ -245,9 +245,9 @@ test("upload-file target accepts .csv as plain text via NL pipeline, not IMPORT_
     page.getByTestId("upload-file").click(),
   ]);
   await chooser.setFiles(csvPath);
-  // i18n（issue #30）：e2e 使用 en-US locale，动态文案已本地化为英文
+  // i18n（issue #28）：zh-CN 确认摘要，来源措辞「上传采集」（NL 提词管线）
   await expect(page.getByTestId("confirm-summary")).toHaveText(
-    /Collected \d+ words via Upload \(\d+ new\)/,
+    /本次共计上传采集 \d+ 个单词，其中新词 \d+ 个/,
     { timeout: 10_000 },
   );
   // 确认前零网络（popup 打开本身的 check-login 恢复路径除外；不上传、不推送）
@@ -276,8 +276,9 @@ test("upload-file target rejects non plain-text (e.g. .png) file with zero write
     page.getByTestId("upload-file").click(),
   ]);
   await chooser.setFiles(pngPath);
+  // i18n（issue #28）：zh-CN 的纯文本拒绝文案
   await expect(page.getByTestId("sync-status")).toHaveText(
-    /Only plain text files supported/,
+    /仅支持纯文本文件/,
     { timeout: 10_000 },
   );
   // 零写入 + 不出现确认页；网络零增量（上一用例的推送循环可能仍在后台
@@ -305,14 +306,15 @@ test("export-log exports storage.local error ring buffer as text (issue #25)", a
   });
 
   await page.getByTestId("export-log").click();
-  // i18n（issue #30）：动态文案在不同 locale 下显示不同文本，使用更灵活的断言
-  await expect(page.getByTestId("sync-status")).toHaveText(/exported.*\d+.*error.*log/i);
+  // i18n（issue #28）：zh-CN 动态文案「已导出 N 条错误日志」
+  await expect(page.getByTestId("sync-status")).toHaveText(/已导出 \d+ 条错误日志/);
 
   // 清空后再导出：提示暂无
   await page.evaluate(async () => {
     await chrome.storage.local.remove("errorLog");
   });
   await page.getByTestId("export-log").click();
-  await expect(page.getByTestId("sync-status")).toHaveText(/no.*error.*log/i);
+  // i18n（issue #28）：zh-CN「暂无错误日志」
+  await expect(page.getByTestId("sync-status")).toHaveText(/暂无错误日志/);
   await page.close();
 });

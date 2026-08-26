@@ -12,11 +12,11 @@
     "description": "扩展提示文本"
   },
   "popupTitle": {
-    "message": "WordRadar",
+    "message": "单词雷达",
     "description": "弹窗页面标题"
   },
   "popupHeading": {
-    "message": "WordRadar",
+    "message": "单词雷达",
     "description": "弹窗主标题"
   },
   "countTotal": {

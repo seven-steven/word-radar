@@ -74,24 +74,3 @@ export function t3(
   return key;
 }
 
-/**
- * 获取本地化消息（四个参数）。
- * 用于「本次共计 ${source} ${total} 个单词，其中新词 ${newCount} 个」等模板。
- */
-export function t4(
-  key: string,
-  arg1: string | number,
-  arg2: string | number,
-  arg3: string | number,
-  arg4: string | number,
-): string {
-  if (isChromeI18nAvailable()) {
-    return chrome.i18n.getMessage(key, [
-      String(arg1),
-      String(arg2),
-      String(arg3),
-      String(arg4),
-    ]) || key;
-  }
-  return key;
-}

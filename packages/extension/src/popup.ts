@@ -39,7 +39,7 @@ import {
 import { browserCsvFileGateway } from "./lib/csv-file.js";
 import { defaultErrorLogStorage, formatErrorLog, readErrorLog } from "./lib/error-log.js";
 import type { PushStatus } from "./lib/messages.js";
-import { t, t1, t2, t3, t4 } from "./lib/i18n.js";
+import { t, t1, t3 } from "./lib/i18n.js";
 
 const BBDC_HOME_URL = "https://bbdc.cn/";
 

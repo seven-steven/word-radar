@@ -32,7 +32,7 @@ test("real raw.githubusercontent.com page collects (pre-text with CSP sandbox he
   await raw.bringToFront();
   await popup.getByTestId("collect").click();
   await expect(popup.getByTestId("confirm-summary")).toHaveText(
-    /Collected \d+ words via Collect \(\d+ new\)/,
+    /本次共计采集 \d+ 个单词，其中新词 \d+ 个/,
     { timeout: 15_000 },
   );
   await popup.close();

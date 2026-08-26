@@ -7,7 +7,7 @@
  * 注意：popup 打开时会自动对活动标签页触发一次采集，所以「先开 fixture 页、
  * 再开 popup」本身就走完整链路；再点一次「重新采集」按钮覆盖手动路径。
  *
- * i18n（issue #30）：e2e 使用 en-US locale，动态文案已本地化为英文
+ * i18n（issue #28）：测试 Chromium 在 fixtures.ts 钉死 zh-CN locale，断言中文渲染
  */
 import { test, expect } from "./fixtures.js";
 
@@ -33,9 +33,9 @@ test("collects rare words from a fixture page into the vocabulary", async ({
   // 手动点「重新采集」，采集目标落到文章页。
   await article.bringToFront();
   await popup.getByTestId("collect").click();
-  // i18n（issue #30）：e2e 使用 en-US locale，动态文案已本地化为英文
+  // i18n（issue #28）：zh-CN locale 下确认摘要为「本次共计采集 N 个单词，其中新词 M 个」
   await expect(popup.getByTestId("confirm-summary")).toHaveText(
-    /Collected \d+ words via Collect \([1-9]\d* new\)/,
+    /本次共计采集 \d+ 个单词，其中新词 [1-9]\d* 个/,
     { timeout: 15_000 },
   );
   // 确认前批次只在内存：词库计数不变
@@ -52,9 +52,9 @@ test("collects rare words from a fixture page into the vocabulary", async ({
   const totalAfterConfirm = Number(await popup.getByTestId("total").textContent());
   await article.bringToFront();
   await popup.getByTestId("collect").click();
-  // i18n（issue #30）：e2e 使用 en-US locale，动态文案已本地化为英文
+  // i18n（issue #28）：同页重复采集 → 新词 0
   await expect(popup.getByTestId("confirm-summary")).toHaveText(
-    /Collected \d+ words via Collect \(0 new\)/,
+    /本次共计采集 \d+ 个单词，其中新词 0 个/,
     { timeout: 15_000 },
   );
   await popup.getByTestId("confirm-push").click();
@@ -97,9 +97,9 @@ test("cancel discards the pending batch: counts unchanged, nothing merged", asyn
 
   await article.bringToFront();
   await popup.getByTestId("collect").click();
-  // i18n（issue #30）：e2e 使用 en-US locale，动态文案已本地化为英文
+  // i18n（issue #28）：取消用例的批次预览（总数 ≥ 1）
   await expect(popup.getByTestId("confirm-summary")).toHaveText(
-    /Collected [1-9]\d* words via Collect \(\d+ new\)/,
+    /本次共计采集 [1-9]\d* 个单词，其中新词 \d+ 个/,
     { timeout: 15_000 },
   );
 

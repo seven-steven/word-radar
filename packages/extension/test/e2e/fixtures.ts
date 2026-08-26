@@ -95,6 +95,12 @@ export const test = base.extend<E2eTestFixtures, E2eWorkerFixtures>({
       channel: process.env.E2E_CHANNEL ?? "chromium",
     } as const;
     const context = await chromium.launchPersistentContext(userDataDir, {      ...launchOptions,
+      // i18n（issue #28）：钉死测试 Chromium 的 UI locale。不设置时 Chromium 跟随
+      // 宿主 OS 语言（本机 zh-CN、CI 可能 en-US），chrome.i18n 消息解析随宿主漂移，
+      // 文案断言就无法确定。产品核心用户是中文环境，钉 zh-CN 让 e2e 恰好持续
+      // 验证「中文环境显示中文」这一 issue #28 的主诉；en 侧由 locale.test.ts +
+      // verify-manifest 校验 en/zh key 完整性兜底。
+      locale: "zh-CN",
       // MV3 扩展加载（new headless 支持；老 headless 不支持）
       args: [
         `--disable-extensions-except=${extensionDir}`,

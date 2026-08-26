@@ -61,7 +61,7 @@ describe("locale invariants", () => {
 
   it("all keys used in code exist in all three locales", () => {
     // These are all the i18n keys used throughout the codebase
-    // (extracted from grep analysis of t(), t1(), t2(), t3(), t4() calls)
+    // (extracted from grep analysis of t(), t1(), t2(), t3() calls)
     const usedKeys = [
       // Static UI keys (from issue #30)
       "extName",
@@ -146,6 +146,17 @@ describe("locale invariants", () => {
         zhTwKeys.has(key),
         `Key "${key}" used in code but missing in zh_TW/messages.json`
       ).toBe(true);
+    }
+  });
+
+  it("brand name is localized: 单词雷达 in zh locales, WordRadar in en", () => {
+    // issue #28：中文环境（zh_CN/zh_TW）所有面向用户的名称显示点都是「单词雷达」，
+    // 英文环境兜底 WordRadar。manifest 三字段之外，popup 标题/主标题是用户
+    // 原始反馈里最显眼的名称显示点（见 issue 截图），锁住三个 locale 的值。
+    for (const key of ["extName", "extTooltip", "popupTitle", "popupHeading"]) {
+      expect(enMessages[key].message).toBe("WordRadar");
+      expect(zhCnMessages[key].message).toBe("单词雷达");
+      expect(zhTwMessages[key].message).toBe("单词雷达");
     }
   });
 
