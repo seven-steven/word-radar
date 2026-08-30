@@ -7,10 +7,11 @@
  * 打开 popup 时的 checkLogin 若发现已登录，会触发一轮存量待推重推——
  * 那是允许的恢复路径，不与「唯一路径」冲突（见 docs/spec.md 扩展行为）。
  *
- * chrome.* 调用收在两个边界模块里：
+ * chrome.* 调用收在边界模块里：
  * - active-tab.ts：popup → content（COLLECT_WORDS / 应答）+ 新标签页打开
  * - sw-channel.ts：popup → service worker（GET_COUNTS / CHECK_LOGIN /
  *   EXPORT_CSV / IMPORT_CSV / CONFIRM_COLLECTED / DISCARD_COLLECTED）
+ * - i18n.ts：chrome.i18n（applyStaticI18n 静态回填 + t/t1/t2/t3 动态文案）
  * 本地文件操作收在 csv-file.ts（下载 / 文件选择，可注入）。
  *
  * 词库读写 + HTTP 调用 全部发生在 service worker；popup 不直连 IndexedDB、不发 HTTP。
@@ -39,41 +40,16 @@ import {
 import { browserCsvFileGateway } from "./lib/csv-file.js";
 import { defaultErrorLogStorage, formatErrorLog, readErrorLog } from "./lib/error-log.js";
 import type { PushStatus } from "./lib/messages.js";
-import { t, t1, t3 } from "./lib/i18n.js";
+import { applyStaticI18n, t, t1, t3 } from "./lib/i18n.js";
 
 const BBDC_HOME_URL = "https://bbdc.cn/";
 
-/**
- * i18n 初始化（issue #30）：为所有带有 data-i18n 属性的元素回填本地化文本，
- * 并设置 <html lang> 属性匹配当前 locale。
- */
-function initI18n(): void {
-  // 设置 html lang 属性
-  const htmlLang = chrome.i18n.getUILanguage?.() || "zh-CN";
-  const htmlElement = document.documentElement;
-  if (htmlElement) {
-    // Chrome returns language codes like "zh-CN", "en-US", etc.
-    htmlElement.setAttribute("lang", htmlLang);
-  }
-
-  // 回填所有带有 data-i18n 属性的元素（包括 <title> 标签）
-  const i18nElements = document.querySelectorAll<HTMLElement>("[data-i18n]");
-  for (const element of i18nElements) {
-    const key = element.getAttribute("data-i18n");
-    if (key) {
-      const message = chrome.i18n.getMessage(key);
-      if (message) {
-        element.textContent = message;
-      }
-    }
-  }
-}
-
-// 在 DOM 就绪后立即执行 i18n 初始化
+// i18n 静态回填（issue #30）：[data-i18n] 元素文本 + <html lang>，实现与
+// chrome.i18n 直调全部收在 lib/i18n.ts 的 applyStaticI18n（边界模块约定）。
 if (document.readyState === "loading") {
-  document.addEventListener("DOMContentLoaded", initI18n);
+  document.addEventListener("DOMContentLoaded", () => applyStaticI18n(document));
 } else {
-  initI18n();
+  applyStaticI18n(document);
 }
 
 const totalEl = document.querySelector<HTMLElement>('[data-testid="total"]');

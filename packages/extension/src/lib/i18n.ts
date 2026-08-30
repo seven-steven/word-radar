@@ -74,3 +74,32 @@ export function t3(
   return key;
 }
 
+/**
+ * 静态文本回填（issue #30/#28）：popup 启动时把所有 [data-i18n] 元素回填为
+ * 当前 locale 的消息，并设置 <html lang>。
+ *
+ * chrome.* 直调收在本模块——popup 的 chrome.i18n 边界（与 active-tab.ts 之于
+ * chrome.tabs、sw-channel.ts 之于 chrome.runtime 同构），popup.ts 只调用一次。
+ *
+ * lang 推导：消息解析策略是「UI 语言 zh 系列命中 zh_CN，其余回退
+ * default_locale(en)」，而 getUILanguage() 只反映 UI 语言——直接写入会让
+ * ja/fr 用户拿到 lang="ja" 却渲染英文文案（WCAG 3.1.1 语言声明失真）。
+ * 故按同一策略映射：zh* → "zh-CN"（zh_CN/zh_TW 文案相同），其余 → "en"。
+ */
+export function applyStaticI18n(doc: Document): void {
+  const uiLanguage = chrome.i18n.getUILanguage?.() ?? "en";
+  const lang = uiLanguage.toLowerCase().startsWith("zh") ? "zh-CN" : "en";
+  doc.documentElement.setAttribute("lang", lang);
+
+  const elements = doc.querySelectorAll<HTMLElement>("[data-i18n]");
+  for (const element of elements) {
+    const key = element.getAttribute("data-i18n");
+    if (key) {
+      const message = chrome.i18n.getMessage(key);
+      if (message) {
+        element.textContent = message;
+      }
+    }
+  }
+}
+
