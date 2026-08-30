@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 /**
- * verify-manifest：断言三方 version 一致 + MV3 基本形态合规。
+ * verify-manifest：断言三方 version 一致 + MV3 基本形态合规 + i18n 结构（src 与 zip）。
  *
  * 三方：根 package.json / packages/extension/src/manifest.json /
  * dist/word-radar-<version>-chrome.zip 内的 manifest.json（verify-zip 提供
  * 纯 Node zip 解析；zip 缺失时提示先 build/package，非零退出）。
  *
- * 断言逻辑抽纯函数 `verifyManifest(...)`，便于单测 fixture 覆盖失败路径。
+ * 断言逻辑全部抽纯函数 `verifyManifest(...)`——locale 载荷由调用方注入，
+ * 函数本身不触文件系统——便于单测 fixture 覆盖失败路径。
  */
 import { readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
@@ -23,12 +24,24 @@ const I18N_PLACEHOLDER_PATTERN = /^__MSG_(\w+)__$/;
 const I18N_REQUIRED_LOCALES = ["en", "zh_CN", "zh_TW"];
 
 /**
- * 校验三方版本一致性 + MV3 形态（对 src 与 zip 内 manifest 各查一遍）。
+ * locale 装载结果：`{ messages }` 装载成功；`{ error }` 携带缺失/解析失败原因
+ * （由调用方读 `_locales/<locale>/messages.json` 时生成）。
+ * @typedef {{ messages: object } | { error: string }} LocaleLoadResult
+ */
+
+/**
+ * 校验三方版本一致性 + MV3 形态 + i18n 结构（对 src 与 zip 内 manifest 各查一遍）。
  *
- * @param {{ rootVersion: string, srcManifest: object | null, zipManifest: object | null, zipBuffer?: Buffer }} input
+ * @param {{
+ *   rootVersion: string,
+ *   srcManifest: object | null,
+ *   zipManifest: object | null,
+ *   srcLocales: Record<string, LocaleLoadResult>,
+ *   zipBuffer?: Buffer,
+ * }} input
  * @returns {{ ok: boolean, errors: string[] }}
  */
-export function verifyManifest({ rootVersion, srcManifest, zipManifest, zipBuffer }) {
+export function verifyManifest({ rootVersion, srcManifest, zipManifest, srcLocales, zipBuffer }) {
   const errors = [];
 
   if (typeof rootVersion !== "string" || rootVersion.length === 0) {
@@ -66,10 +79,8 @@ export function verifyManifest({ rootVersion, srcManifest, zipManifest, zipBuffe
   errors.push(...checkMv3Shape(srcManifest, "src"));
   errors.push(...checkMv3Shape(zipManifest, "zip"));
 
-  // i18n structure validation (src only)
-  errors.push(...checkI18nStructureSrc(srcManifest));
+  errors.push(...checkI18nStructureSrc(srcManifest, srcLocales));
 
-  // i18n validation in zip (if buffer provided)
   if (zipBuffer) {
     errors.push(...checkI18nInZip(zipBuffer, srcManifest));
   }
@@ -78,174 +89,122 @@ export function verifyManifest({ rootVersion, srcManifest, zipManifest, zipBuffe
 }
 
 /**
- * 检查 src manifest 的 i18n 结构：占位符格式、default_locale、_locales 目录和 key 一致性。
+ * 检查 src 侧 i18n：default_locale、占位符格式、locale 装载结果与 key 一致性。
+ *
+ * @param {object} manifest src manifest.json（已解析）
+ * @param {Record<string, LocaleLoadResult>} srcLocales
+ *   每个 locale 的装载结果（main() 读 `_locales/<locale>/messages.json` 生成）：
+ *   `{ messages }` 成功；`{ error }` 携带缺失/解析失败原因；缺项视为文件缺失。
  */
-function checkI18nStructureSrc(manifest) {
+function checkI18nStructureSrc(manifest, srcLocales) {
   const errors = [];
 
-  // Check default_locale
   if (manifest.default_locale !== "en") {
     errors.push(`src manifest: default_locale must be "en", got "${manifest.default_locale || ""}"`);
   }
 
-  // Extract message keys from manifest placeholders
-  const messageKeys = new Set();
-
-  // Check name field
-  const nameMatch = manifest.name?.match(I18N_PLACEHOLDER_PATTERN);
-  if (!nameMatch) {
-    errors.push(`src manifest: name must be an i18n placeholder like __MSG_extName__, got "${manifest.name || ""}"`);
-  } else {
-    messageKeys.add(nameMatch[1]);
+  // src manifest 的 i18n 字段必须是占位符（报错式；key 提取见 extractManifestMessageKeys）
+  for (const [field, exampleKey, value] of [
+    ["name", "extName", manifest.name],
+    ["description", "extDescription", manifest.description],
+    ["action.default_title", "extTooltip", manifest.action?.default_title],
+  ]) {
+    if (typeof value !== "string" || !I18N_PLACEHOLDER_PATTERN.test(value)) {
+      errors.push(`src manifest: ${field} must be an i18n placeholder like __MSG_${exampleKey}__, got "${value ?? ""}"`);
+    }
   }
 
-  // Check description field
-  const descMatch = manifest.description?.match(I18N_PLACEHOLDER_PATTERN);
-  if (!descMatch) {
-    errors.push(`src manifest: description must be an i18n placeholder like __MSG_extDescription__, got "${manifest.description || ""}"`);
-  } else {
-    messageKeys.add(descMatch[1]);
-  }
-
-  // Check action.default_title field
-  const titleMatch = manifest.action?.default_title?.match(I18N_PLACEHOLDER_PATTERN);
-  if (!titleMatch) {
-    errors.push(`src manifest: action.default_title must be an i18n placeholder like __MSG_extTooltip__, got "${manifest.action?.default_title || ""}"`);
-  } else {
-    messageKeys.add(titleMatch[1]);
-  }
-
-  // Check _locales directories and message files - parse each once and reuse
-  const extensionRoot = resolve(REPO_ROOT, "packages/extension");
+  const messageKeys = extractManifestMessageKeys(manifest);
   const localeData = {};
-
   for (const locale of I18N_REQUIRED_LOCALES) {
-    const messagesPath = resolve(extensionRoot, "_locales", locale, "messages.json");
-    if (!existsSync(messagesPath)) {
-      errors.push(`src _locales: missing ${locale}/messages.json at ${messagesPath}`);
+    const entry = srcLocales?.[locale];
+    if (!entry || !entry.messages) {
+      errors.push(`src _locales: ${entry?.error ?? `missing ${locale}/messages.json`}`);
       continue;
     }
-
-    try {
-      const messages = JSON.parse(readFileSync(messagesPath, "utf8"));
-      localeData[locale] = messages;
-
-      // Check that all referenced keys exist
-      for (const key of messageKeys) {
-        if (!(key in messages)) {
-          errors.push(`src _locales: ${locale}/messages.json missing key "${key}" referenced by manifest`);
-        }
-      }
-    } catch (err) {
-      errors.push(`src _locales: failed to parse ${locale}/messages.json - ${err instanceof Error ? err.message : String(err)}`);
-    }
+    localeData[locale] = entry.messages;
+    errors.push(...checkReferencedKeys(messageKeys, entry.messages, locale, "src"));
   }
 
-  // Check key consistency across locales using the parsed data
-  if (messageKeys.size > 0 && localeData["en"] && localeData["zh_CN"] && localeData["zh_TW"]) {
-    const enKeys = new Set(Object.keys(localeData["en"]));
-    const zhCnKeys = new Set(Object.keys(localeData["zh_CN"]));
-    const zhTwKeys = new Set(Object.keys(localeData["zh_TW"]));
-
-    // Check all Chinese keys match English
-    for (const key of enKeys) {
-      if (!zhCnKeys.has(key)) {
-        errors.push(`src _locales: key "${key}" exists in en but missing in zh_CN`);
-      }
-      if (!zhTwKeys.has(key)) {
-        errors.push(`src _locales: key "${key}" exists in en but missing in zh_TW`);
-      }
-    }
-
-    // Check for extra keys in Chinese locales
-    for (const key of zhCnKeys) {
-      if (!enKeys.has(key)) {
-        errors.push(`src _locales: key "${key}" exists in zh_CN but missing in en`);
-      }
-    }
-    for (const key of zhTwKeys) {
-      if (!enKeys.has(key)) {
-        errors.push(`src _locales: key "${key}" exists in zh_TW but missing in en`);
-      }
-    }
-
-    // Verify zh_CN and zh_TW have identical key sets
-    if (zhCnKeys.size !== zhTwKeys.size) {
-      errors.push(`src _locales: zh_CN has ${zhCnKeys.size} keys but zh_TW has ${zhTwKeys.size} keys`);
-    }
-  }
-
+  errors.push(...checkLocaleConsistency(messageKeys, localeData, "src"));
   return errors;
 }
 
 /**
- * 检查 ZIP 包内的 i18n 文件结构：_locales 目录和 key 一致性。
+ * 检查 zip 包内 i18n：_locales 条目装载与 key 一致性（readZipEntry 为内存解析，无 fs 访问）。
  */
 function checkI18nInZip(zipBuffer, manifest) {
   const errors = [];
-
-  // Extract message keys from manifest placeholders
-  const messageKeys = new Set();
-  const nameMatch = manifest.name?.match(I18N_PLACEHOLDER_PATTERN);
-  const descMatch = manifest.description?.match(I18N_PLACEHOLDER_PATTERN);
-  const titleMatch = manifest.action?.default_title?.match(I18N_PLACEHOLDER_PATTERN);
-
-  if (nameMatch) messageKeys.add(nameMatch[1]);
-  if (descMatch) messageKeys.add(descMatch[1]);
-  if (titleMatch) messageKeys.add(titleMatch[1]);
-
-  // Check each locale in the zip
+  const messageKeys = extractManifestMessageKeys(manifest);
   const localeData = {};
-  for (const locale of I18N_REQUIRED_LOCALES) {
-    const messagesPath = `_locales/${locale}/messages.json`;
-    try {
-      const messagesContent = readZipEntry(zipBuffer, messagesPath).toString("utf8");
-      const messages = JSON.parse(messagesContent);
-      localeData[locale] = messages;
 
-      // Check that all referenced keys exist
-      for (const key of messageKeys) {
-        if (!(key in messages)) {
-          errors.push(`zip _locales: ${locale}/messages.json missing key "${key}" referenced by manifest`);
-        }
-      }
+  for (const locale of I18N_REQUIRED_LOCALES) {
+    try {
+      const messages = JSON.parse(readZipEntry(zipBuffer, `_locales/${locale}/messages.json`).toString("utf8"));
+      localeData[locale] = messages;
+      errors.push(...checkReferencedKeys(messageKeys, messages, locale, "zip"));
     } catch (err) {
       errors.push(`zip _locales: ${locale}/messages.json error - ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
-  // Check key consistency across locales in the zip
-  if (messageKeys.size > 0 && localeData["en"] && localeData["zh_CN"] && localeData["zh_TW"]) {
-    const enKeys = new Set(Object.keys(localeData["en"]));
-    const zhCnKeys = new Set(Object.keys(localeData["zh_CN"]));
-    const zhTwKeys = new Set(Object.keys(localeData["zh_TW"]));
+  errors.push(...checkLocaleConsistency(messageKeys, localeData, "zip"));
+  return errors;
+}
 
-    // Check all Chinese keys match English
-    for (const key of enKeys) {
-      if (!zhCnKeys.has(key)) {
-        errors.push(`zip _locales: key "${key}" exists in en but missing in zh_CN`);
-      }
-      if (!zhTwKeys.has(key)) {
-        errors.push(`zip _locales: key "${key}" exists in en but missing in zh_TW`);
-      }
-    }
+/**
+ * 从 manifest 的 i18n 占位符字段静默提取 message key 集合；
+ * 非占位符字段不产生 key（格式报错由 src 侧 checkI18nStructureSrc 负责）。
+ */
+function extractManifestMessageKeys(manifest) {
+  const keys = new Set();
+  for (const value of [manifest.name, manifest.description, manifest.action?.default_title]) {
+    const match = typeof value === "string" ? value.match(I18N_PLACEHOLDER_PATTERN) : null;
+    if (match) keys.add(match[1]);
+  }
+  return keys;
+}
 
-    // Check for extra keys in Chinese locales
-    for (const key of zhCnKeys) {
-      if (!enKeys.has(key)) {
-        errors.push(`zip _locales: key "${key}" exists in zh_CN but missing in en`);
-      }
+/**
+ * 校验单个已装载 locale 覆盖 manifest 引用的全部 key（src/zip 共用）。
+ */
+function checkReferencedKeys(messageKeys, messages, locale, label) {
+  const errors = [];
+  for (const key of messageKeys) {
+    if (!(key in messages)) {
+      errors.push(`${label} _locales: ${locale}/messages.json missing key "${key}" referenced by manifest`);
     }
-    for (const key of zhTwKeys) {
-      if (!enKeys.has(key)) {
-        errors.push(`zip _locales: key "${key}" exists in zh_TW but missing in en`);
-      }
-    }
+  }
+  return errors;
+}
 
-    // Verify zh_CN and zh_TW have identical key sets
-    if (zhCnKeys.size !== zhTwKeys.size) {
-      errors.push(`zip _locales: zh_CN has ${zhCnKeys.size} keys but zh_TW has ${zhTwKeys.size} keys`);
-    }
+/**
+ * 校验三 locale 的 key 一致性（src/zip 共用，label 决定错误文案前缀）：
+ * en 与 zh_CN/zh_TW 双向对齐，zh_CN 与 zh_TW 规模一致。仅当 manifest 引用了
+ * key 且三方 locale 均装载成功时执行（与既有行为一致）。
+ */
+function checkLocaleConsistency(messageKeys, localeData, label) {
+  const errors = [];
+  if (!(messageKeys.size > 0 && localeData["en"] && localeData["zh_CN"] && localeData["zh_TW"])) {
+    return errors;
+  }
+
+  const enKeys = new Set(Object.keys(localeData["en"]));
+  const zhCnKeys = new Set(Object.keys(localeData["zh_CN"]));
+  const zhTwKeys = new Set(Object.keys(localeData["zh_TW"]));
+
+  for (const key of enKeys) {
+    if (!zhCnKeys.has(key)) errors.push(`${label} _locales: key "${key}" exists in en but missing in zh_CN`);
+    if (!zhTwKeys.has(key)) errors.push(`${label} _locales: key "${key}" exists in en but missing in zh_TW`);
+  }
+  for (const key of zhCnKeys) {
+    if (!enKeys.has(key)) errors.push(`${label} _locales: key "${key}" exists in zh_CN but missing in en`);
+  }
+  for (const key of zhTwKeys) {
+    if (!enKeys.has(key)) errors.push(`${label} _locales: key "${key}" exists in zh_TW but missing in en`);
+  }
+  if (zhCnKeys.size !== zhTwKeys.size) {
+    errors.push(`${label} _locales: zh_CN has ${zhCnKeys.size} keys but zh_TW has ${zhTwKeys.size} keys`);
   }
 
   return errors;
@@ -271,6 +230,28 @@ function checkMv3Shape(manifest, label) {
   }
 
   return errors;
+}
+
+/**
+ * 读取 src `_locales` 三 locale 的 messages.json，构造 verifyManifest 的 srcLocales
+ * 装载结果：缺失/解析失败不提前退出，作为 `{ error }` 汇入校验错误。
+ */
+function loadSrcLocales() {
+  const extensionRoot = resolve(REPO_ROOT, "packages/extension");
+  const srcLocales = {};
+  for (const locale of I18N_REQUIRED_LOCALES) {
+    const messagesPath = resolve(extensionRoot, "_locales", locale, "messages.json");
+    if (!existsSync(messagesPath)) {
+      srcLocales[locale] = { error: `missing ${locale}/messages.json at ${messagesPath}` };
+      continue;
+    }
+    try {
+      srcLocales[locale] = { messages: JSON.parse(readFileSync(messagesPath, "utf8")) };
+    } catch (err) {
+      srcLocales[locale] = { error: `failed to parse ${locale}/messages.json - ${err instanceof Error ? err.message : String(err)}` };
+    }
+  }
+  return srcLocales;
 }
 
 function main() {
@@ -304,8 +285,7 @@ function main() {
     process.exit(1);
   }
 
-  // Verify with i18n validation including zip contents
-  const result = verifyManifest({ rootVersion, srcManifest, zipManifest, zipBuffer });
+  const result = verifyManifest({ rootVersion, srcManifest, zipManifest, srcLocales: loadSrcLocales(), zipBuffer });
   if (!result.ok) {
     console.error("verify-manifest: FAILED");
     for (const err of result.errors) console.error(`  - ${err}`);

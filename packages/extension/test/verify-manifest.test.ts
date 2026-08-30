@@ -1,15 +1,9 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { verifyManifest } from "../../../scripts/verify-manifest.mjs";
 import { readZipEntry } from "../../../scripts/verify-zip.mjs";
-import { existsSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
 
-// Mock fs and zip functions for i18n tests
-vi.mock("node:fs", () => ({
-  existsSync: vi.fn(),
-  readFileSync: vi.fn(),
-}));
-
+// verifyManifest 是纯函数：src locale 载荷经 srcLocales 注入，不触文件系统。
+// 仅 zip 侧在函数内用 readZipEntry 解析内存 zip buffer，mock 它注入 zip 内容。
 vi.mock("../../../scripts/verify-zip.mjs", () => ({
   readZipEntry: vi.fn(),
 }));
@@ -29,20 +23,28 @@ const validManifest = {
   default_locale: "en",
 };
 
+const validMessages = {
+  extName: { message: "WordRadar", description: "" },
+  extDescription: { message: "Extract English words from web pages", description: "" },
+  extTooltip: { message: "WordRadar", description: "" },
+};
+
+// main() 读文件后构造的 locale 装载结果：{ messages } 成功 / { error } 失败原因
+const validSrcLocales = {
+  en: { messages: validMessages },
+  zh_CN: { messages: validMessages },
+  zh_TW: { messages: validMessages },
+};
+
+const zhMessages = {
+  extName: { message: "单词雷达", description: "" },
+  extDescription: { message: "把网页里的英文生词一键提取出来", description: "" },
+  extTooltip: { message: "单词雷达", description: "" },
+};
+
 describe("verify-manifest: verifyManifest", () => {
   beforeEach(() => {
-    // Reset mocks before each test
-    vi.mocked(existsSync).mockReturnValue(true);
-    vi.mocked(readFileSync).mockReturnValue(JSON.stringify({
-      extName: { message: "WordRadar", description: "" },
-      extDescription: { message: "Extract English words from web pages", description: "" },
-      extTooltip: { message: "WordRadar", description: "" },
-    }));
-    vi.mocked(readZipEntry).mockReturnValue(Buffer.from(JSON.stringify({
-      extName: { message: "WordRadar", description: "" },
-      extDescription: { message: "Extract English words from web pages", description: "" },
-      extTooltip: { message: "WordRadar", description: "" },
-    })));
+    vi.mocked(readZipEntry).mockReturnValue(Buffer.from(JSON.stringify(validMessages)));
   });
 
   afterEach(() => {
@@ -55,6 +57,7 @@ describe("verify-manifest: verifyManifest", () => {
         rootVersion: "0.1.0",
         srcManifest: validManifest,
         zipManifest: validManifest,
+        srcLocales: validSrcLocales,
       });
       expect(result).toEqual({ ok: true, errors: [] });
     });
@@ -64,6 +67,7 @@ describe("verify-manifest: verifyManifest", () => {
         rootVersion: "0.1.0",
         srcManifest: validManifest,
         zipManifest: null,
+        srcLocales: validSrcLocales,
       });
       expect(result.ok).toBe(false);
       expect(result.errors.some((e) => /build|package/i.test(e))).toBe(true);
@@ -76,6 +80,7 @@ describe("verify-manifest: verifyManifest", () => {
         rootVersion: "0.1.0",
         srcManifest: validManifest,
         zipManifest: validManifest,
+        srcLocales: validSrcLocales,
       });
       expect(result).toEqual({ ok: true, errors: [] });
     });
@@ -84,15 +89,13 @@ describe("verify-manifest: verifyManifest", () => {
       const i18nManifest = {
         ...validManifest,
         name: "WordRadar",
-        description: "__MSG_extDescription__",
-        action: { ...validManifest.action, default_title: "__MSG_extTooltip__" },
-        default_locale: "en",
       };
 
       const result = verifyManifest({
         rootVersion: "0.1.0",
         srcManifest: i18nManifest,
         zipManifest: i18nManifest,
+        srcLocales: validSrcLocales,
       });
       expect(result.ok).toBe(false);
       expect(result.errors.some((e) => /name.*__MSG_/i.test(e))).toBe(true);
@@ -101,16 +104,14 @@ describe("verify-manifest: verifyManifest", () => {
     it("fails when manifest description is not an i18n placeholder", () => {
       const i18nManifest = {
         ...validManifest,
-        name: "__MSG_extName__",
         description: "Not a placeholder",
-        action: { ...validManifest.action, default_title: "__MSG_extTooltip__" },
-        default_locale: "en",
       };
 
       const result = verifyManifest({
         rootVersion: "0.1.0",
         srcManifest: i18nManifest,
         zipManifest: i18nManifest,
+        srcLocales: validSrcLocales,
       });
       expect(result.ok).toBe(false);
       expect(result.errors.some((e) => /description.*__MSG_/i.test(e))).toBe(true);
@@ -119,16 +120,14 @@ describe("verify-manifest: verifyManifest", () => {
     it("fails when action.default_title is not an i18n placeholder", () => {
       const i18nManifest = {
         ...validManifest,
-        name: "__MSG_extName__",
-        description: "__MSG_extDescription__",
         action: { ...validManifest.action, default_title: "Not a placeholder" },
-        default_locale: "en",
       };
 
       const result = verifyManifest({
         rootVersion: "0.1.0",
         srcManifest: i18nManifest,
         zipManifest: i18nManifest,
+        srcLocales: validSrcLocales,
       });
       expect(result.ok).toBe(false);
       expect(result.errors.some((e) => /default_title.*__MSG_/i.test(e))).toBe(true);
@@ -137,9 +136,6 @@ describe("verify-manifest: verifyManifest", () => {
     it("fails when default_locale is not 'en'", () => {
       const i18nManifest = {
         ...validManifest,
-        name: "__MSG_extName__",
-        description: "__MSG_extDescription__",
-        action: { ...validManifest.action, default_title: "__MSG_extTooltip__" },
         default_locale: "zh_CN",
       };
 
@@ -147,63 +143,74 @@ describe("verify-manifest: verifyManifest", () => {
         rootVersion: "0.1.0",
         srcManifest: i18nManifest,
         zipManifest: i18nManifest,
+        srcLocales: validSrcLocales,
       });
       expect(result.ok).toBe(false);
       expect(result.errors.some((e) => /default_locale.*en/i.test(e))).toBe(true);
     });
 
-    it("fails when _locales file is missing", () => {
-      vi.mocked(existsSync).mockReturnValue(false);
-
+    it("fails when _locales file is missing (srcLocales 未提供该 locale)", () => {
       const result = verifyManifest({
         rootVersion: "0.1.0",
         srcManifest: validManifest,
         zipManifest: validManifest,
+        srcLocales: {},
       });
       expect(result.ok).toBe(false);
       expect(result.errors.some((e) => /_locales.*missing/i.test(e))).toBe(true);
     });
 
+    it("fails when a locale file failed to load (srcLocales 带 error 装载结果)", () => {
+      const result = verifyManifest({
+        rootVersion: "0.1.0",
+        srcManifest: validManifest,
+        zipManifest: validManifest,
+        srcLocales: {
+          ...validSrcLocales,
+          zh_TW: { error: 'failed to parse zh_TW/messages.json - Unexpected token "z"' },
+        },
+      });
+      expect(result.ok).toBe(false);
+      expect(result.errors.some((e) => /_locales.*failed to parse zh_TW/i.test(e))).toBe(true);
+    });
+
     it("fails when message key is missing from locale file", () => {
-      vi.mocked(readFileSync).mockReturnValue(JSON.stringify({
-        extName: { message: "WordRadar", description: "" },
+      const incomplete = {
+        extName: validMessages.extName,
         // Missing extDescription key
-        extTooltip: { message: "WordRadar", description: "" },
-      }));
+        extTooltip: validMessages.extTooltip,
+      };
 
       const result = verifyManifest({
         rootVersion: "0.1.0",
         srcManifest: validManifest,
         zipManifest: validManifest,
+        srcLocales: {
+          en: { messages: incomplete },
+          zh_CN: { messages: incomplete },
+          zh_TW: { messages: incomplete },
+        },
       });
       expect(result.ok).toBe(false);
       expect(result.errors.some((e) => /missing key.*extDescription/i.test(e))).toBe(true);
     });
 
     it("fails when key sets differ between locales", () => {
-      // Mock different content based on file path instead of call order
-      vi.mocked(readFileSync).mockImplementation((path) => {
-        const pathStr = typeof path === 'string' ? path : String(path);
-        if (pathStr.includes("zh_CN")) {
-          return JSON.stringify({
-            extName: { message: "单词雷达", description: "" },
-            extDescription: { message: "把网页里的英文生词一键提取出来", description: "" },
-            // Missing extTooltip
-          });
-        } else {
-          // en locale (complete)
-          return JSON.stringify({
-            extName: { message: "WordRadar", description: "" },
-            extDescription: { message: "Extract English words from web pages", description: "" },
-            extTooltip: { message: "WordRadar", description: "" },
-          });
-        }
-      });
+      const withoutTooltip = {
+        extName: zhMessages.extName,
+        extDescription: zhMessages.extDescription,
+        // Missing extTooltip
+      };
 
       const result = verifyManifest({
         rootVersion: "0.1.0",
         srcManifest: validManifest,
         zipManifest: validManifest,
+        srcLocales: {
+          en: { messages: validMessages },
+          zh_CN: { messages: withoutTooltip },
+          zh_TW: { messages: zhMessages },
+        },
       });
       expect(result.ok).toBe(false);
       expect(result.errors.some((e) => /extTooltip/.test(e))).toBe(true);
@@ -213,7 +220,7 @@ describe("verify-manifest: verifyManifest", () => {
       const mockZipBuffer = Buffer.from("fake zip content");
 
       vi.mocked(readZipEntry).mockImplementation((zipBuf, path) => {
-        const pathStr = typeof path === 'string' ? path : String(path);
+        const pathStr = String(path);
         if (pathStr.includes("_locales")) {
           throw new Error(`zip entry not found: ${pathStr}`);
         }
@@ -224,10 +231,33 @@ describe("verify-manifest: verifyManifest", () => {
         rootVersion: "0.1.0",
         srcManifest: validManifest,
         zipManifest: validManifest,
+        srcLocales: validSrcLocales,
         zipBuffer: mockZipBuffer,
       });
       expect(result.ok).toBe(false);
       expect(result.errors.some((e) => /zip _locales.*error/i.test(e))).toBe(true);
+    });
+
+    it("fails when ZIP locale file is missing a manifest-referenced key", () => {
+      const mockZipBuffer = Buffer.from("fake zip content");
+
+      vi.mocked(readZipEntry).mockImplementation((zipBuf, path) => {
+        const pathStr = String(path);
+        if (pathStr.includes("zh_CN")) {
+          return Buffer.from(JSON.stringify({ extName: validMessages.extName, extTooltip: validMessages.extTooltip }));
+        }
+        return Buffer.from(JSON.stringify(validMessages));
+      });
+
+      const result = verifyManifest({
+        rootVersion: "0.1.0",
+        srcManifest: validManifest,
+        zipManifest: validManifest,
+        srcLocales: validSrcLocales,
+        zipBuffer: mockZipBuffer,
+      });
+      expect(result.ok).toBe(false);
+      expect(result.errors.some((e) => /zip _locales.*missing key.*extDescription/i.test(e))).toBe(true);
     });
   });
 
@@ -237,6 +267,7 @@ describe("verify-manifest: verifyManifest", () => {
         rootVersion: "0.2.0",
         srcManifest: { ...validManifest, version: "0.1.0" },
         zipManifest: { ...validManifest, version: "0.1.0" },
+        srcLocales: validSrcLocales,
       });
       expect(result.ok).toBe(false);
       expect(result.errors.some((e) => /0\.2\.0.*0\.1\.0/.test(e))).toBe(true);
@@ -247,6 +278,7 @@ describe("verify-manifest: verifyManifest", () => {
         rootVersion: "0.1.0",
         srcManifest: { ...validManifest, version: "0.1.0" },
         zipManifest: { ...validManifest, version: "0.3.0" },
+        srcLocales: validSrcLocales,
       });
       expect(result.ok).toBe(false);
       expect(result.errors.some((e) => e.includes("0.1.0") && e.includes("0.3.0"))).toBe(true);
@@ -256,7 +288,7 @@ describe("verify-manifest: verifyManifest", () => {
   describe("MV3 shape failures", () => {
     it("fails when manifest_version is not 3", () => {
       const m = { ...validManifest, manifest_version: 2 };
-      const result = verifyManifest({ rootVersion: "0.1.0", srcManifest: m, zipManifest: m });
+      const result = verifyManifest({ rootVersion: "0.1.0", srcManifest: m, zipManifest: m, srcLocales: validSrcLocales });
       expect(result.ok).toBe(false);
       expect(result.errors.some((e) => /manifest_version/.test(e))).toBe(true);
     });
@@ -264,28 +296,28 @@ describe("verify-manifest: verifyManifest", () => {
     it("fails when name is missing", () => {
       const m = { ...validManifest } as Record<string, unknown>;
       delete m.name;
-      const result = verifyManifest({ rootVersion: "0.1.0", srcManifest: m, zipManifest: validManifest });
+      const result = verifyManifest({ rootVersion: "0.1.0", srcManifest: m, zipManifest: validManifest, srcLocales: validSrcLocales });
       expect(result.ok).toBe(false);
       expect(result.errors.some((e) => /name/.test(e))).toBe(true);
     });
 
     it("fails when action.default_popup is missing", () => {
       const m = { ...validManifest, action: {} };
-      const result = verifyManifest({ rootVersion: "0.1.0", srcManifest: validManifest, zipManifest: m });
+      const result = verifyManifest({ rootVersion: "0.1.0", srcManifest: validManifest, zipManifest: m, srcLocales: validSrcLocales });
       expect(result.ok).toBe(false);
       expect(result.errors.some((e) => /default_popup/.test(e))).toBe(true);
     });
 
     it("fails when background.service_worker is missing", () => {
       const m = { ...validManifest, background: {} };
-      const result = verifyManifest({ rootVersion: "0.1.0", srcManifest: validManifest, zipManifest: m });
+      const result = verifyManifest({ rootVersion: "0.1.0", srcManifest: validManifest, zipManifest: m, srcLocales: validSrcLocales });
       expect(result.ok).toBe(false);
       expect(result.errors.some((e) => /service_worker/.test(e))).toBe(true);
     });
 
     it("fails when an icon size is missing", () => {
       const m = { ...validManifest, icons: { "16": "a.png", "48": "b.png" } };
-      const result = verifyManifest({ rootVersion: "0.1.0", srcManifest: validManifest, zipManifest: m });
+      const result = verifyManifest({ rootVersion: "0.1.0", srcManifest: validManifest, zipManifest: m, srcLocales: validSrcLocales });
       expect(result.ok).toBe(false);
       expect(result.errors.some((e) => /128/.test(e))).toBe(true);
     });
