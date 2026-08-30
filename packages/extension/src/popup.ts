@@ -19,7 +19,9 @@
  * i18n 静态文本国际化（issue #30）：通过 data-i18n 属性标记静态文本元素，
  * 在 popup 启动时用 chrome.i18n.getMessage() 回填，并动态设置 <html lang>。
  */
-import { CORE_VERSION } from "@word-radar/core";
+// 版本号走 version 子路径：barrel 入口首行 import compromise（~362 kB），
+// popup 只取 CORE_VERSION 不能让 NLP 库进 bundle（popup-bundle.test 守护）
+import { CORE_VERSION } from "@word-radar/core/version";
 import {
   chromeTabsGateway,
   openBbdcHome,
