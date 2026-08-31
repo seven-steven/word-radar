@@ -7,7 +7,7 @@
  * 断言按中文渲染（也持续验证「中文环境显示中文」这一 issue #28 的主诉）。
  */
 import { writeFileSync } from "node:fs";
-import { test, expect } from "./fixtures.js";
+import { test, expect, waitCountsLoaded } from "./fixtures.js";
 
 test.beforeEach(({ mockBbdc }) => {
   mockBbdc.reset();
@@ -103,7 +103,11 @@ test("CSV import goes through the confirmation gate (issue #22 review S-3)", asy
   const csvPath = "/tmp/word-radar-e2e-import.csv";
   writeFileSync(csvPath, "lemma,flags\nimportwordalpha,0\nimportwordbeta,0\n");
 
+  await waitCountsLoaded(page); // 基线读取前置：等 total 脱骨架（骨架屏契约）
   const totalBefore = Number(await page.getByTestId("total").textContent());
+
+  // 工具抽屉默认收起（issue #35 重做）：先展开抽屉再操作面板内按钮（交互适配）
+  await page.getByTestId("tools-toggle").click();
 
   // 点导入 → 文件选择器 → 确认页展示「导入」措辞的批次预览
   const [chooser] = await Promise.all([
@@ -171,6 +175,7 @@ test("upload-file target walks collect → confirm → push with .txt text (issu
   const txtPath = "/tmp/word-radar-e2e-upload.txt";
   writeFileSync(txtPath, "The curious astronomer photographed a luminous nebula.\n");
 
+  await waitCountsLoaded(page); // 基线读取前置：等 total 脱骨架（骨架屏契约）
   const totalBefore = Number(await page.getByTestId("total").textContent());
   mockBbdc.reset();
 
@@ -269,6 +274,7 @@ test("upload-file target rejects non plain-text (e.g. .png) file with zero write
   // 验收修订：.csv 已是合法纯文本目标（走自然语言提词），改用 .png 做拒绝用例
   const pngPath = "/tmp/word-radar-e2e-upload-reject.png";
   writeFileSync(pngPath, "lemma,flags\nnotafiletarget,0\n");
+  await waitCountsLoaded(page); // 基线读取前置：等 total 脱骨架（骨架屏契约）
   const totalBefore = Number(await page.getByTestId("total").textContent());
 
   const [chooser] = await Promise.all([
@@ -276,8 +282,9 @@ test("upload-file target rejects non plain-text (e.g. .png) file with zero write
     page.getByTestId("upload-file").click(),
   ]);
   await chooser.setFiles(pngPath);
-  // i18n（issue #28）：zh-CN 的纯文本拒绝文案
-  await expect(page.getByTestId("sync-status")).toHaveText(
+  // i18n（issue #28）：zh-CN 的纯文本拒绝文案。反馈走主状态行（issue #35
+  // 重做返工：上传按钮在主采集行，抽屉收起时 sync-status 不可见）
+  await expect(page.getByTestId("status")).toHaveText(
     /仅支持纯文本文件/,
     { timeout: 10_000 },
   );
@@ -305,6 +312,7 @@ test("export-log exports storage.local error ring buffer as text (issue #25)", a
     });
   });
 
+  await page.getByTestId("tools-toggle").click(); // 工具抽屉默认收起（issue #35 重做），先展开
   await page.getByTestId("export-log").click();
   // i18n（issue #28）：zh-CN 动态文案「已导出 N 条错误日志」
   await expect(page.getByTestId("sync-status")).toHaveText(/已导出 \d+ 条错误日志/);

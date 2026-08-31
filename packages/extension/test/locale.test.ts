@@ -160,7 +160,7 @@ describe("applyStaticI18n", () => {
     const label = { getAttribute: () => "countTotal", textContent: "" };
     applyStaticI18n(fakeDoc([heading, label]));
     expect(heading.textContent).toBe("WordRadar");
-    expect(label.textContent).toBe("Total Words");
+    expect(label.textContent).toBe("Total words");
   });
 
   it("maps html lang to the rendering locale, not the raw UI locale (review finding)", () => {

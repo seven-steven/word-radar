@@ -20,7 +20,7 @@
     "description": "Popup main heading"
   },
   "countTotal": {
-    "message": "Total Words",
+    "message": "Total words",
     "description": "Label for total word count"
   },
   "countPushed": {
@@ -40,7 +40,7 @@
     "description": "Button to start collection again"
   },
   "btnConfirmPush": {
-    "message": "Confirm Push",
+    "message": "Confirm push",
     "description": "Button to confirm and push collected words"
   },
   "btnCancel": {
@@ -48,7 +48,7 @@
     "description": "Button to cancel collection"
   },
   "pushStatusIdle": {
-    "message": "Push Status: Idle",
+    "message": "Push status: idle",
     "description": "Push status when idle"
   },
   "pushSuccess": {
@@ -64,7 +64,7 @@
     "description": "Label for failed pushes"
   },
   "btnRetryPending": {
-    "message": "Retry Pending",
+    "message": "Retry pending",
     "description": "Button to retry pending words"
   },
   "btnExportCsv": {
@@ -76,19 +76,15 @@
     "description": "Button to import CSV file"
   },
   "btnUploadFile": {
-    "message": "Upload File",
+    "message": "Upload file",
     "description": "Button to upload file for collection"
   },
   "btnExportLog": {
-    "message": "Export Log",
+    "message": "Export log",
     "description": "Button to export error log"
   },
-  "loginStatusUnknown": {
-    "message": "Login Status: Unknown",
-    "description": "Login status when unknown"
-  },
   "btnCheckLogin": {
-    "message": "Check Login",
+    "message": "Check login",
     "description": "Button to check login status"
   },
   "btnOpenBbdc": {
@@ -132,7 +128,7 @@
     "description": "Push completed status"
   },
   "pushIdle": {
-    "message": "Push Status: Idle",
+    "message": "Push status: idle",
     "description": "Push idle status"
   },
   "exporting": {
@@ -174,10 +170,6 @@
   "uploadCollectingFile": {
     "message": "Collecting $1…",
     "description": "Upload collection in progress, params: filename"
-  },
-  "uploadParsedPending": {
-    "message": "Parsed $1, awaiting confirmation",
-    "description": "Upload collection parsed awaiting confirmation, params: filename"
   },
   "uploadFailed": {
     "message": "Upload collection failed: $1",
@@ -238,5 +230,17 @@
   "errorUploadFailed": {
     "message": "Upload collection failed: $1",
     "description": "Upload collection failed error, params: error details"
+  },
+  "toolsToggle": {
+    "message": "Tools",
+    "description": "Tools drawer toggle button"
+  },
+  "emptyHint": {
+    "message": "Your library is empty — collect this page or upload a file to get started.",
+    "description": "Empty state hint shown when the word library has no words"
+  },
+  "pushProgress": {
+    "message": "Push progress",
+    "description": "Accessible label for the push progress bar"
   }
 }

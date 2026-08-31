@@ -5,7 +5,7 @@
  *
  * i18n（issue #28）：测试 Chromium 在 fixtures.ts 钉死 zh-CN locale，断言中文渲染
  */
-import { test, expect } from "./fixtures.js";
+import { test, expect, waitCountsLoaded } from "./fixtures.js";
 
 test.beforeEach(({ mockBbdc }) => {
   mockBbdc.reset();
@@ -38,6 +38,7 @@ test("collects into a fresh tab with no declarative injection and no reload", as
   });
 
   // 再点一次（重复注入路径）：幂等守卫生效，累计不重复计数
+  await waitCountsLoaded(popup); // 基线读取前置：等 total 脱骨架（骨架屏契约）
   const totalBefore = Number(await popup.getByTestId("total").textContent());
   await article.bringToFront();
   await popup.getByTestId("collect").click();

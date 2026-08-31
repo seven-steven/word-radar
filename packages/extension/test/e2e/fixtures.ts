@@ -28,6 +28,22 @@ const EXTENSION_DIST = resolve(__dirname, "../../dist");
 const PAGES_DIR = join(__dirname, "pages");
 
 /**
+ * 骨架屏契约（issue #35 重做）：GET_COUNTS 应答前计数元素为空文本且带
+ * `is-skeleton` 类（旧版「—」占位时代，「goto 后立刻读 textContent 作基线」
+ * 隐式依赖加载竞态——竞态输掉时 Number("") === 0 会把基线钉成 0）。
+ * 任何「读计数 textContent 作基线」之前必须先等对应元素脱骨架；
+ * 三个计数同帧渲染，等任一即全部就绪。断言意图不变，只是前置同步。
+ */
+export async function waitCountsLoaded(
+  page: Page,
+  testId: "total" | "pending" | "pushed" = "total",
+): Promise<void> {
+  await expect(page.getByTestId(testId)).not.toHaveClass(/is-skeleton/, {
+    timeout: 15_000,
+  });
+}
+
+/**
  * e2e 专用扩展目录：复制 dist 并给 host_permissions 加上 fixture 服务与
  * raw.githubusercontent.com（issue #14 后采集主路径是 executeScript；真实
  * 使用中 popup 由 action 点击打开，activeTab 即刻授权，但 e2e 把 popup 当

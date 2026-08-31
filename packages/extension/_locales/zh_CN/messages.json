@@ -83,10 +83,6 @@
     "message": "导出日志",
     "description": "导出日志按钮"
   },
-  "loginStatusUnknown": {
-    "message": "登录状态：未知",
-    "description": "登录状态未知文案"
-  },
   "btnCheckLogin": {
     "message": "检查登录",
     "description": "检查登录按钮"
@@ -175,10 +171,6 @@
     "message": "上传采集 $1 中…",
     "description": "上传采集进行中，参数：文件名"
   },
-  "uploadParsedPending": {
-    "message": "已解析 $1，待确认",
-    "description": "上传采集解析完成待确认，参数：文件名"
-  },
   "uploadFailed": {
     "message": "上传采集失败：$1",
     "description": "上传采集失败，参数：错误信息"
@@ -238,5 +230,17 @@
   "errorUploadFailed": {
     "message": "上传采集失败：$1",
     "description": "上传采集失败错误，参数：错误详情"
+  },
+  "toolsToggle": {
+    "message": "工具",
+    "description": "工具抽屉开关按钮"
+  },
+  "emptyHint": {
+    "message": "词库还是空的，采集当前页或上传文件开始",
+    "description": "词库为空时的空态提示"
+  },
+  "pushProgress": {
+    "message": "推送进度",
+    "description": "推送进度条的可访问名称"
   }
 }

@@ -18,6 +18,14 @@
  *
  * i18n 静态文本国际化（issue #30）：通过 data-i18n 属性标记静态文本元素，
  * 在 popup 启动时用 chrome.i18n.getMessage() 回填，并动态设置 <html lang>。
+ *
+ * UI/UX 重做（issue #35）：锁定布局 + 6 项交互增量——
+ * A 条件可见（retry-push 按 phase/pending 显隐）、B 焦点管理（确认卡聚焦
+ * confirm-push + Esc 取消）、C 布局防抖（confirm/tools 走 grid-template-rows
+ * 过渡）、D 状态行互斥（confirm 可见时隐藏 info 态 status，error 豁免始终
+ * 可见——语义锁在 lib/status-visibility.ts + 单测）、E 数字微反馈（计数变化
+ * 闪品牌色）、F 完成收束（completed 定格 100%，下一次 collect 复位）。
+ * 视觉 token 全在 popup.css。
  */
 // 版本号走 version 子路径：barrel 入口首行 import compromise（~362 kB），
 // popup 只取 CORE_VERSION 不能让 NLP 库进 bundle（popup-bundle.test 守护）
@@ -41,6 +49,7 @@ import {
 } from "./lib/sw-channel.js";
 import { browserCsvFileGateway } from "./lib/csv-file.js";
 import { defaultErrorLogStorage, formatErrorLog, readErrorLog } from "./lib/error-log.js";
+import { isStatusLineVisible } from "./lib/status-visibility.js";
 import type { PushStatus } from "./lib/messages.js";
 import { applyStaticI18n, t, t1, t3 } from "./lib/i18n.js";
 
@@ -76,6 +85,9 @@ const pushStatusEl = document.querySelector<HTMLElement>('[data-testid="push-sta
 const pushSucceededEl = document.querySelector<HTMLElement>('[data-testid="push-succeeded"]');
 const pushExistingEl = document.querySelector<HTMLElement>('[data-testid="push-existing"]');
 const pushFailedEl = document.querySelector<HTMLElement>('[data-testid="push-failed"]');
+const pushProgressEl = document.querySelector<HTMLElement>('[data-testid="push-progress"]');
+const pushProgressFillEl = document.querySelector<HTMLElement>('[data-testid="push-progress-fill"]');
+const emptyHintEl = document.querySelector<HTMLElement>('[data-testid="empty-hint"]');
 const exportCsvButton = document.querySelector<HTMLButtonElement>('[data-testid="export-csv"]');
 const importCsvButton = document.querySelector<HTMLButtonElement>('[data-testid="import-csv"]');
 const uploadFileButton = document.querySelector<HTMLButtonElement>('[data-testid="upload-file"]');
@@ -85,19 +97,103 @@ const confirmSection = document.querySelector<HTMLElement>('[data-testid="confir
 const confirmSummaryEl = document.querySelector<HTMLElement>('[data-testid="confirm-summary"]');
 const confirmPushButton = document.querySelector<HTMLButtonElement>('[data-testid="confirm-push"]');
 const cancelCollectButton = document.querySelector<HTMLButtonElement>('[data-testid="cancel-collect"]');
+const toolsToggleButton = document.querySelector<HTMLButtonElement>('[data-testid="tools-toggle"]');
+const toolsPanel = document.querySelector<HTMLElement>('[data-testid="tools-panel"]');
+const toolsChevron = document.querySelector<HTMLElement>('[data-testid="tools-chevron"]');
 
 if (versionEl) {
   versionEl.textContent = `core ${CORE_VERSION}`;
 }
 
-function renderCounts(total: number | null, pending: number | null): void {
-  if (totalEl) totalEl.textContent = total === null ? "—" : String(total);
-  if (pendingEl) pendingEl.textContent = pending === null ? "—" : String(pending);
-  // 已推送 = 词库总词数 - 待推（推送在 SW 逐词 markPushed，待推递减 → 已推送递增）
-  if (pushedEl) {
-    pushedEl.textContent =
-      total === null || pending === null ? "—" : String(Math.max(0, total - pending));
+// 推送进度条的可访问名称：data-i18n 只回填文本，属性须启动时设置
+if (pushProgressEl) {
+  pushProgressEl.setAttribute("aria-label", t("pushProgress"));
+}
+
+// ── 显隐防抖（C）：confirm 卡片与工具面板统一走 grid-template-rows 过渡 ──
+
+function isRevealOpen(el: HTMLElement | null): boolean {
+  return el?.classList.contains("open") ?? false;
+}
+
+function setRevealOpen(el: HTMLElement | null, open: boolean): void {
+  el?.classList.toggle("open", open);
+}
+
+// ── 状态行互斥（D）+ 空态提示 ──────────────────────────────────────────
+
+let lastKnownTotal: number | null = null;
+
+function updateStatusVisibility(): void {
+  if (statusEl) {
+    // D 互斥 + error 豁免（返工锁定）：卡片开着只藏中性状态，错误始终可见
+    statusEl.hidden = !isStatusLineVisible(isRevealOpen(confirmSection), statusEl.dataset.tone);
   }
+}
+
+function updateEmptyHint(): void {
+  if (emptyHintEl) {
+    emptyHintEl.hidden = !(lastKnownTotal === 0 && !isRevealOpen(confirmSection));
+  }
+}
+
+/** 状态行统一写入口：tone 区分中性 / 错误（错误态红条 + 浅红底，见 popup.css）。
+ *  statusEl 的 tone 变化即时重算互斥可见性（error 豁免在卡片可见时生效）。 */
+function renderStatusLine(
+  el: HTMLElement | null,
+  text: string,
+  tone: "info" | "error" = "info",
+): void {
+  if (!el) return;
+  el.textContent = text;
+  el.dataset.tone = tone;
+  if (el === statusEl) updateStatusVisibility();
+}
+
+// ── 计数渲染：null → 骨架脉冲；值变化 → 品牌色一闪（E，初始 null→值 不闪）──
+
+let prevTotal: number | null = null;
+let prevPending: number | null = null;
+let prevPushed: number | null = null;
+
+function flashCountValue(el: HTMLElement): void {
+  el.classList.remove("flash");
+  void el.offsetWidth; // 强制 reflow：连续变化时重启动画
+  el.classList.add("flash");
+}
+
+function renderCountValue(el: HTMLElement | null, next: number | null, prev: number | null): void {
+  if (!el) return;
+  if (next === null) {
+    el.textContent = "";
+    el.classList.add("is-skeleton");
+    return;
+  }
+  el.classList.remove("is-skeleton");
+  el.textContent = String(next);
+  if (prev !== null && prev !== next) flashCountValue(el);
+}
+
+function renderCounts(total: number | null, pending: number | null): void {
+  // 已推送 = 词库总词数 - 待推（推送在 SW 逐词 markPushed，待推递减 → 已推送递增）
+  const pushed = total === null || pending === null ? null : Math.max(0, total - pending);
+  renderCountValue(totalEl, total, prevTotal);
+  renderCountValue(pendingEl, pending, prevPending);
+  renderCountValue(pushedEl, pushed, prevPushed);
+  prevTotal = total;
+  prevPending = pending;
+  prevPushed = pushed;
+  lastKnownTotal = total;
+  updateEmptyHint();
+}
+
+// 数字微反馈收尾：动画结束摘掉类（animationName 过滤，避免误清骨架脉冲）
+for (const el of [totalEl, pendingEl, pushedEl]) {
+  el?.addEventListener("animationend", (event) => {
+    if ((event as AnimationEvent).animationName === "wr-count-flash") {
+      el.classList.remove("flash");
+    }
+  });
 }
 
 type LoginState = "unknown" | "logged-in" | "logged-out";
@@ -105,14 +201,45 @@ type LoginState = "unknown" | "logged-in" | "logged-out";
 function renderLogin(state: LoginState): void {
   if (!loginStatusEl) return;
   loginStatusEl.dataset.state = state;
+  // unknown = 加载中：骨架脉冲（无文本、无状态点）
+  if (state === "unknown") {
+    loginStatusEl.textContent = "";
+    loginStatusEl.classList.add("is-skeleton");
+    return;
+  }
+  loginStatusEl.classList.remove("is-skeleton");
   loginStatusEl.textContent =
-    state === "logged-in"
-      ? t("statusLoggedIn")
-      : state === "logged-out"
-        ? t("statusLoggedOut")
-        : t("loginStatusUnknown");
+    state === "logged-in" ? t("statusLoggedIn") : t("statusLoggedOut");
   if (openBbdcButton) {
     openBbdcButton.hidden = state !== "logged-out";
+  }
+}
+
+// ── 推送状态渲染：文本 + 进度条（F：completed 定格 100%）+ retry 条件可见（A）──
+
+function clamp01(ratio: number): number {
+  return Math.min(1, Math.max(0, ratio));
+}
+
+function renderPushProgress(phase: PushStatus["phase"], processed: number, total: number): void {
+  if (!pushProgressEl) return;
+  pushProgressEl.dataset.phase = phase;
+  // completed 定格 100%；running/paused 按 processed/total；idle 归零
+  const ratio = phase === "completed" ? 1 : total > 0 ? clamp01(processed / total) : 0;
+  if (pushProgressFillEl) {
+    pushProgressFillEl.style.transform = `scaleX(${ratio})`;
+  }
+  pushProgressEl.setAttribute("aria-valuenow", String(Math.round(ratio * 100)));
+}
+
+/** F 完成收束的复位侧：下一次 collect() 开始新周期时进度条归零。 */
+function resetPushProgress(): void {
+  if (pushProgressEl) {
+    pushProgressEl.dataset.phase = "idle";
+    pushProgressEl.setAttribute("aria-valuenow", "0");
+  }
+  if (pushProgressFillEl) {
+    pushProgressFillEl.style.transform = "scaleX(0)";
   }
 }
 
@@ -128,10 +255,15 @@ function renderPushStatus(status: PushStatus): void {
         : t("pushIdle");
   if (pushStatusEl) pushStatusEl.textContent = label;
   if (pushStatusEl) pushStatusEl.dataset.phase = status.phase;
+  renderPushProgress(status.phase, status.processed, status.total);
   if (pushSucceededEl) pushSucceededEl.textContent = String(status.succeeded);
   if (pushExistingEl) pushExistingEl.textContent = String(status.existing);
   if (pushFailedEl) pushFailedEl.textContent = String(status.failed);
-  if (retryPushButton) retryPushButton.disabled = status.phase === "running";
+  if (retryPushButton) {
+    // A 条件可见：无推送历史且无待推时收起；running 期间禁用
+    retryPushButton.hidden = status.phase === "idle" && status.pending === 0;
+    retryPushButton.disabled = status.phase === "running";
+  }
 }
 
 async function refreshPushStatus(): Promise<void> {
@@ -151,12 +283,15 @@ async function requestRetryPush(): Promise<void> {
     await retryPush(chromeSwChannel);
     await refreshPushStatus();
   } finally {
-    if (retryPushButton) retryPushButton.disabled = false;
+    // 恢复可用性交给 phase 语义：running 仍禁用（A），其余放行
+    if (retryPushButton) {
+      retryPushButton.disabled = pushStatusEl?.dataset.phase === "running";
+    }
   }
 }
 
 function renderSyncStatus(text: string): void {
-  if (syncStatusEl) syncStatusEl.textContent = text;
+  renderStatusLine(syncStatusEl, text);
 }
 
 /** 导出文件名：word-radar-YYYYMMDD-HHmm.csv（本地时区）。 */
@@ -187,7 +322,7 @@ async function exportCsv(): Promise<void> {
       browserCsvFileGateway.download(csvExportFileName(), outcome.csv);
       renderSyncStatus(t("exportCsvSuccess"));
     } else {
-      renderSyncStatus(t1("exportFailed", outcome.error));
+      renderStatusLine(syncStatusEl, t1("exportFailed", outcome.error), "error");
     }
   } finally {
     if (exportCsvButton) exportCsvButton.disabled = false;
@@ -210,7 +345,7 @@ async function exportLog(): Promise<void> {
     browserCsvFileGateway.download(logExportFileName(), formatErrorLog(records));
     renderSyncStatus(t1("exportedLogCount", records.length));
   } catch {
-    renderSyncStatus(t("exportLogFailed"));
+    renderStatusLine(syncStatusEl, t("exportLogFailed"), "error");
   } finally {
     if (exportLogButton) exportLogButton.disabled = false;
   }
@@ -233,7 +368,7 @@ async function importCsvFromFile(): Promise<void> {
       renderConfirmPage("sourceImport", outcome.total, outcome.newCount);
       renderSyncStatus(t1("importParsedPending", picked.name));
     } else {
-      renderSyncStatus(t1("importFailed", outcome.error));
+      renderStatusLine(syncStatusEl, t1("importFailed", outcome.error), "error");
     }
   } finally {
     if (importCsvButton) importCsvButton.disabled = false;
@@ -251,17 +386,17 @@ async function uploadFileFromDisk(): Promise<void> {
   const picked = await browserCsvFileGateway.pickUploadText();
   if (!picked) return; // 用户取消：静默
   if (uploadFileButton) uploadFileButton.disabled = true;
-  renderSyncStatus(t1("uploadCollectingFile", picked.name));
+  // 反馈路由（返工锁定）：上传按钮在主采集行，抽屉收起时 sync-status 完全
+  // 不可见——进行中 / 失败的反馈一律走主状态行 statusEl；成功则以确认卡为反馈。
   hideConfirmPage();
+  renderStatusLine(statusEl, t1("uploadCollectingFile", picked.name));
   try {
     const outcome = await uploadFile(chromeSwChannel, picked.text, picked.name);
     if (outcome.ok) {
-      // 批次已驻留 SW 内存：展示确认页（措辞用「上传采集」，计数语义与采集一致）
+      // 批次已驻留 SW 内存：确认卡即成功反馈（措辞用「上传采集」，计数语义与采集一致）
       renderConfirmPage("sourceUpload", outcome.total, outcome.newCount);
-      if (statusEl) statusEl.textContent = t("pendingConfirm");
-      renderSyncStatus(t1("uploadParsedPending", picked.name));
     } else {
-      renderSyncStatus(t1("uploadFailed", outcome.error));
+      renderStatusLine(statusEl, t1("uploadFailed", outcome.error), "error");
     }
   } finally {
     if (uploadFileButton) uploadFileButton.disabled = false;
@@ -283,7 +418,10 @@ async function refreshLogin(): Promise<void> {
 }
 
 async function checkLogin(): Promise<void> {
-  if (loginStatusEl) loginStatusEl.textContent = t("checkingLogin");
+  if (loginStatusEl) {
+    loginStatusEl.classList.remove("is-skeleton");
+    loginStatusEl.textContent = t("checkingLogin");
+  }
   if (checkLoginButton) checkLoginButton.disabled = true;
   try {
     await refreshLogin();
@@ -305,26 +443,35 @@ function renderConfirmPage(
     const source = t(sourceKey);
     confirmSummaryEl.textContent = t3("confirmSummary", source, total, newCount);
   }
-  if (confirmSection) confirmSection.hidden = false;
-  if (confirmPushButton) confirmPushButton.disabled = false;
+  setRevealOpen(confirmSection, true);
+  if (confirmPushButton) {
+    confirmPushButton.disabled = false;
+    // B 焦点管理：卡片浮现即落到主操作
+    confirmPushButton.focus();
+  }
+  updateStatusVisibility(); // D 状态行互斥
+  updateEmptyHint();
 }
 
 function hideConfirmPage(): void {
-  if (confirmSection) confirmSection.hidden = true;
+  setRevealOpen(confirmSection, false);
+  updateStatusVisibility(); // D：卡片收起后恢复状态行
+  updateEmptyHint();
 }
 
 async function collect(): Promise<void> {
-  if (statusEl) statusEl.textContent = t("statusCollecting");
+  renderStatusLine(statusEl, t("statusCollecting"));
   if (collectButton) collectButton.disabled = true;
   hideConfirmPage();
+  resetPushProgress(); // F：新采集周期收束上一轮的完成定格
   try {
     const outcome = await requestCollection(chromeTabsGateway);
     if (outcome.ok) {
       // 确认闸门：采集结果只在 SW 内存（待确认批次），此处仅展示预览
       renderConfirmPage("sourceCollect", outcome.total, outcome.newCount);
-      if (statusEl) statusEl.textContent = t("pendingConfirm");
-    } else if (statusEl) {
-      statusEl.textContent = outcome.error;
+      renderStatusLine(statusEl, t("pendingConfirm"));
+    } else {
+      renderStatusLine(statusEl, outcome.error, "error");
     }
   } finally {
     if (collectButton) collectButton.disabled = false;
@@ -339,13 +486,13 @@ async function confirmPush(): Promise<void> {
     const outcome = await confirmCollected(chromeSwChannel);
     if (outcome.ok) {
       renderCounts(outcome.counts.total, outcome.counts.pending);
-      if (statusEl) statusEl.textContent = t("confirmedPushStarted");
+      renderStatusLine(statusEl, t("confirmedPushStarted"));
       hideConfirmPage();
       // 确认即推送：拉起进度轮询（推送在 SW，popup 关闭不中断）
       await refreshPushStatus();
       startPushStatusPolling();
     } else {
-      if (statusEl) statusEl.textContent = t1("confirmFailed", outcome.error);
+      renderStatusLine(statusEl, t1("confirmFailed", outcome.error), "error");
     }
   } finally {
     if (confirmPushButton) confirmPushButton.disabled = false;
@@ -357,7 +504,7 @@ async function confirmPush(): Promise<void> {
 async function cancelCollect(): Promise<void> {
   await discardCollected(chromeSwChannel);
   hideConfirmPage();
-  if (statusEl) statusEl.textContent = t("cancelled");
+  renderStatusLine(statusEl, t("cancelled"));
 }
 
 collectButton?.addEventListener("click", () => {
@@ -370,6 +517,14 @@ confirmPushButton?.addEventListener("click", () => {
 
 cancelCollectButton?.addEventListener("click", () => {
   void cancelCollect();
+});
+
+// B 焦点管理：确认卡上 Esc 等同取消（卡片收起态 visibility:hidden，不会误触）
+confirmSection?.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && isRevealOpen(confirmSection)) {
+    event.preventDefault();
+    void cancelCollect();
+  }
 });
 
 checkLoginButton?.addEventListener("click", () => {
@@ -399,6 +554,14 @@ uploadFileButton?.addEventListener("click", () => {
 
 exportLogButton?.addEventListener("click", () => {
   void exportLog();
+});
+
+// 工具抽屉：aria-expanded + chevron ▸/▾ 与面板 grid 过渡联动
+toolsToggleButton?.addEventListener("click", () => {
+  const open = !isRevealOpen(toolsPanel);
+  setRevealOpen(toolsPanel, open);
+  toolsToggleButton.setAttribute("aria-expanded", String(open));
+  if (toolsChevron) toolsChevron.textContent = open ? "▾" : "▸";
 });
 
 // 推送进行中每 ~500ms 拉一次状态，结束即停。

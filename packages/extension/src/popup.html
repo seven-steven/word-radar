@@ -4,177 +4,102 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title data-i18n="popupTitle">WordRadar</title>
-    <style>
-      body {
-        margin: 0;
-        padding: 12px 16px;
-        min-width: 240px;
-        font-family: system-ui, sans-serif;
-        font-size: 14px;
-      }
-      h1 {
-        margin: 0 0 8px;
-        font-size: 16px;
-      }
-      .counts {
-        display: flex;
-        gap: 16px;
-        margin-top: 8px;
-      }
-      .count-item {
-        display: flex;
-        flex-direction: column;
-      }
-      .count-label {
-        color: #888;
-        font-size: 11px;
-      }
-      .count-value {
-        font-size: 18px;
-        font-weight: 600;
-      }
-      button {
-        margin-top: 12px;
-      }
-      [data-testid="version"] {
-        margin-top: 12px;
-        color: #888;
-        font-size: 12px;
-      }
-      [data-testid="status"] {
-        margin: 4px 0 0;
-        color: #555;
-        font-size: 12px;
-        min-height: 1em;
-      }
-      .push {
-        margin-top: 12px;
-        padding-top: 8px;
-        border-top: 1px solid #eee;
-      }
-      .push-stats {
-        color: #555;
-        font-size: 12px;
-        line-height: 1.6;
-      }
-      .confirm {
-        margin-top: 8px;
-        padding: 8px;
-        border: 1px solid #e2e8f0;
-        border-radius: 6px;
-      }
-      .confirm-summary {
-        margin: 0;
-        font-size: 13px;
-      }
-      .confirm-actions {
-        display: flex;
-        gap: 8px;
-        margin-top: 8px;
-      }
-      .confirm-actions button {
-        margin-top: 0;
-        flex: 1;
-      }
-      .login-row {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-      }
-      .login-status {
-        font-size: 12px;
-        color: #555;
-      }
-      .login-status[data-state="logged-in"] {
-        color: #0a7d2c;
-      }
-      .login-status[data-state="logged-out"] {
-        color: #b00000;
-      }
-      .login-actions {
-        margin-top: 8px;
-        display: flex;
-        gap: 8px;
-      }
-      .sync {
-        margin-top: 12px;
-        padding-top: 8px;
-        border-top: 1px solid #eee;
-      }
-      .sync-actions {
-        display: flex;
-        gap: 8px;
-      }
-      .sync-actions button {
-        margin-top: 0;
-      }
-      .sync-status {
-        margin: 4px 0 0;
-        color: #555;
-        font-size: 12px;
-        min-height: 1em;
-        word-break: break-all;
-      }
-    </style>
+    <link rel="stylesheet" href="./popup.css" />
   </head>
   <body>
     <main>
-      <h1 data-i18n="popupHeading">WordRadar</h1>
-      <div class="counts">
+      <header>
+        <h1 data-i18n="popupHeading">WordRadar</h1>
+      </header>
+
+      <!-- 计数条：加载中显示骨架脉冲（renderCounts 的 null 态） -->
+      <section class="counts">
         <div class="count-item">
           <span class="count-label" data-i18n="countTotal">词库总词数</span>
-          <span class="count-value" data-testid="total">—</span>
+          <span class="count-value is-skeleton" data-testid="total"></span>
         </div>
         <div class="count-item">
           <span class="count-label" data-i18n="countPushed">已推送</span>
-          <span class="count-value" data-testid="pushed">—</span>
+          <span class="count-value is-skeleton" data-testid="pushed"></span>
         </div>
         <div class="count-item">
           <span class="count-label" data-i18n="countPending">待推</span>
-          <span class="count-value" data-testid="pending">—</span>
+          <span class="count-value is-skeleton" data-testid="pending"></span>
         </div>
-      </div>
-      <p data-testid="status" data-i18n="statusCollecting">采集中…</p>
-      <button type="button" data-testid="collect" data-i18n="btnRecollect">重新采集</button>
+      </section>
+
+      <!-- 采集入口行：主操作（采集）+ 次操作（上传文件，issue #24） -->
+      <section class="collect-entry">
+        <div class="collect-actions">
+          <button type="button" class="btn btn-primary" data-testid="collect" data-i18n="btnRecollect">重新采集</button>
+          <button type="button" class="btn btn-secondary" data-testid="upload-file" data-i18n="btnUploadFile">上传文件</button>
+        </div>
+        <p class="status-line" data-testid="status" data-i18n="statusCollecting">采集中…</p>
+        <p class="empty-hint" data-testid="empty-hint" data-i18n="emptyHint" hidden></p>
+      </section>
+
       <!-- 确认闸门（issue #22）：待确认批次只存活于内存，确认才入库+推送 -->
-      <section class="confirm" data-testid="confirm-section" hidden>
-        <p class="confirm-summary" data-testid="confirm-summary"></p>
-        <div class="confirm-actions">
-          <button type="button" data-testid="confirm-push" data-i18n="btnConfirmPush">确认推送</button>
-          <button type="button" data-testid="cancel-collect" data-i18n="btnCancel">取消</button>
+      <section class="reveal" data-testid="confirm-section">
+        <div class="reveal-clip">
+          <div class="confirm-card">
+            <p class="confirm-summary" data-testid="confirm-summary"></p>
+            <div class="confirm-actions">
+              <button type="button" class="btn btn-primary" data-testid="confirm-push" data-i18n="btnConfirmPush">确认推送</button>
+              <button type="button" class="btn btn-text" data-testid="cancel-collect" data-i18n="btnCancel">取消</button>
+            </div>
+          </div>
         </div>
       </section>
+
+      <!-- 推送区：状态文本 + 进度条（scaleX 填充）+ 统计行 + 条件重试 -->
       <section class="push">
-        <div class="push-stats" data-testid="push-status" data-i18n="pushStatusIdle">推送状态：空闲</div>
+        <div class="push-status" data-testid="push-status" data-phase="idle" data-i18n="pushStatusIdle">推送状态：空闲</div>
+        <div class="progress" data-testid="push-progress" data-phase="idle" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+          <div class="progress-fill" data-testid="push-progress-fill"></div>
+        </div>
         <div class="push-stats">
-          <span data-i18n="pushSuccess">成功</span> <span data-testid="push-succeeded">0</span> ·
-          <span data-i18n="pushExisting">已存在</span> <span data-testid="push-existing">0</span> ·
-          <span data-i18n="pushFailed">失败</span> <span data-testid="push-failed">0</span>
+          <span data-i18n="pushSuccess">成功</span> <span class="stat-num" data-testid="push-succeeded">0</span>
+          <span class="stat-dot" aria-hidden="true">·</span>
+          <span data-i18n="pushExisting">已存在</span> <span class="stat-num" data-testid="push-existing">0</span>
+          <span class="stat-dot" aria-hidden="true">·</span>
+          <span data-i18n="pushFailed">失败</span> <span class="stat-num" data-testid="push-failed">0</span>
         </div>
-        <button type="button" data-testid="retry-push" data-i18n="btnRetryPending">重试待推</button>
+        <button type="button" class="btn btn-secondary btn-small" data-testid="retry-push" data-i18n="btnRetryPending" hidden>重试待推</button>
       </section>
-      <section class="sync">
-        <div class="sync-actions">
-          <button type="button" data-testid="export-csv" data-i18n="btnExportCsv">导出 CSV</button>
-          <button type="button" data-testid="import-csv" data-i18n="btnImportCsv">导入 CSV</button>
-          <!-- 上传文件采集（issue #24）：.txt/.md 文本走同一提取管线与确认闸门 -->
-          <button type="button" data-testid="upload-file" data-i18n="btnUploadFile">上传文件</button>
-          <!-- 导出日志（issue #25）：storage.local 环形缓冲错误日志 → 可读文本 -->
-          <button type="button" data-testid="export-log" data-i18n="btnExportLog">导出日志</button>
+
+      <!-- 工具抽屉：低频工具默认收起（issue #35 返工锁定），点开走 grid 过渡 -->
+      <section class="tools">
+        <button type="button" class="tools-toggle" data-testid="tools-toggle" aria-expanded="false" aria-controls="tools-panel">
+          <span class="tools-chevron" data-testid="tools-chevron" aria-hidden="true">▸</span>
+          <span data-i18n="toolsToggle">工具</span>
+        </button>
+        <div class="reveal" data-testid="tools-panel" id="tools-panel">
+          <div class="reveal-clip">
+            <div class="tools-body">
+              <div class="tools-actions">
+                <button type="button" class="btn btn-secondary btn-small" data-testid="import-csv" data-i18n="btnImportCsv">导入 CSV</button>
+                <button type="button" class="btn btn-secondary btn-small" data-testid="export-csv" data-i18n="btnExportCsv">导出 CSV</button>
+                <!-- 导出日志（issue #25）：storage.local 环形缓冲错误日志 → 可读文本 -->
+                <button type="button" class="btn btn-secondary btn-small" data-testid="export-log" data-i18n="btnExportLog">导出日志</button>
+              </div>
+              <p class="sync-status" data-testid="sync-status"></p>
+            </div>
+          </div>
         </div>
-        <p class="sync-status" data-testid="sync-status"></p>
       </section>
-      <section class="login">
-        <div class="login-row">
-          <span class="login-status" data-testid="login-status" data-state="unknown" data-i18n="loginStatusUnknown">登录状态：未知</span>
-        </div>
-        <div class="login-actions">
-          <button type="button" data-testid="check-login" data-i18n="btnCheckLogin">检查登录</button>
-          <button type="button" data-testid="open-bbdc" hidden data-i18n="btnOpenBbdc">打开不背单词</button>
-        </div>
-      </section>
-      <p data-testid="version"></p>
     </main>
+
+    <!-- 底部状态条：左侧登录态 + 右侧版本/检查登录（位置钉死） -->
+    <footer class="footer">
+      <div class="footer-side">
+        <span class="login-status is-skeleton" data-testid="login-status" data-state="unknown"></span>
+        <button type="button" class="btn btn-text btn-small" data-testid="open-bbdc" hidden data-i18n="btnOpenBbdc">打开不背单词</button>
+      </div>
+      <div class="footer-side">
+        <span class="version" data-testid="version"></span>
+        <button type="button" class="btn btn-text btn-small" data-testid="check-login" data-i18n="btnCheckLogin">检查登录</button>
+      </div>
+    </footer>
     <script type="module" src="./popup.ts"></script>
   </body>
 </html>

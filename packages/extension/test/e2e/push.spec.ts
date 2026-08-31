@@ -5,7 +5,7 @@
  * 断言重点：确认即推送是唯一路径 + 请求形状（URL / newwordlist JSON / opcode）
  * + 最终 PushStatus 一致性。真实 bbdc.cn 登录路径永不自动化（安全边界）。
  */
-import { test, expect } from "./fixtures.js";
+import { test, expect, waitCountsLoaded } from "./fixtures.js";
 
 test.beforeEach(({ mockBbdc }) => {
   mockBbdc.reset();
@@ -40,6 +40,7 @@ test("confirm merges the batch and pushes the whole pending pool to mocked bbdc"
   await expect(popup.getByTestId("pending")).toHaveText(/^[1-9]\d*$/, {
     timeout: 10_000,
   });
+  await waitCountsLoaded(popup, "pending"); // 基线读取前置（骨架屏契约）
   const pending = Number(await popup.getByTestId("pending").textContent());
   expect(pending).toBeGreaterThanOrEqual(1);
 
@@ -236,6 +237,7 @@ test("push progress updates live in popup and badge shows x/y then ✓ (issue #2
       "running",
       { timeout: 120_000 },
     );
+    await waitCountsLoaded(reopened, "pending"); // 骨架期 Number("")=0 会假性 break
     const pending = Number(await reopened.getByTestId("pending").textContent());
     if (pending === 0) break;
     const retry = reopened.getByTestId("retry-push");
@@ -244,6 +246,7 @@ test("push progress updates live in popup and badge shows x/y then ✓ (issue #2
     await reopened.waitForTimeout(500);
   }
   expect(await badgeText()).toBe("✓");
+  await waitCountsLoaded(reopened, "pushed"); // 基线读取前置：等脱骨架（同帧覆盖 pending）
   const pushed = Number(await reopened.getByTestId("pushed").textContent());
   const pending = Number(await reopened.getByTestId("pending").textContent());
   expect(pending).toBe(0);

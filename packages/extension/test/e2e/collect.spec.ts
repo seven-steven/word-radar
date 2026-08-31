@@ -9,7 +9,7 @@
  *
  * i18n（issue #28）：测试 Chromium 在 fixtures.ts 钉死 zh-CN locale，断言中文渲染
  */
-import { test, expect } from "./fixtures.js";
+import { test, expect, waitCountsLoaded } from "./fixtures.js";
 
 test.beforeEach(({ mockBbdc }) => {
   mockBbdc.reset();
@@ -39,6 +39,7 @@ test("collects rare words from a fixture page into the vocabulary", async ({
     { timeout: 15_000 },
   );
   // 确认前批次只在内存：词库计数不变
+  await waitCountsLoaded(popup); // 基线读取前置：等 total 脱骨架（骨架屏契约）
   const totalBefore = Number(await popup.getByTestId("total").textContent());
   await expect(popup.getByTestId("total")).toHaveText(String(totalBefore));
 
@@ -86,6 +87,7 @@ test("cancel discards the pending batch: counts unchanged, nothing merged", asyn
     { timeout: 120_000 },
   );
   // 等一次稳定计数（boot 自动采集可能打到 popup 自身，计数即词库现状）
+  await waitCountsLoaded(popup); // 基线读取前置：等 total 脱骨架（骨架屏契约）
   await expect(popup.getByTestId("total")).toHaveText(/^\d+$/);
   const totalBefore = Number(await popup.getByTestId("total").textContent());
   const pendingBefore = Number(await popup.getByTestId("pending").textContent());

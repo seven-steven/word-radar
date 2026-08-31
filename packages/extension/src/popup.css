@@ -1,0 +1,470 @@
+/*
+ * popup 样式（issue #35 UI/UX 重做）。
+ * 全部视觉 token 走 --wr-* 自定义属性；零外部字体、零依赖。
+ * 经 popup.html 的 <link rel="stylesheet"> 由 Vite/crxjs 打进 dist。
+ */
+
+:root {
+  /* 色板（石板灰暖色系 + 单一品牌橙 accent） */
+  --wr-bg: #fafaf9;
+  --wr-surface: #ffffff;
+  --wr-text: #1c1917;
+  --wr-text-secondary: #57534e;
+  --wr-hairline: #e7e5e4;
+  --wr-accent: #ea580c;
+  --wr-accent-strong: #c2410c;
+  --wr-success: #16a34a;
+  --wr-danger: #dc2626;
+  --wr-danger-bg: #fef2f2;
+  --wr-confirm-bg: #fff7ed;
+  --wr-progress-from: #f97316;
+  --wr-progress-to: #ef4444;
+  /* 暖色调阴影（不用纯黑） */
+  --wr-shadow: 0 1px 2px rgb(28 25 23 / 0.06), 0 2px 8px rgb(28 25 23 / 0.06);
+  --wr-radius-control: 8px;
+  --wr-radius-card: 12px;
+  --wr-speed: 180ms;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 16px;
+  width: 320px;
+  background: var(--wr-bg);
+  color: var(--wr-text);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+h1 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+/* ── 计数条 ─────────────────────────────────────────────── */
+
+.counts {
+  display: flex;
+  gap: 24px;
+  margin-top: 8px;
+}
+
+.count-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.count-label {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--wr-text-secondary);
+}
+
+.count-value {
+  font-size: 18px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+}
+
+/* 数字微反馈（E）：值变化时品牌色高亮一闪，animationend 移除 */
+.count-value.flash {
+  animation: wr-count-flash 180ms ease-out;
+}
+
+@keyframes wr-count-flash {
+  from {
+    color: var(--wr-accent);
+  }
+  to {
+    color: var(--wr-text);
+  }
+}
+
+/* ── 骨架（计数 / 登录态加载中）：opacity 呼吸脉冲 ─────── */
+
+.is-skeleton {
+  display: inline-block;
+  min-width: 2.5em;
+  height: 0.8em;
+  border-radius: 4px;
+  background: var(--wr-hairline);
+  animation: wr-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes wr-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+/* ── 按钮 ──────────────────────────────────────────────── */
+
+.btn {
+  appearance: none;
+  border: 1px solid transparent;
+  border-radius: var(--wr-radius-control);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 7px 12px;
+  cursor: pointer;
+  transition:
+    background-color var(--wr-speed) ease,
+    border-color var(--wr-speed) ease,
+    color var(--wr-speed) ease,
+    box-shadow var(--wr-speed) ease,
+    transform var(--wr-speed) ease;
+}
+
+.btn:focus-visible,
+.tools-toggle:focus-visible {
+  outline: 2px solid var(--wr-accent);
+  outline-offset: 2px;
+}
+
+.btn:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.btn-primary {
+  background: var(--wr-accent);
+  color: #ffffff;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: var(--wr-accent-strong);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 6px rgb(234 88 12 / 0.25);
+}
+
+.btn-secondary {
+  background: var(--wr-surface);
+  border-color: var(--wr-hairline);
+  color: var(--wr-text);
+}
+
+.btn-secondary:hover:not(:disabled) {
+  border-color: #d6d3d1;
+  background: #f5f5f4;
+  transform: translateY(-1px);
+}
+
+/* 纯文本按钮（取消 / 底部小操作）：无描边无底色 */
+.btn-text {
+  background: transparent;
+  color: var(--wr-text-secondary);
+  padding: 4px 8px;
+}
+
+.btn-text:hover:not(:disabled) {
+  color: var(--wr-text);
+  background: rgb(28 25 23 / 0.05);
+}
+
+.btn-small {
+  font-size: 12px;
+  padding: 4px 10px;
+}
+
+/* ── 采集入口行 ────────────────────────────────────────── */
+
+.collect-entry {
+  margin-top: 16px;
+}
+
+.collect-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.status-line {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--wr-text-secondary);
+  min-height: 1em;
+}
+
+.empty-hint {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--wr-text-secondary);
+}
+
+/* 错误态状态行：左侧 3px 红条 + 浅红底（与品牌橙拉开） */
+.status-line[data-tone="error"],
+.sync-status[data-tone="error"] {
+  color: var(--wr-danger);
+  background: var(--wr-danger-bg);
+  border-left: 3px solid var(--wr-danger);
+  border-radius: 0 6px 6px 0;
+  padding: 4px 8px;
+}
+
+/* ── 显隐防抖（C）：grid-template-rows 0fr→1fr 过渡 ──────
+   收起态 visibility 延迟切换：收起先折叠再退出可聚焦/可达性树，
+   展开立即 visible 让焦点管理（B）即刻生效。 */
+
+.reveal {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 200ms ease;
+}
+
+.reveal-clip {
+  overflow: hidden;
+  min-height: 0;
+  visibility: hidden;
+  transition: visibility 0s linear 200ms;
+}
+
+.reveal.open {
+  grid-template-rows: 1fr;
+}
+
+.reveal.open > .reveal-clip {
+  visibility: visible;
+  transition-delay: 0s;
+}
+
+/* ── 确认卡片：浅橙底、无描边无阴影、圆角 12 ──────────── */
+
+.confirm-card {
+  margin-top: 8px;
+  background: var(--wr-confirm-bg);
+  border-radius: var(--wr-radius-card);
+  padding: 12px;
+}
+
+.confirm-summary {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.confirm-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.confirm-actions .btn-primary {
+  flex: 1;
+}
+
+/* ── 推送区 ────────────────────────────────────────────── */
+
+.push {
+  margin-top: 16px;
+  padding-top: 8px;
+  border-top: 1px solid var(--wr-hairline);
+}
+
+.push-status {
+  font-size: 12px;
+  color: var(--wr-text-secondary);
+}
+
+/* 进度条：scaleX 填充（不用 width），running 橙红渐变 / paused 转灰 */
+.progress {
+  margin-top: 8px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--wr-hairline);
+  overflow: hidden;
+}
+
+.progress-fill {
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--wr-progress-from), var(--wr-progress-to));
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 250ms ease;
+}
+
+.progress[data-phase="paused"] .progress-fill {
+  background: #a8a29e;
+}
+
+/* 推送暂停（含错误）：错误态视觉——红条 + 浅红底（与品牌橙拉开） */
+.push-status[data-phase="paused"] {
+  color: var(--wr-danger);
+  background: var(--wr-danger-bg);
+  border-left: 3px solid var(--wr-danger);
+  border-radius: 0 6px 6px 0;
+  padding: 4px 8px;
+}
+
+.push-stats {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 6px;
+  font-size: 12px;
+  color: var(--wr-text-secondary);
+}
+
+.stat-num {
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  color: var(--wr-text);
+}
+
+.push .btn {
+  margin-top: 8px;
+}
+
+/* ── 工具抽屉 ──────────────────────────────────────────── */
+
+.tools-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 8px;
+  padding: 4px 0;
+  background: none;
+  border: none;
+  border-radius: 6px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--wr-text-secondary);
+  cursor: pointer;
+  transition: color var(--wr-speed) ease;
+}
+
+.tools-toggle:hover {
+  color: var(--wr-text);
+}
+
+.tools-chevron {
+  display: inline-block;
+  width: 1em;
+}
+
+.tools-body {
+  padding-top: 8px;
+}
+
+.tools-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.sync-status {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--wr-text-secondary);
+  min-height: 1em;
+  word-break: break-all;
+}
+
+/* ── 底部状态条：发丝线上边距，位置钉死 ───────────────── */
+
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin-top: 16px;
+  padding-top: 8px;
+  border-top: 1px solid var(--wr-hairline);
+  font-size: 12px;
+}
+
+.footer-side {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.version {
+  color: var(--wr-text-secondary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* 320px 内不放不下时按列换行，按钮文字永不内部折行 */
+.btn {
+  white-space: nowrap;
+}
+
+/* 登录态：绿点/红点（data-state 机制保留），未知=骨架 */
+.login-status {
+  position: relative;
+  padding-left: 14px;
+  color: var(--wr-text-secondary);
+}
+
+.login-status::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 50%;
+  translate: 0 -50%;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.login-status[data-state="logged-in"] {
+  color: var(--wr-success);
+}
+
+.login-status[data-state="logged-in"]::before {
+  background: var(--wr-success);
+}
+
+.login-status[data-state="logged-out"] {
+  color: var(--wr-danger);
+}
+
+.login-status[data-state="logged-out"]::before {
+  background: var(--wr-danger);
+}
+
+.login-status.is-skeleton {
+  padding-left: 0;
+}
+
+.login-status.is-skeleton::before {
+  display: none;
+}
+
+/* ── 动效偏好：reduce 下一律瞬时 ──────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    transition-delay: 0s !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
