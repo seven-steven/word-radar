@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/).
 
+## [Unreleased]
+
+### Changed
+
+- Logo 图标矢量化重绘：`word-radar.svg` 从内嵌 1024px 位图的伪 SVG（945KB）重写为纯矢量路径（1KB，缩小约 900 倍）——圆角矩形 `rx=229` + 五锚点三次贝塞尔 W 笔画 + 5-stop 水平渐变 `#FF501E→#FCB736`；16/48/128 PNG 从矢量源重新光栅化，边缘更干净（模糊 RMSE 0.038，残差为原位图噪点）
+
 ## [0.1.0] - 2026-08-22
 
 ### 核心功能
