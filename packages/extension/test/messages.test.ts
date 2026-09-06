@@ -21,7 +21,9 @@ import {
   isImportCsvMessage,
   isMarkPushedMessage,
   isUploadFileMessage,
+  isUploadTextMessage,
   UPLOAD_FILE,
+  UPLOAD_TEXT,
   isWordsCollectedMessage,
 } from "../src/lib/messages.js";
 
@@ -268,5 +270,27 @@ describe("isUploadFileMessage（issue #38 文件批）", () => {
     ).toBe(false);
     expect(isUploadFileMessage(null)).toBe(false);
     expect(isUploadFileMessage(UPLOAD_FILE)).toBe(false);
+  });
+});
+
+describe("isUploadTextMessage（issue #42 粘贴文本）", () => {
+  it("锁定 type 字段字面值", () => {
+    expect(UPLOAD_TEXT).toBe("UPLOAD_TEXT");
+  });
+
+  it("接受合法消息（含空串文本）", () => {
+    expect(isUploadTextMessage({ type: "UPLOAD_TEXT", text: "run and jump" })).toBe(true);
+    expect(isUploadTextMessage({ type: "UPLOAD_TEXT", text: "" })).toBe(true);
+  });
+
+  it("拒绝缺 text、非字符串 text 与畸形值", () => {
+    expect(isUploadTextMessage({ type: "UPLOAD_TEXT" })).toBe(false);
+    expect(isUploadTextMessage({ type: "UPLOAD_TEXT", text: 42 })).toBe(false);
+    // 同为上传协议但形状不同：文件批消息不是文本消息
+    expect(
+      isUploadTextMessage({ type: "UPLOAD_FILE", files: [{ name: "a.txt", text: "run" }] }),
+    ).toBe(false);
+    expect(isUploadTextMessage(null)).toBe(false);
+    expect(isUploadTextMessage(UPLOAD_TEXT)).toBe(false);
   });
 });

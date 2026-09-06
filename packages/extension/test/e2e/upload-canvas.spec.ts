@@ -1,7 +1,8 @@
 /**
- * 上传画布 e2e（issue #41 v1.1-T4）：拖放多文件合并单一确认批、非白名单
- * 后缀计数摘要、双上限整批拒绝、覆盖语义两条（collect/import 驻留批询问、
- * upload 驻留批静默替换）。
+ * 上传画布 e2e（issue #41 v1.1-T4；issue #42 v1.1-T5 粘贴手势）：
+ * 拖放多文件合并单一确认批、非白名单后缀计数摘要、双上限整批拒绝、覆盖
+ * 语义两条（collect/import 驻留批询问、upload 驻留批静默替换）、粘贴文本
+ * 直进提取管线、粘贴文件同拖放语义（白名单过滤 + 计数摘要）。
  *
  * 已知边界：Playwright 合成 DataTransfer 无法产生 webkitGetAsEntry（浏览器
  * 限制），目录递归进不了 e2e——由 test/drop-files.test.ts 的 fake entry 树
@@ -41,6 +42,36 @@ async function dropOnCanvas(
   }, files);
 }
 
+/**
+ * 在上传画布上合成一次 paste（issue #42）：ClipboardEventInit 的
+ * clipboardData 可直接携带 DataTransfer（Chromium 支持）。画布 tabindex=0，
+ * 先 focus 再派发——真实 ⌘V 只会落在聚焦元素上。
+ */
+async function pasteOnCanvas(
+  page: Page,
+  payload: { text?: string; files?: Array<{ name: string; text: string }> },
+): Promise<void> {
+  await page.evaluate((spec) => {
+    const dt = new DataTransfer();
+    for (const file of spec.files ?? []) {
+      dt.items.add(new File([file.text], file.name, { type: "text/plain" }));
+    }
+    if (spec.text !== undefined) dt.setData("text/plain", spec.text);
+    const canvas = document.querySelector<HTMLElement>(
+      '[data-testid="upload-canvas"]',
+    );
+    if (!canvas) throw new Error("upload-canvas not found");
+    canvas.focus();
+    canvas.dispatchEvent(
+      new ClipboardEvent("paste", {
+        clipboardData: dt,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+  }, payload);
+}
+
 /** 记录并接受本页出现的所有 dialog（window.confirm）；seen() 供「无 dialog」断言。 */
 function trackDialogs(page: Page): { seen: () => boolean } {
   let seen = false;
@@ -68,12 +99,14 @@ test("upload canvas replaces the upload button and renders the hint (issue #41)"
   const page = await extContext.newPage();
   await page.goto(popupUrl);
 
-  // 画布在场、指引文案按 zh-CN 回填、role=button 可聚焦
+  // 画布在场、指引文案按 zh-CN 回填、role=button 可聚焦；
+  // 辅行（issue #42）：粘贴手势 + 文件夹拖放引导
   const canvas = page.getByTestId("upload-canvas");
   await expect(canvas).toBeVisible();
   await expect(canvas).toHaveAttribute("role", "button");
   await expect(canvas).toHaveAttribute("tabindex", "0");
   await expect(canvas).toContainText("点击选择文件，或拖放文件 / 文件夹");
+  await expect(canvas).toContainText("可粘贴文本或文件；文件夹请拖放");
   // 旧「上传文件」按钮已删（决议 A3）：testid 引用清零
   await expect(page.getByTestId("upload-file")).toHaveCount(0);
 
@@ -244,6 +277,68 @@ test("re-upload over a resident upload batch replaces silently (issue #41 决议
     /本次共计上传采集 \d+ 个单词，其中新词 \d+ 个/,
   );
   expect(dialogs.seen()).toBe(false);
+
+  await page.getByTestId("cancel-collect").click();
+  await page.close();
+});
+
+test("paste plain text on the canvas goes straight into the extraction pipeline (issue #42 决议 A3)", async ({
+  extContext,
+  popupUrl,
+  mockBbdc,
+}) => {
+  const page = await extContext.newPage();
+  await page.goto(popupUrl);
+  await waitBootCollectSettled(page);
+  await waitCountsLoaded(page);
+  const totalBefore = Number(await page.getByTestId("total").textContent());
+
+  // 粘贴文本通道：无文件名/后缀概念，直接进提取管线 → 待确认批次
+  await pasteOnCanvas(page, {
+    text: "The marzipan lighthouse hummed a quiet tune.\n",
+  });
+
+  // 确认卡措辞仍是「上传采集」（粘贴属于上传目标，不叫「剪贴板采集」）
+  await expect(page.getByTestId("confirm-summary")).toHaveText(
+    /本次共计上传采集 \d+ 个单词，其中新词 \d+ 个/,
+    { timeout: 10_000 },
+  );
+  // 确认前：不落库、零网络请求（check-login 豁免，同拖放用例）
+  await expect(page.getByTestId("total")).toHaveText(String(totalBefore));
+  expect(
+    mockBbdc.requests.filter((r) => !r.url.includes("check-login")),
+  ).toHaveLength(0);
+
+  // 取消批次：不留待推，避免污染共享词库/推送循环
+  await page.getByTestId("cancel-collect").click();
+  await expect(page.getByTestId("confirm-section")).toBeHidden();
+  await page.close();
+});
+
+test("pasted files go through the same whitelist filter and summary as drop (issue #42 决议 A4)", async ({
+  extContext,
+  popupUrl,
+}) => {
+  const page = await extContext.newPage();
+  await page.goto(popupUrl);
+  await waitBootCollectSettled(page);
+
+  // 粘贴文件通道：与拖放完全同语义——白名单过滤 + 计数摘要（1 收 1 忽）
+  await pasteOnCanvas(page, {
+    files: [
+      { name: "paste.txt", text: "A whimsical tobacconist shuffled ten envelopes.\n" },
+      { name: "paste.png", text: "binary" },
+    ],
+  });
+
+  await expect(page.getByTestId("status")).toHaveText(
+    /已收录 1 个文件，忽略 1 个（\.png）/,
+    { timeout: 10_000 },
+  );
+  await expect(page.getByTestId("confirm-section")).toBeVisible();
+  await expect(page.getByTestId("confirm-summary")).toHaveText(
+    /本次共计上传采集 \d+ 个单词，其中新词 \d+ 个/,
+  );
 
   await page.getByTestId("cancel-collect").click();
   await page.close();

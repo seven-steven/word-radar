@@ -171,9 +171,17 @@
     "message": "Collecting from $1 files…",
     "description": "Upload collection in progress for a multi-file batch (issue #38), params: file count"
   },
+  "uploadCollectingPasted": {
+    "message": "Collecting pasted text…",
+    "description": "Upload collection in progress for the pasted-text channel (issue #42)"
+  },
   "uploadCanvasHint": {
     "message": "Click to choose files, or drop files / folders",
     "description": "Upload canvas hint text (issue #41)"
+  },
+  "uploadCanvasPasteHint": {
+    "message": "Paste text or files; drop folders",
+    "description": "Upload canvas sub-hint: paste gesture and folder guidance (issue #42)"
   },
   "uploadSummaryFiles": {
     "message": "Collected $1 files",

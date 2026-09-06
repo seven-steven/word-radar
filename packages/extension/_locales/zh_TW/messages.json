@@ -171,9 +171,17 @@
     "message": "正在上传采集 $1 个文件…",
     "description": "上传采集进行中（多文件整批，issue #38），参数：文件数"
   },
+  "uploadCollectingPasted": {
+    "message": "正在上传采集粘贴的文本…",
+    "description": "粘贴文本通道上传采集进行中（issue #42）"
+  },
   "uploadCanvasHint": {
     "message": "点击选择文件，或拖放文件 / 文件夹",
     "description": "上传画布指引文案（issue #41）"
+  },
+  "uploadCanvasPasteHint": {
+    "message": "可粘贴文本或文件；文件夹请拖放",
+    "description": "上传画布辅行指引：粘贴手势与文件夹引导（issue #42）"
   },
   "uploadSummaryFiles": {
     "message": "已收录 $1 个文件",

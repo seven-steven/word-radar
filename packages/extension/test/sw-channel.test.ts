@@ -4,6 +4,7 @@ import {
   fetchExportCsv,
   fetchLoginStatus,
   importCsv,
+  uploadPastedText,
   type SwChannel,
 } from "../src/lib/sw-channel.js";
 
@@ -24,6 +25,8 @@ function fakeChannel(overrides: Partial<SwChannel> = {}): SwChannel {
     retryPush: vi.fn(async () => undefined),
     exportCsv: vi.fn(async () => ({ ok: true, csv: "lemma,flags\nrun,0\n" })),
     importCsv: vi.fn(async () => ({ total: 8, newCount: 5 })),
+    uploadFile: vi.fn(async () => ({ total: 0, newCount: 0 })),
+    uploadText: vi.fn(async () => ({ total: 0, newCount: 0 })),
     ...overrides,
   };
 }
@@ -199,5 +202,40 @@ describe("importCsv（popup 侧）", () => {
 
     const outcome = await importCsv(channel, "lemma,flags\n", "a.csv");
     expect(outcome.ok).toBe(false);
+  });
+});
+
+describe("uploadPastedText（popup 侧，issue #42 粘贴文本）", () => {
+  it("向 SW 发 UPLOAD_TEXT 并把 BatchPreview 包成 {ok:true,total,newCount}", async () => {
+    const channel = fakeChannel({
+      uploadText: vi.fn(async () => ({ total: 5, newCount: 3 })),
+    });
+
+    const outcome = await uploadPastedText(channel, "run and jump");
+
+    expect(channel.uploadText).toHaveBeenCalledWith("run and jump");
+    expect(outcome).toEqual({ ok: true, total: 5, newCount: 3 });
+  });
+
+  it("SW 报 {ok:false,error} 时原样透传；畸形应答/抛错归一为 upload-unavailable（同 uploadFile）", async () => {
+    await expect(
+      uploadPastedText(
+        fakeChannel({ uploadText: vi.fn(async () => ({ ok: false, error: "upload-failed" })) }),
+        "run",
+      ),
+    ).resolves.toEqual({ ok: false, error: "upload-failed" });
+    await expect(
+      uploadPastedText(fakeChannel({ uploadText: vi.fn(async () => "garbage") }), "run"),
+    ).resolves.toEqual({ ok: false, error: "upload-unavailable" });
+    await expect(
+      uploadPastedText(
+        fakeChannel({
+          uploadText: vi.fn(async () => {
+            throw new Error("Could not establish connection");
+          }),
+        }),
+        "run",
+      ),
+    ).resolves.toEqual({ ok: false, error: "upload-unavailable" });
   });
 });

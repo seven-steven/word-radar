@@ -5,6 +5,8 @@
  *   任一文件非法后缀 → 整批拒绝、零写入 + 错误日志 stage=upload；
  *   新批次覆盖旧批次（单驻留语义）；确认后与采集批次同语义合并。
  * - sw-channel 的 uploadFile 收窄（files 批形状）。
+ * - background-listener 的 UPLOAD_TEXT 分支 + sw-channel 的 uploadPastedText
+ *   收窄（issue #42 v1.1-T5 粘贴文本通道：无后缀校验，直进提取管线）。
  */
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -16,6 +18,7 @@ import {
 import {
   CONFIRM_COLLECTED,
   UPLOAD_FILE,
+  UPLOAD_TEXT,
   WORDS_COLLECTED,
   type PushStatus,
 } from "../src/lib/messages.js";
@@ -382,5 +385,113 @@ describe("sw-channel uploadFile 收窄（issue #24；#38 文件批）", () => {
         [{ name: "a.txt", text: "x" }],
       ),
     ).resolves.toEqual({ ok: false, error: "upload-unavailable" });
+  });
+});
+
+describe("createBackgroundListener UPLOAD_TEXT（issue #42 v1.1-T5 粘贴文本）", () => {
+  /** 与网页采集同源的提取管线：注入确定性 extract 验证被调用与传参。 */
+  const freshExtract = () =>
+    vi.fn((text: string): WordEntry[] =>
+      text.split(/\s+/).filter(Boolean).map((lemma) => ({ lemma, flags: 0 })));
+
+  it("text 直进同一提取管线：无后缀校验、countNew 算 diff、只驻留（不合并不推送）、应答 {total,newCount}；持有通道", async () => {
+    const extract = freshExtract();
+    const repository = fakeRepository();
+    repository.countNew = vi.fn(async () => 1);
+    const coordinator = fakePushCoordinator();
+    const errorLogger = { log: vi.fn() };
+    const listener = createBackgroundListener({
+      repository,
+      bbdcClient: fakeBbdcClient(),
+      actionBadge: fakeActionBadge(),
+      pushCoordinator: coordinator,
+      errorLogger,
+      extract,
+    });
+    const sendResponse = vi.fn();
+
+    // 决议 A3：粘贴文本无文件名/后缀概念——即便文本长得像文件名
+    // （"sketch.exe photo.png"）也当纯文本提词，不过 UPLOAD_TEXT_SUFFIXES
+    // 白名单（对比：同内容走 UPLOAD_FILE 必须有合法后缀文件名才放行）
+    const keep = listener(
+      { type: UPLOAD_TEXT, text: "sketch.exe photo.png run and jump" },
+      {},
+      sendResponse,
+    );
+
+    expect(keep).toBe(true);
+    await flush();
+    expect(extract).toHaveBeenCalledWith("sketch.exe photo.png run and jump");
+    expect(repository.countNew).toHaveBeenCalledTimes(1);
+    // 确认闸门：粘贴文本同样不直接入库、不触发推送
+    expect(repository.mergeCollected).not.toHaveBeenCalled();
+    expect(coordinator.start).not.toHaveBeenCalled();
+    expect(sendResponse).toHaveBeenCalledWith({ total: 5, newCount: 1 });
+    expect(errorLogger.log).not.toHaveBeenCalled();
+  });
+
+  it("新批次覆盖旧批次：先 WORDS_COLLECTED 再 UPLOAD_TEXT，CONFIRM 合并的是粘贴批次", async () => {
+    const extract = freshExtract();
+    const repository = fakeRepository();
+    const listener = createBackgroundListener({
+      repository,
+      bbdcClient: fakeBbdcClient(),
+      actionBadge: fakeActionBadge(),
+      pushCoordinator: fakePushCoordinator(),
+      errorLogger: { log: vi.fn() },
+      extract,
+    });
+
+    listener(
+      {
+        type: WORDS_COLLECTED,
+        entries: [
+          { lemma: "alphaword", flags: 0 },
+          { lemma: "betaword", flags: 0 },
+        ],
+      },
+      {},
+      vi.fn(),
+    );
+    await flush();
+    listener({ type: UPLOAD_TEXT, text: "serendipity" }, {}, vi.fn());
+    await flush();
+
+    const sendResponse = vi.fn();
+    listener({ type: CONFIRM_COLLECTED }, {}, sendResponse);
+    await flush();
+    await flush();
+
+    // 单驻留语义：粘贴批次覆盖了网页采集批次
+    expect(repository.mergeCollected).toHaveBeenCalledWith([
+      { lemma: "serendipity", flags: 0 },
+    ]);
+    expect(sendResponse).toHaveBeenCalledWith({ total: 1, pending: 1 });
+  });
+
+  it("countNew 抛错：应答 upload-failed 并写错误日志 stage=upload（与 UPLOAD_FILE 同 stage）", async () => {
+    const repository = fakeRepository();
+    repository.countNew = vi.fn(async () => {
+      throw new Error("idb read failed");
+    });
+    const errorLogger = { log: vi.fn() };
+    const listener = createBackgroundListener({
+      repository,
+      bbdcClient: fakeBbdcClient(),
+      actionBadge: fakeActionBadge(),
+      pushCoordinator: fakePushCoordinator(),
+      errorLogger,
+      extract: freshExtract(),
+    });
+    const sendResponse = vi.fn();
+
+    const keep = listener({ type: UPLOAD_TEXT, text: "run" }, {}, sendResponse);
+
+    expect(keep).toBe(true);
+    await flush();
+    expect(sendResponse).toHaveBeenCalledWith({ ok: false, error: "upload-failed" });
+    const event = errorLogger.log.mock.calls[0]?.[0] as { stage: string; summary: string };
+    expect(event.stage).toBe("upload");
+    expect(event.summary).toContain("idb read failed");
   });
 });

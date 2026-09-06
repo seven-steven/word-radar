@@ -22,9 +22,12 @@ export type { Counts };
  *   + `IMPORT_CSV`（CSV 文本同过确认闸门：驻留待确认批次，不直接入库）
  * - popup → background（issue #24；#38 改文件批）：`UPLOAD_FILE`（本地纯文本
  *   文件批整批算一次采集，同过确认闸门；html/xml 由 popup 侧预处理为纯文本）
+ * - popup → background（issue #42 v1.1-T5）：`UPLOAD_TEXT`（画布粘贴的纯文本
+ *   直进提取管线——无文件名/后缀概念、不过白名单，同过确认闸门）
  *
  * background 是 WORDS_COLLECTED / GET_COUNTS / MARK_PUSHED / CONFIRM_COLLECTED /
- * DISCARD_COLLECTED / EXPORT_CSV / IMPORT_CSV 的唯一接收方
+ * DISCARD_COLLECTED / EXPORT_CSV / IMPORT_CSV / UPLOAD_FILE / UPLOAD_TEXT 的
+ * 唯一接收方
  * （独占 IndexedDB 写入 + 推送调度 + 所有 HTTP）。
  */
 
@@ -40,6 +43,7 @@ export const GET_PUSH_STATUS = "GET_PUSH_STATUS" as const;
 export const EXPORT_CSV = "EXPORT_CSV" as const;
 export const IMPORT_CSV = "IMPORT_CSV" as const;
 export const UPLOAD_FILE = "UPLOAD_FILE" as const;
+export const UPLOAD_TEXT = "UPLOAD_TEXT" as const;
 
 /**
  * 上传文件采集允许的纯文本后缀（issue #24 验收修订放宽；issue #38 v1.1-T1
@@ -197,6 +201,23 @@ export interface UploadFileMessage {
   files: UploadedFilePart[];
 }
 
+/**
+ * popup → background（issue #42 v1.1-T5 决议 A3）：画布粘贴的纯文本。
+ * 与 UPLOAD_FILE 的区别：粘贴文本无文件名/后缀概念——不过 UPLOAD_TEXT_SUFFIXES
+ * 白名单、无文件批、无双上限（与网页采集的整页文本一致），text 直接进与
+ * 网页采集相同的 core 提取管线（extractWordEntries），提取结果只驻留待确认
+ * 批次（与采集/导入/上传批次同形态），应答 `BatchPreview`；入库与推送仅由
+ * `CONFIRM_COLLECTED` 触发。驻留即覆盖旧批次（单驻留语义），popup 侧覆盖
+ * 闸门语义与拖放/点选一致（upload 驻留批静默替换，collect/import 驻留批
+ * window.confirm）。粘贴的文件走 UPLOAD_FILE 通道（决议 A4，与拖放同语义），
+ * 不经本消息。
+ */
+export interface UploadTextMessage {
+  type: typeof UPLOAD_TEXT;
+  /** 粘贴的纯文本（popup 侧已 trim，空串在 popup 侧静默忽略、不会发出）。 */
+  text: string;
+}
+
 /** service worker → popup 的导出应答。 */
 export type ExportCsvResponse =
   | { ok: true; csv: string }
@@ -228,7 +249,8 @@ export type ExtensionMessage =
   | GetPushStatusMessage
   | ExportCsvMessage
   | ImportCsvMessage
-  | UploadFileMessage;
+  | UploadFileMessage
+  | UploadTextMessage;
 
 /**
  * content → popup 的同步应答：成功携带确认页预览（总数 + 新词数），
@@ -337,6 +359,16 @@ export function isUploadFileMessage(
         typeof part.name === "string" &&
         typeof part.text === "string",
     )
+  );
+}
+
+export function isUploadTextMessage(
+  value: unknown,
+): value is UploadTextMessage {
+  return (
+    isObject(value) &&
+    value.type === UPLOAD_TEXT &&
+    typeof value.text === "string"
   );
 }
 

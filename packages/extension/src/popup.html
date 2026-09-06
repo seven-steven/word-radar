@@ -46,12 +46,17 @@
           <div class="collect-actions">
             <button type="button" class="btn btn-secondary" data-testid="collect" data-i18n="btnRecollect">重新采集</button>
           </div>
-          <!-- 上传画布：点击（或 Enter/Space）唤起多选选择器，拖放文件/文件夹递归收录；
-               role="button" + tabindex 让指引文案本身可聚焦可操作，dragover 高亮由
-               data-dragging 驱动（popup.css），aria-label 启动时按 locale 回填（popup.ts） -->
-          <div class="upload-canvas" data-testid="upload-canvas" role="button" tabindex="0" data-dragging="false">
+          <!-- 上传画布：点击（或 Enter/Space）唤起多选选择器，拖放文件/文件夹递归收录，
+               聚焦后 ⌘V 粘贴文本或文件（issue #42）；role="button" + tabindex 让指引
+               文案本身可聚焦可操作，dragover 高亮由 data-dragging 驱动（popup.css），
+               aria-label 启动时按 locale 回填（popup.ts），辅行作 aria-describedby 供
+               读屏器播报粘贴/文件夹引导 -->
+          <div class="upload-canvas" data-testid="upload-canvas" role="button" tabindex="0" data-dragging="false" aria-describedby="upload-canvas-sub">
             <span class="upload-canvas-marker" aria-hidden="true">[+]</span>
-            <span data-i18n="uploadCanvasHint">点击选择文件，或拖放文件 / 文件夹</span>
+            <span class="upload-canvas-lines">
+              <span data-i18n="uploadCanvasHint">点击选择文件，或拖放文件 / 文件夹</span>
+              <span class="upload-canvas-sub" id="upload-canvas-sub" data-i18n="uploadCanvasPasteHint">可粘贴文本或文件；文件夹请拖放</span>
+            </span>
           </div>
           <!-- role="status"：采集/上传/确认失败等插值文本对读屏器播报（WCAG 4.1.3） -->
           <p class="status-line" data-testid="status" role="status" data-i18n="statusCollecting">采集中…</p>

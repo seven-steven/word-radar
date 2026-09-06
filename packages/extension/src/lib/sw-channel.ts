@@ -9,6 +9,7 @@ import {
   EXPORT_CSV,
   IMPORT_CSV,
   UPLOAD_FILE,
+  UPLOAD_TEXT,
   isBatchPreview,
   isExportCsvResponse,
   type BatchPreview,
@@ -23,6 +24,7 @@ import {
   type MarkPushedMessage,
   type CheckLoginMessage,
   type UploadFileMessage,
+  type UploadTextMessage,
   type UploadedFilePart,
 } from "./messages.js";
 
@@ -47,6 +49,8 @@ export interface SwChannel {
   importCsv(csvText: string, fileName: string): Promise<unknown>;
   /** issue #24；#38 改文件批：把本地纯文本文件批（UPLOAD_TEXT_SUFFIXES）交给 SW（整批 = 一次采集，驻留待确认批次）。 */
   uploadFile(files: UploadedFilePart[]): Promise<unknown>;
+  /** issue #42 T5：把画布粘贴的纯文本交给 SW（直进提取管线，驻留待确认批次）。 */
+  uploadText(text: string): Promise<unknown>;
   /** 确认待确认批次（issue #22）：SW 合并入词库并触发一轮推送。 */
   confirmCollected(): Promise<unknown>;
   /** 取消：丢弃 SW 内存中的待确认批次。 */
@@ -82,6 +86,10 @@ export const chromeSwChannel: SwChannel = {
   },
   uploadFile(files: UploadedFilePart[]) {
     const message: UploadFileMessage = { type: UPLOAD_FILE, files };
+    return chrome.runtime.sendMessage(message);
+  },
+  uploadText(text: string) {
+    const message: UploadTextMessage = { type: UPLOAD_TEXT, text };
     return chrome.runtime.sendMessage(message);
   },
   confirmCollected() {
@@ -268,6 +276,42 @@ export async function uploadFile(
 ): Promise<UploadFileOutcome> {
   try {
     const raw = await channel.uploadFile(files);
+    if (isBatchPreview(raw)) {
+      return { ok: true, total: raw.total, newCount: raw.newCount };
+    }
+    if (
+      typeof raw === "object" &&
+      raw !== null &&
+      (raw as { ok?: unknown }).ok === false &&
+      typeof (raw as { error?: unknown }).error === "string"
+    ) {
+      return { ok: false, error: (raw as { error: string }).error };
+    }
+    return { ok: false, error: "upload-unavailable" };
+  } catch {
+    return { ok: false, error: "upload-unavailable" };
+  }
+}
+
+/**
+ * 粘贴文本通道的应答形态：与 UploadFileOutcome 同构（成功为待确认批次预览，
+ * 失败为错误），粘贴与拖放共用确认卡与失败反馈的渲染逻辑。
+ */
+export type UploadTextOutcome = UploadFileOutcome;
+
+/**
+ * issue #42 T5 粘贴文本采集收窄（决议 A3：直进提取管线，同过确认闸门）：
+ * - SW 返回 BatchPreview（提取成功，批次已驻留）→ `{ok:true,total,newCount}`
+ * - SW 返回 `{ok:false,error}` → 原样透传
+ * - 任何其他应答 / 抛错 → `{ok:false}`（归一 error 与 uploadFile 同码
+ *   "upload-unavailable"，两条上传通道的失败反馈同文案）
+ */
+export async function uploadPastedText(
+  channel: SwChannel,
+  text: string,
+): Promise<UploadTextOutcome> {
+  try {
+    const raw = await channel.uploadText(text);
     if (isBatchPreview(raw)) {
       return { ok: true, total: raw.total, newCount: raw.newCount };
     }

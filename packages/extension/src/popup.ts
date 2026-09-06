@@ -17,6 +17,8 @@
  * html-text.ts 在 popup 侧预处理为纯文本）。
  * 拖放文件树收集与上传闸门（白名单过滤 + 双上限）收在 drop-files.ts
  * （issue #41 v1.1-T4：画布成为唯一上传入口，删除「上传文件」按钮）。
+ * 画布粘贴（issue #42 v1.1-T5）：第三种输入手势——粘贴文件与拖放同管线
+ * （UPLOAD_FILE），粘贴文本直进提取管线（UPLOAD_TEXT，无文件名/后缀概念）。
  *
  * 词库读写 + HTTP 调用 全部发生在 service worker；popup 不直连 IndexedDB、不发 HTTP。
  *
@@ -50,6 +52,7 @@ import {
   importCsv,
   retryPush,
   uploadFile,
+  uploadPastedText,
 } from "./lib/sw-channel.js";
 import { browserCsvFileGateway } from "./lib/csv-file.js";
 import { defaultErrorLogStorage, formatErrorLog, readErrorLog } from "./lib/error-log.js";
@@ -529,6 +532,53 @@ async function uploadFromDrop(dataTransfer: DataTransfer): Promise<void> {
   }
 }
 
+/**
+ * 画布粘贴（issue #42 v1.1-T5 决议 A3/A4）：画布的第三种输入手势（是上传
+ * 目标的一部分，不叫「剪贴板采集」）。
+ * - 文件通道（决议 A4）：clipboardData.files 非空 → 装回 DataTransfer 走
+ *   uploadFromDrop 同管线（白名单过滤 + 计数摘要 + 双上限，与拖放完全同
+ *   语义）；
+ * - 文本通道（决议 A3）：text/plain trim 后非空 → 无文件名/后缀概念、不过
+ *   白名单，经 UPLOAD_TEXT 直进 SW 文本提取管线 → 待确认批次（确认卡措辞
+ *   仍是「上传采集」）；
+ * - 两者皆空：静默忽略。粘贴目录技术不可行（OS 剪贴板不传目录内容），
+ *   画布辅行文案引导「文件夹请拖放」。
+ * 覆盖语义与 T4 一致：粘贴也是再次输入——upload 驻留批静默替换 + 提示；
+ * collect/import 驻留批 window.confirm（gateOverwrite），拒绝即中止。
+ */
+async function uploadFromPaste(snapshot: { files: File[]; text: string }): Promise<void> {
+  if (snapshot.files.length > 0) {
+    // 文件通道：装回 DataTransfer 复用拖放管线（含 isUploading 防重入与
+    // gateOverwrite 覆盖闸门）；剪贴板文件没有 webkitGetAsEntry 树，
+    // collectDroppedFiles 自然走 dataTransfer.files 顶层回退。
+    const dt = new DataTransfer();
+    for (const file of snapshot.files) dt.items.add(file);
+    await uploadFromDrop(dt);
+    return;
+  }
+  if (!snapshot.text) return; // 既无文件也无文本：静默忽略
+  if (isUploading) return; // 上传进行中防重入（同两条拖放/点选通道）
+  if (!gateOverwrite()) return; // collect/import 驻留批被拒：中止
+  const replaced = isReplacingUpload();
+  isUploading = true;
+  try {
+    hideConfirmPage();
+    renderStatusLine(statusEl, t("uploadCollectingPasted"));
+    const outcome = await uploadPastedText(chromeSwChannel, snapshot.text);
+    if (outcome.ok) {
+      // 批次已驻留 SW 内存：确认卡即成功反馈（措辞用「上传采集」）；
+      // renderConfirmPage 记录 lastBatchSource="upload"，后续粘贴/拖放/点选
+      // 的覆盖判定与 T4 完全一致，无需额外代码。
+      renderConfirmPage("sourceUpload", outcome.total, outcome.newCount);
+      if (replaced) renderStatusLine(statusEl, t("uploadReplacedBatch"));
+    } else {
+      renderStatusLine(statusEl, t1("uploadFailed", outcome.error), "error");
+    }
+  } finally {
+    isUploading = false;
+  }
+}
+
 async function refreshCounts(): Promise<void> {
   const counts = await fetchCounts(chromeSwChannel);
   if (counts) {
@@ -729,6 +779,19 @@ if (uploadCanvas) {
     dragDepth = 0;
     setDragging(false);
     if (event.dataTransfer) void uploadFromDrop(event.dataTransfer);
+  });
+
+  // 粘贴（issue #42）：画布 tabindex=0 聚焦时收到 ⌘V。paste 的 clipboardData
+  // 在事件处理让出事件循环后进入保护态（getData 返回空串），文本与文件清单
+  // 必须在本监听器内同步摘下（同 drop 的 webkitGetAsEntry 必须同步调用的
+  // 先例），再交给异步的 uploadFromPaste。
+  uploadCanvas.addEventListener("paste", (event) => {
+    event.preventDefault();
+    const clipboard = event.clipboardData;
+    void uploadFromPaste({
+      files: Array.from(clipboard?.files ?? []),
+      text: (clipboard?.getData("text/plain") ?? "").trim(),
+    });
   });
 }
 

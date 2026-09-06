@@ -356,6 +356,20 @@ body {
   font-weight: 700;
 }
 
+/* 主行 + 辅行（issue #42）：主行沿用画布字号/继承色（hover 转墨），辅行
+   小一号且恒 mute——粘贴/文件夹引导是次级信息，hover 高亮只属于主行 */
+.upload-canvas-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: left;
+}
+
+.upload-canvas-sub {
+  font-size: 12px;
+  color: var(--wr-mute);
+}
+
 .status-line {
   margin: 8px 0 0;
   font-size: 14px;

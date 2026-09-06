@@ -13,6 +13,7 @@ import {
   isImportCsvMessage,
   isMarkPushedMessage,
   isUploadFileMessage,
+  isUploadTextMessage,
   isWordsCollectedMessage,
   isRetryPushMessage,
   isGetPushStatusMessage,
@@ -105,12 +106,16 @@ export interface BackgroundListenerDeps {
  *   零写入 + 错误日志 stage=upload。html/xml 已由 popup 侧预处理为纯文本，
  *   这里收到的 text 一律当纯文本。注意：.csv 在这里当纯文本提词，不做
  *   IMPORT_CSV 的结构化解析
+ * - UPLOAD_TEXT（issue #42 v1.1-T5 决议 A3）：画布粘贴的纯文本——无文件名/
+ *   后缀概念、不过白名单、无双上限，text 直接进同一 core 提取管线，驻留
+ *   待确认批次（覆盖旧批次）；错误同样写 stage=upload。粘贴的文件走
+ *   UPLOAD_FILE（决议 A4，与拖放同语义），不经本消息
  *
  * 其他消息一律忽略（返回 false，不持有消息通道）。
  *
  * 异步应答（WORDS_COLLECTED / CONFIRM_COLLECTED / GET_COUNTS / MARK_PUSHED /
- * CHECK_LOGIN / EXPORT_CSV / IMPORT_CSV）通过 return true 保持消息通道，
- * sendResponse 在仓库 promise resolve 时调用。
+ * CHECK_LOGIN / EXPORT_CSV / IMPORT_CSV / UPLOAD_FILE / UPLOAD_TEXT）通过
+ * return true 保持消息通道，sendResponse 在仓库 promise resolve 时调用。
  */
 export function createBackgroundListener(deps: BackgroundListenerDeps) {
   const bbdcClient = deps.bbdcClient ?? defaultBbdcClient();
@@ -300,6 +305,26 @@ export function createBackgroundListener(deps: BackgroundListenerDeps) {
         .catch(() => undefined);
       return true;
     }
+    if (isUploadTextMessage(message)) {
+      // 上传粘贴文本（issue #42 决议 A3）：text 无文件名/后缀概念，直接进
+      // 与网页采集同一 core 提取管线，提取结果只驻留待确认批次（不写库、
+      // 不推送，确认动作是唯一入库路径）；驻留即覆盖旧批次。错误日志与
+      // UPLOAD_FILE 同 stage=upload（同属上传手势）。
+      void handleUploadText(message.text, {
+        repository: deps.repository,
+        extract: deps.extract ?? extractWordEntries,
+      })
+        .then((result) => {
+          pendingBatch = result.entries;
+          renderBadge(); // 上传驻留待确认批次 → badge "?"（issue #23）
+          sendResponse(result.preview);
+        }, (error: unknown) => {
+          errorLogger.log({ stage: "upload", summary: t1("errorUploadFailed", errorSummary(error)) });
+          sendResponse({ ok: false, error: "upload-failed" });
+        })
+        .catch(() => undefined);
+      return true;
+    }
     return false;
   };
 }
@@ -391,6 +416,21 @@ async function handleUploadFile(
   }
   // 整批 = 一次采集：全部文件文本合并成单文本，只跑一次提取
   const text = files.map((file) => file.text).join("\n\n");
+  const entries = deps.extract(text);
+  const newCount = await deps.repository.countNew(entries);
+  return { entries, preview: { total: entries.length, newCount } };
+}
+
+/**
+ * 上传粘贴文本（issue #42 决议 A3）：text 不过白名单、无后缀校验、无上限
+ * ——与网页采集的整页文本同一待遇，直接进 core 提取管线 → countNew 算新词
+ * diff（零网络请求），返回 {entries,preview} 由调用方驻留为待确认批次
+ * （驻留即覆盖旧批次，单驻留语义不变）——不直接 mergeCollected。
+ */
+async function handleUploadText(
+  text: string,
+  deps: { repository: BackgroundRepository; extract: (text: string) => WordEntry[] },
+): Promise<{ entries: WordEntry[]; preview: BatchPreview }> {
   const entries = deps.extract(text);
   const newCount = await deps.repository.countNew(entries);
   return { entries, preview: { total: entries.length, newCount } };
