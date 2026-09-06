@@ -35,8 +35,19 @@ const zhTwMessages: Record<string, { message: string; description: string }> =
  */
 const SRC_DIR = join(dirname(fileURLToPath(import.meta.url)), "../src");
 
-/** 经由联合类型参数动态派发、字面量扫描不可见的 key（renderConfirmPage 的来源措辞）。 */
-const DYNAMICALLY_DISPATCHED_KEYS = ["sourceCollect", "sourceImport", "sourceUpload"];
+/**
+ * 经由变量动态派发、字面量扫描不可见的 key：
+ * - renderConfirmPage 的来源措辞（联合类型参数）
+ * - context-menu.ts 的菜单 title（getMessage(key) 形参，issue #40 复盘改
+ *   显式解析后不再有 __MSG_*__ 字面量）
+ */
+const DYNAMICALLY_DISPATCHED_KEYS = [
+  "sourceCollect",
+  "sourceImport",
+  "sourceUpload",
+  "menuCollectPage",
+  "menuUploadFiles",
+];
 
 function collectUsedI18nKeys(): Set<string> {
   const keys = new Set<string>();

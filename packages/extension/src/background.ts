@@ -30,11 +30,13 @@ chrome.runtime.onInstalled.addListener(() => {
   void chrome.storage.local.set({ [HEARTBEAT_KEY]: true });
 });
 
-// 右键菜单（issue #40 v1.1-T3，ADR 0001）：onInstalled 在扩展更新时会再次
-// 触发，registerContextMenus 内部先 removeAll 再 create（幂等）。
-chrome.runtime.onInstalled.addListener(() => {
-  registerContextMenus();
-});
+// 右键菜单注册（issue #40，v1.1-T3）：在 SW 顶层重放——MV3 SW 每次启动
+// 都会执行本模块。不能只挂在 onInstalled 里：onInstalled 仅在 install /
+// 版本 update / Chrome update 时触发，「rebuild dist 但 manifest 版本号
+// 不变」的迭代流程（reload 扩展/重启浏览器让 SW 跑新代码）永远踩不中，
+// 注册表为空 → 右键菜单不可见（issue #40 实测症状）。registerContextMenus
+// 内部先 removeAll 再 create（幂等），重放无副作用。
+registerContextMenus();
 
 // 菜单点击：写唤起标记（storage.session openReason）+ openPopup——popup boot
 // 读标记分流（collect 自动采集 / upload 直达上传画布），见 lib/open-reason.ts。

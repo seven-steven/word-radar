@@ -160,16 +160,28 @@ describe("registerContextMenus", () => {
     expect(registrar.created.map((p) => p.id)).toEqual(["collect-page", "upload-files"]);
   });
 
-  it("title 走 __MSG_*__ 占位符（Chrome 原生 i18n 替换）；contexts 均为 page", () => {
+  it("title 经 getMessage 显式解析（chrome.i18n 无文档保证 create 占位符替换，127 门槛下更不可依赖）；contexts 均为 page", () => {
     const registrar = fakeRegistrar();
-    registerContextMenus(registrar);
+    const messages: Record<string, string> = {
+      menuCollectPage: "采集当前页",
+      menuUploadFiles: "上传文件采集生词",
+    };
+    registerContextMenus(registrar, (key) => messages[key] ?? "");
 
     for (const properties of registrar.created) {
-      expect(properties.title).toMatch(/^__MSG_\w+__$/);
+      expect(properties.title).not.toMatch(/^__MSG_/);
       expect(properties.contexts).toEqual(["page"]);
     }
-    expect(registrar.created[0]?.title).toBe("__MSG_menuCollectPage__");
-    expect(registrar.created[1]?.title).toBe("__MSG_menuUploadFiles__");
+    expect(registrar.created[0]?.title).toBe("采集当前页");
+    expect(registrar.created[1]?.title).toBe("上传文件采集生词");
+  });
+
+  it("getMessage 返回空串（locale key 缺失）时降级为 key 本身：可见的开发期错误优于空 title", () => {
+    const registrar = fakeRegistrar();
+    registerContextMenus(registrar, () => "");
+
+    expect(registrar.created[0]?.title).toBe("menuCollectPage");
+    expect(registrar.created[1]?.title).toBe("menuUploadFiles");
   });
 
   it("documentUrlPatterns 只在 collect-page 上（http/https 限定）；upload-files 不限页面", () => {
