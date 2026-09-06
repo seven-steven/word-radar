@@ -32,12 +32,13 @@ test("collects words from a raw-like pre-only page", async ({
   await raw.close();
 });
 
-test("shows 不可注入 error when active tab is an extension page", async ({
+test("shows 不可注入 error when collecting over an extension page", async ({
   extContext,
   popupUrl,
 }) => {
   // popup 自身作为活动页:chrome-extension:// 页面不可注入(executeScript 无
-  // 对应 host 权限,activeTab 也不覆盖扩展自身页面)→ 注入 reject,归一为
+  // 对应 host 权限,activeTab 也不覆盖扩展自身页面)。boot 不自动采集
+  // (issue #39 v1.1-T2)——显式点「采集当前页」触发,注入 reject,归一为
   // 「此页面无法采集」文案(issue #14 后注入是主路径,失败即整体失败)。
   const noScriptPage = await extContext.newPage();
   await noScriptPage.goto(popupUrl);
@@ -45,6 +46,8 @@ test("shows 不可注入 error when active tab is an extension page", async ({
 
   const popup = await extContext.newPage();
   await popup.goto(popupUrl);
+  // 后开者是活动标签：此时点采集，目标是 popup 页自身（不可注入）
+  await popup.getByTestId("collect").click();
   // i18n（issue #28）：zh-CN locale 下的不可注入错误文案（与文件头注释一致）
   await expect(popup.getByTestId("status")).toHaveText(
     /此页面无法采集：chrome:\/\/ 等特殊页不支持注入/s,

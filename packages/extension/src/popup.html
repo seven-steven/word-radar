@@ -44,7 +44,9 @@
              「上传文件」按钮已删；ink 填充 primary 为确认闸门独占（issue #24） -->
         <section class="collect-entry">
           <div class="collect-actions">
-            <button type="button" class="btn btn-secondary" data-testid="collect" data-i18n="btnRecollect">重新采集</button>
+            <!-- 采集入口显式化（issue #39 v1.1-T2）：点图标只开弹窗，对当前页的
+                 采集由本按钮显式触发；按钮名与空态提示 emptyHint 的「采集当前页」同词 -->
+            <button type="button" class="btn btn-secondary" data-testid="collect" data-i18n="btnCollectPage">采集当前页</button>
           </div>
           <!-- 上传画布：点击（或 Enter/Space）唤起多选选择器，拖放文件/文件夹递归收录，
                聚焦后 ⌘V 粘贴文本或文件（issue #42）；role="button" + tabindex 让指引
@@ -58,8 +60,9 @@
               <span class="upload-canvas-sub" id="upload-canvas-sub" data-i18n="uploadCanvasPasteHint">可粘贴文本或文件；文件夹请拖放</span>
             </span>
           </div>
-          <!-- role="status"：采集/上传/确认失败等插值文本对读屏器播报（WCAG 4.1.3） -->
-          <p class="status-line" data-testid="status" role="status" data-i18n="statusCollecting">采集中…</p>
+          <!-- role="status"：采集/上传/确认失败等插值文本对读屏器播报（WCAG 4.1.3）；
+               初始为待机引导（issue #39：打开不自动采集，不再以「采集中」开场） -->
+          <p class="status-line" data-testid="status" role="status" data-i18n="statusReady">就绪。点「采集当前页」或用下方画布上传文件</p>
           <p class="empty-hint" data-testid="empty-hint" data-i18n="emptyHint" hidden></p>
         </section>
 

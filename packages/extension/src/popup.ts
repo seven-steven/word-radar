@@ -1,5 +1,7 @@
 /**
- * Popup 入口：打开即对当前活动标签页重新采集，展示确认页
+ * Popup 入口：点工具栏图标只打开弹窗、不采集（issue #39 v1.1-T2 采集入口
+ * 显式化——采集时机归还用户）；对当前页的采集由弹窗内「采集当前页」按钮
+ * 显式触发。触发后展示确认页
  * 「本次共计采集 N 个单词，其中新词 M 个」（新词 = 与本地词库的 lemma diff，
  * 零网络请求）。点「确认推送」→ SW 把待确认批次合并入词库并触发一轮推送
  * 全部待推；点「取消」或关闭弹窗 → 什么都不发生（批次只在内存，不持久化）。
@@ -825,11 +827,11 @@ function startPushStatusPolling(): void {
   pushStatusTimer = window.setTimeout(tick, 0);
 }
 
-// 打开即：拉一次计数 + 自动采集当前页 + 拉一次登录态 + 拉一次推送状态。
+// 打开即：拉一次计数 + 拉一次登录态 + 拉一次推送状态。不自动采集——对当前页
+// 的采集只由「采集当前页」按钮显式触发（issue #39 v1.1-T2），点图标只开弹窗。
 // （上传入口是 popup 内的上传画布（issue #41），不做右键菜单目标。）
 void refreshCounts();
 void refreshLogin();
 void refreshPushStatus().then(startPushStatusPolling);
-void collect();
 
 export {};

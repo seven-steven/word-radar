@@ -31,13 +31,17 @@
     "message": "Pending",
     "description": "Label for pending word count"
   },
+  "statusReady": {
+    "message": "Ready — click \"Collect this page\" or use the canvas below to upload files.",
+    "description": "Idle default state after opening the popup (issue #39: no auto-collect on open)"
+  },
   "statusCollecting": {
     "message": "Collecting…",
-    "description": "Initial status text when collecting words"
+    "description": "Status text while collecting words"
   },
-  "btnRecollect": {
-    "message": "Recollect",
-    "description": "Button to start collection again"
+  "btnCollectPage": {
+    "message": "Collect this page",
+    "description": "Button to explicitly collect the active tab (issue #39)"
   },
   "btnConfirmPush": {
     "message": "Confirm push",

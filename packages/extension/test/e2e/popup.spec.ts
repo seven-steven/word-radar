@@ -22,11 +22,17 @@ test("popup renders counts and version on open", async ({ extContext, popupUrl }
   await expect(page.getByTestId("version")).toContainText(/^core \d/);
   // 「自动推送」开关已彻底移除（issue #22）：无残留 UI
   await expect(page.getByTestId("auto-push")).toHaveCount(0);
-  // 确认页在采集应答前隐藏
+  // 采集入口显式化（issue #39 v1.1-T2）：打开 popup 呈默认态——不自动采集，
+  // 状态行是待机引导（而非「采集中…」/「此页面无法采集」），无批次驻留。
+  // 若回归出 boot 自动采集，状态行会先变「采集中…」再变注入错误，回不到
+  // 待机文案 → 本断言失败。
+  await expect(page.getByTestId("status")).toHaveText(
+    /就绪。点「采集当前页」或用下方画布上传文件/,
+  );
   await expect(page.getByTestId("confirm-section")).toBeHidden();
 
   // i18n（issue #28）：zh-CN locale 下静态文本为中文
-  await expect(page.getByTestId("collect")).toHaveText("重新采集");
+  await expect(page.getByTestId("collect")).toHaveText("采集当前页");
 
   await page.close();
 });

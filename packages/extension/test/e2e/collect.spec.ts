@@ -4,8 +4,9 @@
  * 入词库（真实 IndexedDB）→ popup counts 变化。零外网（bbdc / langeasy 已被
  * worker 层 mock 拦截）。
  *
- * 注意：popup 打开时会自动对活动标签页触发一次采集，所以「先开 fixture 页、
- * 再开 popup」本身就走完整链路；再点一次「重新采集」按钮覆盖手动路径。
+ * 注意：boot 不自动采集（issue #39 v1.1-T2 采集入口显式化）——本用例全部
+ * 走「采集当前页」按钮的显式路径：先开 fixture 页、再开 popup，把文章页
+ * 带回前台后点按钮触发采集。
  *
  * i18n（issue #28）：测试 Chromium 在 fixtures.ts 钉死 zh-CN locale，断言中文渲染
  */
@@ -28,9 +29,8 @@ test("collects rare words from a fixture page into the vocabulary", async ({
 
   const popup = await extContext.newPage();
   await popup.goto(popupUrl);
-  // popup 以标签页模拟时，popup 自己就是「活动标签」→ boot 自动采集会打到
-  // 无 content script 的 popup 页（显示「未注入」）。把文章页带回前台后
-  // 手动点「重新采集」，采集目标落到文章页。
+  // popup 以标签页模拟时，popup 自己就是「活动标签」→ 把文章页带回前台后
+  // 点「采集当前页」，采集目标落到文章页（按钮显式触发，issue #39）。
   await article.bringToFront();
   await popup.getByTestId("collect").click();
   // i18n（issue #28）：zh-CN locale 下确认摘要为「本次共计采集 N 个单词，其中新词 M 个」
@@ -86,7 +86,7 @@ test("cancel discards the pending batch: counts unchanged, nothing merged", asyn
     "running",
     { timeout: 120_000 },
   );
-  // 等一次稳定计数（boot 自动采集可能打到 popup 自身，计数即词库现状）
+  // 等一次稳定计数（boot 不自动采集——issue #39，计数即词库现状）
   await waitCountsLoaded(popup); // 基线读取前置：等 total 脱骨架（骨架屏契约）
   await expect(popup.getByTestId("total")).toHaveText(/^\d+$/);
   const totalBefore = Number(await popup.getByTestId("total").textContent());

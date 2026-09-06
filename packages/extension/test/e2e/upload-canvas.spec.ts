@@ -83,11 +83,13 @@ function trackDialogs(page: Page): { seen: () => boolean } {
 }
 
 /**
- * 等 boot 自动采集在 popup 页上失败落定（扩展页不可注入 → 「此页面无法采集」），
- * 避免它的错误状态行竞态覆盖后续用例写入的摘要/提示断言。
+ * 等 popup boot 初始化落定：i18n 静态回填把状态行刷成待机引导。boot 不再
+ * 自动采集（issue #39 v1.1-T2），该待机文案常态驻留——以此作「popup 就绪、
+ * 无进行中采集/上传状态」的同步锚点，避免 boot 期的瞬时状态行竞态覆盖
+ * 后续用例写入的摘要/提示断言。
  */
-async function waitBootCollectSettled(page: Page): Promise<void> {
-  await expect(page.getByTestId("status")).toHaveText(/此页面无法采集/, {
+async function waitPopupReady(page: Page): Promise<void> {
+  await expect(page.getByTestId("status")).toHaveText(/就绪/, {
     timeout: 15_000,
   });
 }
@@ -120,7 +122,7 @@ test("drag-drop multiple files merges into ONE confirm batch (issue #41)", async
 }) => {
   const page = await extContext.newPage();
   await page.goto(popupUrl);
-  await waitBootCollectSettled(page);
+  await waitPopupReady(page);
   await waitCountsLoaded(page);
   const totalBefore = Number(await page.getByTestId("total").textContent());
 
@@ -153,7 +155,7 @@ test("drag-drop with non-whitelisted files shows the suffix summary and still co
 }) => {
   const page = await extContext.newPage();
   await page.goto(popupUrl);
-  await waitBootCollectSettled(page);
+  await waitPopupReady(page);
 
   // 2 个白名单 + 3 个非白名单：摘要只报后缀类别（去重排序），不展开文件名
   await dropOnCanvas(page, [
@@ -185,7 +187,7 @@ test("drag-drop exceeding the double limit rejects the WHOLE batch (issue #41)",
 }) => {
   const page = await extContext.newPage();
   await page.goto(popupUrl);
-  await waitBootCollectSettled(page);
+  await waitPopupReady(page);
   await waitCountsLoaded(page);
   const totalBefore = Number(await page.getByTestId("total").textContent());
 
@@ -220,9 +222,9 @@ test("upload over a resident collect batch asks before discarding (issue #41 决
 
   const page = await extContext.newPage();
   await page.goto(popupUrl);
-  await waitBootCollectSettled(page);
+  await waitPopupReady(page);
 
-  // 先制造网页采集驻留批：文章页带回前台后手动点「重新采集」（同 collect.spec）
+  // 先制造网页采集驻留批：文章页带回前台后点「采集当前页」（同 collect.spec）
   await article.bringToFront();
   await page.getByTestId("collect").click();
   await expect(page.getByTestId("confirm-summary")).toHaveText(
@@ -252,7 +254,7 @@ test("re-upload over a resident upload batch replaces silently (issue #41 决议
 }) => {
   const page = await extContext.newPage();
   await page.goto(popupUrl);
-  await waitBootCollectSettled(page);
+  await waitPopupReady(page);
 
   // 第一次拖放：驻留 upload 批
   await dropOnCanvas(page, [
@@ -289,7 +291,7 @@ test("paste plain text on the canvas goes straight into the extraction pipeline 
 }) => {
   const page = await extContext.newPage();
   await page.goto(popupUrl);
-  await waitBootCollectSettled(page);
+  await waitPopupReady(page);
   await waitCountsLoaded(page);
   const totalBefore = Number(await page.getByTestId("total").textContent());
 
@@ -321,7 +323,7 @@ test("pasted files go through the same whitelist filter and summary as drop (iss
 }) => {
   const page = await extContext.newPage();
   await page.goto(popupUrl);
-  await waitBootCollectSettled(page);
+  await waitPopupReady(page);
 
   // 粘贴文件通道：与拖放完全同语义——白名单过滤 + 计数摘要（1 收 1 忽）
   await pasteOnCanvas(page, {

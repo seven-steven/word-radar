@@ -31,13 +31,17 @@
     "message": "待推",
     "description": "待推词数标签"
   },
+  "statusReady": {
+    "message": "就绪。点「采集当前页」或用下方画布上传文件",
+    "description": "弹窗打开默认态的待机引导（issue #39：打开不自动采集）"
+  },
   "statusCollecting": {
     "message": "采集中…",
-    "description": "采集中的初始状态文案"
+    "description": "采集进行中状态文案"
   },
-  "btnRecollect": {
-    "message": "重新采集",
-    "description": "重新采集按钮"
+  "btnCollectPage": {
+    "message": "采集当前页",
+    "description": "采集当前页按钮（显式触发对活动标签页的采集，issue #39）"
   },
   "btnConfirmPush": {
     "message": "确认推送",
