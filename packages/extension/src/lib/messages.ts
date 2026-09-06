@@ -73,6 +73,16 @@ export const UPLOAD_TEXT_SUFFIXES = [
   "xml",
 ] as const;
 
+/**
+ * 上传批的双上限（issue #41 决议 A7）：文件数 / 总字节，量级实现期可调。
+ * 拖放画布路径在 popup 侧按此整批校验（filterUploadFiles，用 File.size
+ * 元数据、不读内容）；超限 = 整批拒绝 + 明确反馈，绝不静默截断。
+ */
+export const UPLOAD_LIMITS = {
+  maxFiles: 200,
+  maxTotalBytes: 20 * 1024 * 1024,
+} as const;
+
 export interface PushStatus {
   phase: "idle" | "running" | "paused" | "completed";
   total: number;

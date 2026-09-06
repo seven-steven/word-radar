@@ -75,10 +75,6 @@
     "message": "Import CSV",
     "description": "Button to import CSV file"
   },
-  "btnUploadFile": {
-    "message": "Upload file",
-    "description": "Button to upload file for collection"
-  },
   "btnExportLog": {
     "message": "Export log",
     "description": "Button to export error log"
@@ -174,6 +170,34 @@
   "uploadCollectingFiles": {
     "message": "Collecting from $1 files…",
     "description": "Upload collection in progress for a multi-file batch (issue #38), params: file count"
+  },
+  "uploadCanvasHint": {
+    "message": "Click to choose files, or drop files / folders",
+    "description": "Upload canvas hint text (issue #41)"
+  },
+  "uploadSummaryFiles": {
+    "message": "Collected $1 files",
+    "description": "Upload collection summary without ignored files, params: accepted file count"
+  },
+  "uploadSummaryIgnored": {
+    "message": "Collected $1 files, ignored $2 ($3)",
+    "description": "Upload collection summary with ignored categories, params: accepted count, ignored count, suffix category list"
+  },
+  "uploadIgnoredNoSuffix": {
+    "message": "no extension",
+    "description": "Category label for ignored files without an extension (issue #41)"
+  },
+  "uploadReplacedBatch": {
+    "message": "Replaced the previous upload",
+    "description": "Status note after an upload replaces the previous upload batch (issue #41)"
+  },
+  "uploadConfirmOverwrite": {
+    "message": "Uploading will discard the current pending batch. Continue?",
+    "description": "Confirmation before an upload discards a collect/import batch (issue #41)"
+  },
+  "uploadLimitExceeded": {
+    "message": "Limit exceeded: max $1 files / $2 MB; got $3 files / $4 MB",
+    "description": "Upload double-limit whole-batch rejection, params: max file count, max MB, actual file count, actual MB"
   },
   "uploadFailed": {
     "message": "Upload collection failed: $1",

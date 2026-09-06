@@ -5,7 +5,7 @@
  * download：stub URL.createObjectURL / revokeObjectURL 与 anchor.click，
  * 验证 Blob 类型、download 文件名与对象 URL 回收。
  * pickCsvText：手工构造 input 的 files 并派发 change / cancel 事件。
- * pickUploadText（issue #38 v1.1-T1）：多选整批返回数组；html/xml 文件
+ * pickUploadFiles（issue #38 v1.1-T1）：多选整批返回数组；html/xml 文件
  * 经 htmlToVisibleText 预处理为纯文本。
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -99,11 +99,11 @@ describe("browserCsvFileGateway.pickCsvText", () => {
   });
 });
 
-describe("browserCsvFileGateway.pickUploadText（issue #24 验收修订；#38 多文件批）", () => {
+describe("browserCsvFileGateway.pickUploadFiles（issue #24 验收修订；#38 多文件批）", () => {
   it("accept 过滤覆盖 UPLOAD_TEXT_SUFFIXES 全部后缀（与 SW 校验共用同一常量）", async () => {
     const getInput = trapFileInput();
 
-    const promise = browserCsvFileGateway.pickUploadText();
+    const promise = browserCsvFileGateway.pickUploadFiles();
     const input = getInput();
     const accept = input.accept;
     // 后缀清单随常量自动扩展（issue #38 扩至 17 项），不再手写清单
@@ -119,7 +119,7 @@ describe("browserCsvFileGateway.pickUploadText（issue #24 验收修订；#38 �
   it("多选：input.multiple 开启，选择多个文件按序返回数组（整批 = 一次采集）", async () => {
     const getInput = trapFileInput();
 
-    const promise = browserCsvFileGateway.pickUploadText();
+    const promise = browserCsvFileGateway.pickUploadFiles();
     const input = getInput();
     expect(input.multiple).toBe(true);
 
@@ -139,7 +139,7 @@ describe("browserCsvFileGateway.pickUploadText（issue #24 验收修订；#38 �
   it("html 文件在 popup 侧预处理为纯文本：script/style 文本不进结果（issue #38 决议 A2）", async () => {
     const getInput = trapFileInput();
 
-    const promise = browserCsvFileGateway.pickUploadText();
+    const promise = browserCsvFileGateway.pickUploadFiles();
     const input = getInput();
     const html = [
       "<html><head><style>.ghoststyle{color:red}</style></head><body>",
@@ -161,7 +161,7 @@ describe("browserCsvFileGateway.pickUploadText（issue #24 验收修订；#38 �
   it("纯文本文件不经预处理，原样直读", async () => {
     const getInput = trapFileInput();
 
-    const promise = browserCsvFileGateway.pickUploadText();
+    const promise = browserCsvFileGateway.pickUploadFiles();
     const input = getInput();
     const file = new File(["<p>not processed</p>"], "notes.txt", {
       type: "text/plain",
@@ -178,7 +178,7 @@ describe("browserCsvFileGateway.pickUploadText（issue #24 验收修订；#38 �
   it("用户取消选择时 resolve null", async () => {
     const getInput = trapFileInput();
 
-    const promise = browserCsvFileGateway.pickUploadText();
+    const promise = browserCsvFileGateway.pickUploadFiles();
     getInput().dispatchEvent(new Event("cancel"));
 
     await expect(promise).resolves.toBeNull();

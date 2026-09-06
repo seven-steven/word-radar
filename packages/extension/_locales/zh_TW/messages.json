@@ -75,10 +75,6 @@
     "message": "导入 CSV",
     "description": "导入CSV按钮"
   },
-  "btnUploadFile": {
-    "message": "上传文件",
-    "description": "上传文件按钮"
-  },
   "btnExportLog": {
     "message": "导出日志",
     "description": "导出日志按钮"
@@ -174,6 +170,34 @@
   "uploadCollectingFiles": {
     "message": "正在上传采集 $1 个文件…",
     "description": "上传采集进行中（多文件整批，issue #38），参数：文件数"
+  },
+  "uploadCanvasHint": {
+    "message": "点击选择文件，或拖放文件 / 文件夹",
+    "description": "上传画布指引文案（issue #41）"
+  },
+  "uploadSummaryFiles": {
+    "message": "已收录 $1 个文件",
+    "description": "上传收录摘要（无忽略文件），参数：收录文件数"
+  },
+  "uploadSummaryIgnored": {
+    "message": "已收录 $1 个文件，忽略 $2 个（$3）",
+    "description": "上传收录摘要（带忽略类别），参数：收录数、忽略数、后缀类别清单"
+  },
+  "uploadIgnoredNoSuffix": {
+    "message": "无后缀",
+    "description": "忽略类别中无后缀文件的类别名（issue #41）"
+  },
+  "uploadReplacedBatch": {
+    "message": "已替换上一批上传文件",
+    "description": "上传覆盖上一批上传批次的状态提示（issue #41）"
+  },
+  "uploadConfirmOverwrite": {
+    "message": "上传将丢弃当前待确认批次，继续？",
+    "description": "上传覆盖 collect/import 驻留批次的确认询问（issue #41）"
+  },
+  "uploadLimitExceeded": {
+    "message": "超出上限：最多 $1 个文件、$2 MB；本次 $3 个文件、$4 MB",
+    "description": "上传双上限整批拒绝，参数：文件数上限、字节上限（MB）、本次文件数、本次字节（MB）"
   },
   "uploadFailed": {
     "message": "上传采集失败：$1",

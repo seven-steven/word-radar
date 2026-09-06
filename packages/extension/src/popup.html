@@ -40,11 +40,18 @@
           </div>
         </section>
 
-        <!-- 采集入口行：采集 + 上传文件同为 secondary 描边；ink 填充 primary 为确认闸门独占（issue #24） -->
+        <!-- 采集入口行（issue #41 v1.1-T4）：上传画布成为唯一上传入口，
+             「上传文件」按钮已删；ink 填充 primary 为确认闸门独占（issue #24） -->
         <section class="collect-entry">
           <div class="collect-actions">
             <button type="button" class="btn btn-secondary" data-testid="collect" data-i18n="btnRecollect">重新采集</button>
-            <button type="button" class="btn btn-secondary" data-testid="upload-file" data-i18n="btnUploadFile">上传文件</button>
+          </div>
+          <!-- 上传画布：点击（或 Enter/Space）唤起多选选择器，拖放文件/文件夹递归收录；
+               role="button" + tabindex 让指引文案本身可聚焦可操作，dragover 高亮由
+               data-dragging 驱动（popup.css），aria-label 启动时按 locale 回填（popup.ts） -->
+          <div class="upload-canvas" data-testid="upload-canvas" role="button" tabindex="0" data-dragging="false">
+            <span class="upload-canvas-marker" aria-hidden="true">[+]</span>
+            <span data-i18n="uploadCanvasHint">点击选择文件，或拖放文件 / 文件夹</span>
           </div>
           <!-- role="status"：采集/上传/确认失败等插值文本对读屏器播报（WCAG 4.1.3） -->
           <p class="status-line" data-testid="status" role="status" data-i18n="statusCollecting">采集中…</p>

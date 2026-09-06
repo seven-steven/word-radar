@@ -311,6 +311,51 @@ body {
   gap: 8px;
 }
 
+/* ── 上传画布（issue #41）：hairline 描边空区块 = 唯一上传入口。
+   DESIGN.md：容器区块 hairline 1px；交互件 4px 圆角；hover/拖放反馈一律
+   color-only 180ms（无阴影无位移）；dragover 高亮 = 描边转 accent（非文本
+   载体用 ramp 原色）+ 文字转加深档（Text-Deepens Rule 保 4.5:1）+ soft 底 ── */
+.upload-canvas {
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 64px;
+  padding: 12px 16px;
+  border: 1px solid var(--wr-hairline);
+  border-radius: var(--wr-radius-control);
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--wr-mute);
+  cursor: pointer;
+  user-select: none;
+  transition:
+    border-color var(--wr-speed) ease-out,
+    background-color var(--wr-speed) ease-out,
+    color var(--wr-speed) ease-out;
+}
+
+.upload-canvas:hover {
+  color: var(--wr-ink);
+}
+
+.upload-canvas:focus-visible {
+  outline: 1px solid var(--wr-ink);
+  outline-offset: 2px;
+}
+
+.upload-canvas[data-dragging="true"] {
+  border-color: var(--wr-accent);
+  background: var(--wr-surface-soft);
+  color: var(--wr-accent-hover);
+}
+
+/* [+] 括号标记：品牌唯一的图标语言（DESIGN.md Do's），700 权重让它读作图标 */
+.upload-canvas-marker {
+  font-weight: 700;
+}
+
 .status-line {
   margin: 8px 0 0;
   font-size: 14px;

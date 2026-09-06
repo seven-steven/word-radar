@@ -75,6 +75,30 @@ export function t3(
 }
 
 /**
+ * 获取本地化消息（四个参数，issue #41 上传超限文案）。
+ * @param key messages.json 中的 key，消息中应包含 $1, $2, $3, $4 占位符
+ */
+export function t4(
+  key: string,
+  arg1: string | number,
+  arg2: string | number,
+  arg3: string | number,
+  arg4: string | number,
+): string {
+  if (isChromeI18nAvailable()) {
+    return (
+      chrome.i18n.getMessage(key, [
+        String(arg1),
+        String(arg2),
+        String(arg3),
+        String(arg4),
+      ]) || key
+    );
+  }
+  return key;
+}
+
+/**
  * 静态文本回填（issue #30/#28）：popup 启动时把所有 [data-i18n] 元素回填为
  * 当前 locale 的消息，并设置 <html lang>。
  *

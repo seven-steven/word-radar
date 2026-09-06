@@ -11,10 +11,12 @@
  * - active-tab.ts：popup → content（COLLECT_WORDS / 应答）+ 新标签页打开
  * - sw-channel.ts：popup → service worker（GET_COUNTS / CHECK_LOGIN /
  *   EXPORT_CSV / IMPORT_CSV / UPLOAD_FILE / CONFIRM_COLLECTED / DISCARD_COLLECTED）
- * - i18n.ts：chrome.i18n（applyStaticI18n 静态回填 + t/t1/t2/t3 动态文案）
- * 本地文件操作收在 csv-file.ts（下载 / 文件选择，可注入；上传为多选，
- * issue #38：一次上传的全部文件整批 = 一次采集，html/xml 经 html-text.ts
- * 在 popup 侧预处理为纯文本）。
+ * - i18n.ts：chrome.i18n（applyStaticI18n 静态回填 + t/t1/t2/t3/t4 动态文案）
+ * 本地文件操作收在 csv-file.ts（下载 / 文件选择 / 拖放文件批读取，可注入；
+ * 上传为多选，issue #38：一次上传的全部文件整批 = 一次采集，html/xml 经
+ * html-text.ts 在 popup 侧预处理为纯文本）。
+ * 拖放文件树收集与上传闸门（白名单过滤 + 双上限）收在 drop-files.ts
+ * （issue #41 v1.1-T4：画布成为唯一上传入口，删除「上传文件」按钮）。
  *
  * 词库读写 + HTTP 调用 全部发生在 service worker；popup 不直连 IndexedDB、不发 HTTP。
  *
@@ -51,9 +53,15 @@ import {
 } from "./lib/sw-channel.js";
 import { browserCsvFileGateway } from "./lib/csv-file.js";
 import { defaultErrorLogStorage, formatErrorLog, readErrorLog } from "./lib/error-log.js";
+import {
+  collectDroppedFiles,
+  filterUploadFiles,
+  NO_SUFFIX,
+} from "./lib/drop-files.js";
+import { UPLOAD_LIMITS } from "./lib/messages.js";
 import { isStatusLineVisible } from "./lib/status-visibility.js";
 import type { PushStatus } from "./lib/messages.js";
-import { applyStaticI18n, t, t1, t3 } from "./lib/i18n.js";
+import { applyStaticI18n, t, t1, t3, t4 } from "./lib/i18n.js";
 
 const BBDC_HOME_URL = "https://bbdc.cn/";
 
@@ -92,7 +100,7 @@ const pushProgressFillEl = document.querySelector<HTMLElement>('[data-testid="pu
 const emptyHintEl = document.querySelector<HTMLElement>('[data-testid="empty-hint"]');
 const exportCsvButton = document.querySelector<HTMLButtonElement>('[data-testid="export-csv"]');
 const importCsvButton = document.querySelector<HTMLButtonElement>('[data-testid="import-csv"]');
-const uploadFileButton = document.querySelector<HTMLButtonElement>('[data-testid="upload-file"]');
+const uploadCanvas = document.querySelector<HTMLElement>('[data-testid="upload-canvas"]');
 const syncStatusEl = document.querySelector<HTMLElement>('[data-testid="sync-status"]');
 const exportLogButton = document.querySelector<HTMLButtonElement>('[data-testid="export-log"]');
 const confirmSection = document.querySelector<HTMLElement>('[data-testid="confirm-section"]');
@@ -383,36 +391,141 @@ async function importCsvFromFile(): Promise<void> {
 
 
 /**
- * 上传文件采集（issue #24；#38 v1.1-T1 改多文件）：文件网关一次读出全部
- * 选中文件（html/xml 已在网关侧预处理为纯文本）→ SW 把整批合并成单文本
- * 走与网页采集同一 core 提取管线并驻留待确认批次（整批 = 一次采集，确认前
- * 零网络请求）→ 确认页展示「本次共计上传采集 N 个单词，其中新词 M 个」。
- * 确认 = 合并 + 一轮推送（同采集）；取消丢弃批次。
+ * 上传采集（issue #24；#38 改多文件；#41 v1.1-T4 画布化）：
+ * - 画布点击 → 多选选择器（accept 白名单兜底）→ 逐文件读文本；
+ * - 画布拖放 → collectDroppedFiles 递归全树 → filterUploadFiles 白名单过滤
+ *   + 双上限整批校验（超限 = 整批拒绝 + 明确反馈，绝不静默截断）；
+ * - 文本批 → SW 合并提取（整批 = 一次采集）→ 驻留待确认批次 → 确认卡。
+ * 覆盖语义（决议 A5）：驻留批来源 upload → 静默替换 + 状态行提示；
+ * 来源 collect/import → window.confirm 询问，拒绝即中止。
+ * 反馈路由（返工锁定）：进行中 / 失败 / 摘要 / 替换提示一律走主状态行
+ * statusEl（卡片可见时 info 态被互斥隐藏，卡关闭后仍可读；错误豁免恒可见）；
+ * 成功则以确认卡为反馈。
  */
-async function uploadFileFromDisk(): Promise<void> {
-  const picked = await browserCsvFileGateway.pickUploadText();
-  if (!picked) return; // 用户取消：静默
-  if (uploadFileButton) uploadFileButton.disabled = true;
-  // 反馈路由（返工锁定）：上传按钮在主采集行，抽屉收起时 sync-status 完全
-  // 不可见——进行中 / 失败的反馈一律走主状态行 statusEl；成功则以确认卡为反馈。
+
+// 驻留批次来源（issue #41 覆盖语义）：renderConfirmPage 时记录，批次确认 /
+// 取消后清空。仅 popup 本地记忆——popup 重开后对 SW 内存中的旧批次不可知，
+// 视同无驻留批（与确认卡可见性同一记忆边界）。
+let lastBatchSource: "collect" | "import" | "upload" | null = null;
+
+// 上传进行中防重入（issue #41）：期间忽略画布新的点击/拖放输入。
+let isUploading = false;
+
+/**
+ * 上传前的覆盖闸门（决议 A5）：卡片可见且有驻留批时——来源 upload 直接
+ * 放行（成功后提示「已替换」）；来源 collect/import 弹 confirm 询问，
+ * 用户拒绝则中止上传。
+ */
+function gateOverwrite(): boolean {
+  if (!isRevealOpen(confirmSection)) return true; // 无驻留批：直接放行
+  if (lastBatchSource === "upload") return true; // 上传覆盖上传：静默，成功后提示
+  return window.confirm(t("uploadConfirmOverwrite"));
+}
+
+/** 本次上传是否将替换上一批上传文件（gate 放行后、hideConfirmPage 前取值）。 */
+function isReplacingUpload(): boolean {
+  return isRevealOpen(confirmSection) && lastBatchSource === "upload";
+}
+
+/**
+ * 收录摘要（决议 A6）：只报后缀类别（去重排序，不展开文件名）。
+ * M>0 → 「已收录 N 个文件，忽略 M 个（.x .y）」；M=0 → 「已收录 N 个文件」。
+ */
+function renderUploadSummary(
+  acceptedCount: number,
+  ignoredCount: number,
+  ignoredSuffixes: readonly string[],
+): string {
+  if (ignoredCount === 0) return t1("uploadSummaryFiles", acceptedCount);
+  const categories = ignoredSuffixes
+    .map((suffix) => (suffix === NO_SUFFIX ? t("uploadIgnoredNoSuffix") : `.${suffix}`))
+    .join(" ");
+  return t3("uploadSummaryIgnored", acceptedCount, ignoredCount, categories);
+}
+
+/** 上传批的公共尾段：SW 合并提取 → 确认卡；替换提示 / 收录摘要挂主状态行。 */
+async function runUploadBatch(
+  parts: { name: string; text: string }[],
+  meta: { replaced: boolean; summary: string | null },
+): Promise<void> {
   hideConfirmPage();
   // 进行中状态行（issue #38）：单文件带文件名；多文件整批带文件数
   renderStatusLine(
     statusEl,
-    picked.length > 1
-      ? t1("uploadCollectingFiles", picked.length)
-      : t1("uploadCollectingFile", picked[0]?.name ?? ""),
+    parts.length > 1
+      ? t1("uploadCollectingFiles", parts.length)
+      : t1("uploadCollectingFile", parts[0]?.name ?? ""),
   );
+  const outcome = await uploadFile(chromeSwChannel, parts);
+  if (outcome.ok) {
+    // 批次已驻留 SW 内存：确认卡即成功反馈（措辞用「上传采集」）
+    renderConfirmPage("sourceUpload", outcome.total, outcome.newCount);
+    // 替换提示 / 收录摘要走主状态行；两段都在时以「·」并置，互不吞并
+    const notes = [meta.replaced ? t("uploadReplacedBatch") : null, meta.summary]
+      .filter(Boolean)
+      .join(" · ");
+    if (notes) renderStatusLine(statusEl, notes);
+  } else {
+    renderStatusLine(statusEl, t1("uploadFailed", outcome.error), "error");
+  }
+}
+
+/** 画布点击（或 Enter/Space）：覆盖闸门 → 多选选择器 → 整批上传。 */
+async function uploadFromCanvas(): Promise<void> {
+  if (isUploading) return; // 上传进行中防重入
+  if (!gateOverwrite()) return; // collect/import 驻留批被拒：中止
+  const replaced = isReplacingUpload();
+  isUploading = true;
   try {
-    const outcome = await uploadFile(chromeSwChannel, picked);
-    if (outcome.ok) {
-      // 批次已驻留 SW 内存：确认卡即成功反馈（措辞用「上传采集」，计数语义与采集一致）
-      renderConfirmPage("sourceUpload", outcome.total, outcome.newCount);
-    } else {
-      renderStatusLine(statusEl, t1("uploadFailed", outcome.error), "error");
-    }
+    const picked = await browserCsvFileGateway.pickUploadFiles();
+    if (!picked) return; // 用户取消：静默
+    await runUploadBatch(picked, { replaced, summary: null });
   } finally {
-    if (uploadFileButton) uploadFileButton.disabled = false;
+    isUploading = false;
+  }
+}
+
+/** 画布拖放：递归收集 → 白名单过滤 + 双上限 → 读取 → 整批上传。 */
+async function uploadFromDrop(dataTransfer: DataTransfer): Promise<void> {
+  if (isUploading) return; // 上传进行中防重入
+  if (!gateOverwrite()) return; // collect/import 驻留批被拒：中止
+  const replaced = isReplacingUpload();
+  isUploading = true;
+  try {
+    const files = await collectDroppedFiles(dataTransfer);
+    if (files.length === 0) return; // 拖入的既无文件也无 entry：静默
+    const gate = filterUploadFiles(files, UPLOAD_LIMITS);
+    if (gate.limitError) {
+      // 整批拒绝：上限（常量）/ 本批量（进位 MB，不低估）都换算进反馈
+      const mb = (bytes: number): number => Math.ceil(bytes / (1024 * 1024));
+      renderStatusLine(
+        statusEl,
+        t4(
+          "uploadLimitExceeded",
+          UPLOAD_LIMITS.maxFiles,
+          UPLOAD_LIMITS.maxTotalBytes / (1024 * 1024),
+          gate.limitError.count,
+          mb(gate.limitError.bytes),
+        ),
+        "error",
+      );
+      return;
+    }
+    const summary = renderUploadSummary(
+      gate.accepted.length,
+      files.length - gate.accepted.length,
+      gate.ignoredSuffixes,
+    );
+    if (gate.accepted.length === 0) {
+      // 过滤后一无所剩：只报摘要，不发消息、不出确认卡
+      renderStatusLine(statusEl, summary);
+      return;
+    }
+    const parts = await browserCsvFileGateway.readUploadFiles(gate.accepted);
+    if (!parts) return; // 任一文件读取失败：整批静默中止（与选择器路径同语义）
+    await runUploadBatch(parts, { replaced, summary });
+  } finally {
+    isUploading = false;
   }
 }
 
@@ -446,12 +559,19 @@ async function checkLogin(): Promise<void> {
 /**
  * 确认页：展示待确认批次的总数 / 新词数，并挂起确认 / 取消按钮。
  * sourceKey 仅影响措辞（采集 / 导入 / 上传采集），计数语义与按钮行为完全一致（review S-3）。
+ * 同时记录驻留批次来源（issue #41 覆盖语义的判定依据）；确认 / 取消后由各自路径清空。
  */
 function renderConfirmPage(
   sourceKey: "sourceCollect" | "sourceImport" | "sourceUpload",
   total: number,
   newCount: number,
 ): void {
+  lastBatchSource =
+    sourceKey === "sourceCollect"
+      ? "collect"
+      : sourceKey === "sourceImport"
+        ? "import"
+        : "upload";
   if (confirmSummaryEl) {
     const source = t(sourceKey);
     confirmSummaryEl.textContent = t3("confirmSummary", source, total, newCount);
@@ -504,6 +624,7 @@ async function confirmPush(): Promise<void> {
   try {
     const outcome = await confirmCollected(chromeSwChannel);
     if (outcome.ok) {
+      lastBatchSource = null; // 批次已消费：驻留来源记忆清空（issue #41）
       renderCounts(outcome.counts.total, outcome.counts.pending);
       renderStatusLine(statusEl, t("confirmedPushStarted"));
       hideConfirmPage();
@@ -522,6 +643,7 @@ async function confirmPush(): Promise<void> {
 /** 取消：丢弃待确认批次，什么都不发生（词库、推送状态不变）。 */
 async function cancelCollect(): Promise<void> {
   await discardCollected(chromeSwChannel);
+  lastBatchSource = null; // 批次已丢弃：驻留来源记忆清空（issue #41）
   hideConfirmPage();
   renderStatusLine(statusEl, t("cancelled"));
 }
@@ -567,9 +689,48 @@ importCsvButton?.addEventListener("click", () => {
   void importCsvFromFile();
 });
 
-uploadFileButton?.addEventListener("click", () => {
-  void uploadFileFromDisk();
-});
+// ── 上传画布（issue #41）：唯一上传入口 ─────────────────
+// aria-label 启动时按 locale 回填（data-i18n 只回填文本，属性须手动设置，
+// 同 pushProgress 的先例）；role="button" 的键盘激活走 Enter/Space。
+if (uploadCanvas) {
+  uploadCanvas.setAttribute("aria-label", t("uploadCanvasHint"));
+
+  uploadCanvas.addEventListener("click", () => {
+    void uploadFromCanvas();
+  });
+
+  uploadCanvas.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      void uploadFromCanvas();
+    }
+  });
+
+  // dragenter/dragover preventDefault 才能成为放置目标；dragleave 以计数器
+  // 对抗子元素间移动的抖动（进出子元素各触发一次 leave/enter）。
+  let dragDepth = 0;
+  const setDragging = (dragging: boolean): void => {
+    uploadCanvas.dataset.dragging = String(dragging);
+  };
+  uploadCanvas.addEventListener("dragenter", (event) => {
+    event.preventDefault();
+    dragDepth += 1;
+    setDragging(true);
+  });
+  uploadCanvas.addEventListener("dragover", (event) => {
+    event.preventDefault();
+  });
+  uploadCanvas.addEventListener("dragleave", () => {
+    dragDepth = Math.max(0, dragDepth - 1);
+    if (dragDepth === 0) setDragging(false);
+  });
+  uploadCanvas.addEventListener("drop", (event) => {
+    event.preventDefault();
+    dragDepth = 0;
+    setDragging(false);
+    if (event.dataTransfer) void uploadFromDrop(event.dataTransfer);
+  });
+}
 
 exportLogButton?.addEventListener("click", () => {
   void exportLog();
@@ -602,7 +763,7 @@ function startPushStatusPolling(): void {
 }
 
 // 打开即：拉一次计数 + 自动采集当前页 + 拉一次登录态 + 拉一次推送状态。
-// （上传文件入口是 popup 内的「上传文件」按钮，不做右键菜单目标。）
+// （上传入口是 popup 内的上传画布（issue #41），不做右键菜单目标。）
 void refreshCounts();
 void refreshLogin();
 void refreshPushStatus().then(startPushStatusPolling);

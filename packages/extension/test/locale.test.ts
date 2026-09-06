@@ -51,7 +51,7 @@ function collectUsedI18nKeys(): Set<string> {
   walk(SRC_DIR);
   for (const file of files) {
     const text = readFileSync(file, "utf8");
-    for (const match of text.matchAll(/\b(?:t|t1|t2|t3)\(\s*"([A-Za-z0-9_]+)"/g)) {
+    for (const match of text.matchAll(/\b(?:t|t1|t2|t3|t4)\(\s*"([A-Za-z0-9_]+)"/g)) {
       keys.add(match[1]);
     }
     for (const match of text.matchAll(/data-i18n="([A-Za-z0-9_]+)"/g)) {

@@ -163,7 +163,7 @@ test("CSV import goes through the confirmation gate (issue #22 review S-3)", asy
   await page.close();
 });
 
-test("upload-file target walks collect → confirm → push with .txt text (issue #24)", async ({
+test("upload-canvas walks collect → confirm → push with .txt text (issue #24)", async ({
   extContext,
   popupUrl,
   mockBbdc,
@@ -179,10 +179,10 @@ test("upload-file target walks collect → confirm → push with .txt text (issu
   const totalBefore = Number(await page.getByTestId("total").textContent());
   mockBbdc.reset();
 
-  // 点「上传文件」→ 文件选择器 → 确认页展示「上传采集」措辞的批次预览
+  // 点上传画布→ 文件选择器 → 确认页展示「上传采集」措辞的批次预览
   const [chooser] = await Promise.all([
     page.waitForEvent("filechooser"),
-    page.getByTestId("upload-file").click(),
+    page.getByTestId("upload-canvas").click(),
   ]);
   await chooser.setFiles(txtPath);
   // i18n（issue #28）：zh-CN 确认摘要，来源措辞「上传采集」
@@ -231,7 +231,7 @@ test("upload-file target walks collect → confirm → push with .txt text (issu
   await page.close();
 });
 
-test("upload-file target treats multiple selected files as ONE batch (issue #38)", async ({
+test("upload-canvas treats multiple selected files as ONE batch (issue #38)", async ({
   extContext,
   popupUrl,
   mockBbdc,
@@ -251,7 +251,7 @@ test("upload-file target treats multiple selected files as ONE batch (issue #38)
 
   const [chooser] = await Promise.all([
     page.waitForEvent("filechooser"),
-    page.getByTestId("upload-file").click(),
+    page.getByTestId("upload-canvas").click(),
   ]);
   await chooser.setFiles([pathA, pathB]);
   // 整批 = 一次采集：两个文件合成单张确认卡（「上传采集」措辞）
@@ -289,7 +289,7 @@ test("upload-file target treats multiple selected files as ONE batch (issue #38)
   await page.close();
 });
 
-test("upload-file target accepts .csv as plain text via NL pipeline, not IMPORT_CSV (issue #24)", async ({
+test("upload-canvas accepts .csv as plain text via NL pipeline, not IMPORT_CSV (issue #24)", async ({
   extContext,
   popupUrl,
   mockBbdc,
@@ -305,7 +305,7 @@ test("upload-file target accepts .csv as plain text via NL pipeline, not IMPORT_
 
   const [chooser] = await Promise.all([
     page.waitForEvent("filechooser"),
-    page.getByTestId("upload-file").click(),
+    page.getByTestId("upload-canvas").click(),
   ]);
   await chooser.setFiles(csvPath);
   // i18n（issue #28）：zh-CN 确认摘要，来源措辞「上传采集」（NL 提词管线）
@@ -321,7 +321,7 @@ test("upload-file target accepts .csv as plain text via NL pipeline, not IMPORT_
   await page.close();
 });
 
-test("upload-file target accepts .srt subtitle (17-item allowlist, issue #38)", async ({
+test("upload-canvas accepts .srt subtitle (17-item allowlist, issue #38)", async ({
   extContext,
   popupUrl,
   mockBbdc,
@@ -338,7 +338,7 @@ test("upload-file target accepts .srt subtitle (17-item allowlist, issue #38)", 
 
   const [chooser] = await Promise.all([
     page.waitForEvent("filechooser"),
-    page.getByTestId("upload-file").click(),
+    page.getByTestId("upload-canvas").click(),
   ]);
   await chooser.setFiles(srtPath);
   // i18n（issue #28）：zh-CN 确认摘要，来源措辞「上传采集」
@@ -354,7 +354,7 @@ test("upload-file target accepts .srt subtitle (17-item allowlist, issue #38)", 
   await page.close();
 });
 
-test("upload-file target preprocesses .html: script content never enters the vocabulary (issue #38 决议 A2)", async ({
+test("upload-canvas preprocesses .html: script content never enters the vocabulary (issue #38 决议 A2)", async ({
   extContext,
   popupUrl,
   mockBbdc,
@@ -379,7 +379,7 @@ test("upload-file target preprocesses .html: script content never enters the voc
 
   const [chooser] = await Promise.all([
     page.waitForEvent("filechooser"),
-    page.getByTestId("upload-file").click(),
+    page.getByTestId("upload-canvas").click(),
   ]);
   await chooser.setFiles(htmlPath);
   await expect(page.getByTestId("confirm-summary")).toHaveText(
@@ -416,7 +416,7 @@ test("upload-file target preprocesses .html: script content never enters the voc
   await page.close();
 });
 
-test("upload-file target rejects non plain-text (e.g. .png) file with zero writes (issue #24)", async ({
+test("upload-canvas rejects non plain-text (e.g. .png) file with zero writes (issue #24)", async ({
   extContext,
   popupUrl,
   mockBbdc,
@@ -432,7 +432,7 @@ test("upload-file target rejects non plain-text (e.g. .png) file with zero write
 
   const [chooser] = await Promise.all([
     page.waitForEvent("filechooser"),
-    page.getByTestId("upload-file").click(),
+    page.getByTestId("upload-canvas").click(),
   ]);
   await chooser.setFiles(pngPath);
   // i18n（issue #28）：zh-CN 的纯文本拒绝文案。反馈走主状态行（issue #35
