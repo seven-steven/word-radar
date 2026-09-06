@@ -51,7 +51,9 @@ function collectUsedI18nKeys(): Set<string> {
   walk(SRC_DIR);
   for (const file of files) {
     const text = readFileSync(file, "utf8");
-    for (const match of text.matchAll(/\b(?:t|t1|t2|t3|t4)\(\s*"([A-Za-z0-9_]+)"/g)) {
+    // i18n.ts 的变参 t 化后 t1…t4 是薄别名，统一用 \bt\d*\( 一个正则收口
+    // （code-review Simplify；健全性锁见下方 usedKeys.size 断言）
+    for (const match of text.matchAll(/\bt\d*\(\s*"([A-Za-z0-9_]+)"/g)) {
       keys.add(match[1]);
     }
     for (const match of text.matchAll(/data-i18n="([A-Za-z0-9_]+)"/g)) {

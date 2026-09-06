@@ -14,70 +14,40 @@ function isChromeI18nAvailable(): boolean {
 }
 
 /**
- * 获取本地化消息（无参数）。
- * @param key messages.json 中的 key
- * @returns 本地化后的字符串，key 不存在时返回 key 本身
+ * 获取本地化消息（变参，code-review Simplify：t1/t2/t3/t4 曾是四份逐字拷贝
+ * 的 arity 特化——统一为本实现，t1…t4 退化为薄别名保留调用点与 arity 检查）。
+ * @param key messages.json 中的 key，消息中可含 $1, $2… 占位符
+ * @param args 按序替换 $1, $2… 的参数（String() 后传给 getMessage）
  */
-export function t(key: string): string {
+export function t(key: string, ...args: Array<string | number>): string {
   if (isChromeI18nAvailable()) {
-    return chrome.i18n.getMessage(key) || key;
+    return chrome.i18n.getMessage(key, args.map(String)) || key;
   }
   // 单测环境回退：返回 key（测试环境应 mock chrome.i18n 或接受 key 作为返回值）
   return key;
 }
 
-/**
- * 获取本地化消息（单个参数）。
- * @param key messages.json 中的 key，消息中应包含 $1 占位符
- * @param arg1 替换 $1 的参数
- * @returns 本地化后的字符串
- */
+/** 单参数薄别名（保持调用点 arity 检查，零改动）。 */
 export function t1(key: string, arg1: string | number): string {
-  if (isChromeI18nAvailable()) {
-    return chrome.i18n.getMessage(key, String(arg1)) || key;
-  }
-  // 单测环境回退：无法插值时返回 key
-  return key;
+  return t(key, arg1);
 }
 
-/**
- * 获取本地化消息（两个参数）。
- * @param key messages.json 中的 key，消息中应包含 $1 和 $2 占位符
- * @param arg1 替换 $1 的参数
- * @param arg2 替换 $2 的参数
- * @returns 本地化后的字符串
- */
+/** 双参数薄别名。 */
 export function t2(key: string, arg1: string | number, arg2: string | number): string {
-  if (isChromeI18nAvailable()) {
-    return chrome.i18n.getMessage(key, [String(arg1), String(arg2)]) || key;
-  }
-  return key;
+  return t(key, arg1, arg2);
 }
 
-/**
- * 获取本地化消息（三个参数）。
- * @param key messages.json 中的 key，消息中应包含 $1, $2, $3 占位符
- * @param arg1 替换 $1 的参数
- * @param arg2 替换 $2 的参数
- * @param arg3 替换 $3 的参数
- * @returns 本地化后的字符串
- */
+/** 三参数薄别名。 */
 export function t3(
   key: string,
   arg1: string | number,
   arg2: string | number,
   arg3: string | number,
 ): string {
-  if (isChromeI18nAvailable()) {
-    return chrome.i18n.getMessage(key, [String(arg1), String(arg2), String(arg3)]) || key;
-  }
-  return key;
+  return t(key, arg1, arg2, arg3);
 }
 
-/**
- * 获取本地化消息（四个参数，issue #41 上传超限文案）。
- * @param key messages.json 中的 key，消息中应包含 $1, $2, $3, $4 占位符
- */
+/** 四参数薄别名（issue #41 上传超限文案）。 */
 export function t4(
   key: string,
   arg1: string | number,
@@ -85,17 +55,7 @@ export function t4(
   arg3: string | number,
   arg4: string | number,
 ): string {
-  if (isChromeI18nAvailable()) {
-    return (
-      chrome.i18n.getMessage(key, [
-        String(arg1),
-        String(arg2),
-        String(arg3),
-        String(arg4),
-      ]) || key
-    );
-  }
-  return key;
+  return t(key, arg1, arg2, arg3, arg4);
 }
 
 /**

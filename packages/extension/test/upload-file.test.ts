@@ -122,6 +122,32 @@ describe("createBackgroundListener UPLOAD_FILE（issue #24；#38 文件批）", 
     expect(errorLogger.log).not.toHaveBeenCalled();
   });
 
+  it("空批防御：files: [] 应答 {ok:false,error:'empty-upload-batch'}，零提取零驻留（code-review P1）", async () => {
+    const extract = freshExtract();
+    const repository = fakeRepository();
+    const listener = createBackgroundListener({
+      repository,
+      bbdcClient: fakeBbdcClient(),
+      actionBadge: fakeActionBadge(),
+      pushCoordinator: fakePushCoordinator(),
+      errorLogger: { log: vi.fn() },
+      extract,
+    });
+    const sendResponse = vi.fn();
+
+    const keep = listener({ type: UPLOAD_FILE, files: [] }, {}, sendResponse);
+
+    expect(keep).toBe(true);
+    await flush();
+    expect(extract).not.toHaveBeenCalled();
+    expect(repository.countNew).not.toHaveBeenCalled();
+    // 不驻留空批：后续 CONFIRM 拿不到 0 词批次（无 "?" badge、无 0 词确认卡）
+    expect(sendResponse).toHaveBeenCalledWith({
+      ok: false,
+      error: "empty-upload-batch",
+    });
+  });
+
   it("多文件整批 = 一次采集：文本以空行合并成单文本，只跑一次提取、一次 diff（issue #38）", async () => {
     const extract = freshExtract();
     const repository = fakeRepository();

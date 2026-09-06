@@ -85,6 +85,29 @@ describe("createContextMenuListener", () => {
     expect(openPopup.openPopup).toHaveBeenCalledTimes(1); // 调过但 rejected，被捕获
   });
 
+  it("openPopup reject 时尽力回收标记：remove 被调（防残留误触发，code-review P1）", async () => {
+    const session = fakeSession();
+    const openPopup = fakeOpenPopup({ reject: true });
+    const listener = createContextMenuListener({ session, openPopup });
+
+    listener({ menuItemId: "upload-files" } as MenuItemClickInfo);
+    await flushAsync();
+
+    expect(session.remove).toHaveBeenCalledWith(OPEN_REASON_KEY);
+  });
+
+  it("openPopup reject 且回收也失败：依旧静默不抛", async () => {
+    const session = fakeSession();
+    session.remove.mockRejectedValue(new Error("storage.session unavailable"));
+    const openPopup = fakeOpenPopup({ reject: true });
+    const listener = createContextMenuListener({ session, openPopup });
+
+    expect(() => listener({ menuItemId: "collect-page" } as MenuItemClickInfo)).not.toThrow();
+    await flushAsync();
+
+    expect(session.remove).toHaveBeenCalledTimes(1);
+  });
+
   it("标记写入失败不阻断 openPopup（尽力而为：popup 降级为默认态）", async () => {
     const session = fakeSession();
     session.set.mockRejectedValue(new Error("storage.session unavailable"));

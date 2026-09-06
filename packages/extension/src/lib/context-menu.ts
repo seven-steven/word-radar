@@ -24,6 +24,8 @@
  * （同 background-listener.ts 的注入风格），SW 集成测试注入 mock 网关。
  */
 import {
+  chromeOpenReasonSession,
+  OPEN_REASON_KEY,
   recordOpenReason,
   type OpenReason,
   type OpenReasonSession,
@@ -116,11 +118,7 @@ export interface ContextMenuListenerDeps {
 export function createContextMenuListener(
   deps: ContextMenuListenerDeps = {},
 ): (info: MenuItemClickInfo) => void {
-  const session = deps.session ?? {
-    get: (key) => chrome.storage.session.get(key),
-    set: (key, value) => chrome.storage.session.set({ [key]: value }),
-    remove: (key) => chrome.storage.session.remove(key),
-  };
+  const session = deps.session ?? chromeOpenReasonSession;
   const openPopup = deps.openPopup ?? chromeOpenPopup;
   return (info: MenuItemClickInfo) => {
     const reason = openReasonForMenu(info.menuItemId);
@@ -136,7 +134,14 @@ export function createContextMenuListener(
       try {
         await openPopup.openPopup();
       } catch {
-        // openPopup 可能因策略/焦点竞争失败：静默
+        // openPopup 可能因策略/焦点竞争失败：静默。但已写入的标记必须尽力
+        // 回收（code-review P1）：reject 意味着 popup 没开、没人消费标记，
+        // 残留会让下次点工具栏图标误触发自动采集/聚焦。回收自身失败同样静默。
+        try {
+          await session.remove(OPEN_REASON_KEY);
+        } catch {
+          // 回收失败：标记随浏览器会话结束自然失效
+        }
       }
     })();
   };

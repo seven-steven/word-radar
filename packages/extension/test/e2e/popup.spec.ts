@@ -7,7 +7,7 @@
  * 断言按中文渲染（也持续验证「中文环境显示中文」这一 issue #28 的主诉）。
  */
 import { writeFileSync } from "node:fs";
-import { test, expect, waitCountsLoaded } from "./fixtures.js";
+import { test, expect, drainPendingPool, waitCountsLoaded } from "./fixtures.js";
 
 test.beforeEach(({ mockBbdc }) => {
   mockBbdc.reset();
@@ -152,20 +152,9 @@ test("CSV import goes through the confirmation gate (issue #22 review S-3)", asy
   await expect(page.getByTestId("confirm-section")).toBeHidden();
   await expect(page.getByTestId("total")).toHaveText(String(totalBefore + 2));
 
-  // 排空本用例确认触发的推送（issue #27）：确认入库的词进入待推池，若不等
-  // 推送跑完就关页，下一个用例的 popup boot（check-login 恢复路径）会替本
-  // 用例发起推送 —— 污染后续「确认前零网络」断言（失败点漂移的放大器）。
-  for (let round = 0; round < 15; round += 1) {
-    const pending = Number(await page.getByTestId("pending").textContent());
-    const phase = await page.getByTestId("push-status").getAttribute("data-phase");
-    if (pending === 0 && phase !== "running") break;
-    if (pending > 0 && phase !== "running") {
-      await page.getByTestId("retry-push").click();
-    }
-    await page.waitForTimeout(3_000);
-  }
-  await expect(page.getByTestId("pending")).toHaveText(/^0$/);
-  await expect(page.getByTestId("push-status")).not.toHaveAttribute("data-phase", "running");
+  // 排空本用例确认触发的推送（issue #27）：持久 context 共享推送循环，
+  // 泄漏给下个用例会污染「确认前零网络」断言（drainPendingPool 注释详述）
+  await drainPendingPool(page);
   await page.close();
 });
 
@@ -210,30 +199,8 @@ test("upload-canvas walks collect → confirm → push with .txt text (issue #24
     .poll(() => mockBbdc.addWordRequests().length, { timeout: 20_000 })
     .toBeGreaterThan(0);
   await expect(page.getByTestId("confirm-section")).toBeHidden();
-  // 等本轮推送跑完再收尾：持久 context 共享推送循环，把进行中的推送
-  // 泄漏给后续用例会让 push.spec 的 pending 计数与请求记录错位
-  await expect
-    .poll(
-      async () => page.getByTestId("push-status").getAttribute("data-phase"),
-      { timeout: 30_000 },
-    )
-    .toMatch(/idle|completed|paused/);
-  // 排空待推池：确认触发的一轮推送以 listPending 快照为准，并发中的批次
-  // 可能不在快照内（由下一次 check-login 恢复路径兜底）。这里手动 drain，
-  // 避免把进行中的待推泄漏给 push.spec（持久 context 共享推送循环）。
-  for (let round = 0; round < 15; round++) {
-    await page.reload();
-    await page.waitForTimeout(3_000);
-    const pending = Number(await page.getByTestId("pending").textContent());
-    const phase = await page.getByTestId("push-status").getAttribute("data-phase");
-    if (pending === 0 && phase !== "running") break;
-    if (pending > 0 && phase !== "running") {
-      await page.getByTestId("retry-push").click();
-    }
-    await page.waitForTimeout(3_000);
-  }
-  await expect(page.getByTestId("pending")).toHaveText(/^0$/);
-  await expect(page.getByTestId("push-status")).not.toHaveAttribute("data-phase", "running");
+  // 排空待推池（持久 context 共享推送循环，别把进行中推送泄漏给 push.spec）
+  await drainPendingPool(page);
   await page.close();
 });
 
@@ -278,20 +245,8 @@ test("upload-canvas treats multiple selected files as ONE batch (issue #38)", as
     .poll(() => mockBbdc.addWordRequests().length, { timeout: 20_000 })
     .toBeGreaterThan(0);
   await expect(page.getByTestId("confirm-section")).toBeHidden();
-  // 排空待推池（同上：持久 context 共享推送循环，别把进行中推送泄漏给后续用例）
-  for (let round = 0; round < 15; round++) {
-    await page.reload();
-    await page.waitForTimeout(3_000);
-    const pending = Number(await page.getByTestId("pending").textContent());
-    const phase = await page.getByTestId("push-status").getAttribute("data-phase");
-    if (pending === 0 && phase !== "running") break;
-    if (pending > 0 && phase !== "running") {
-      await page.getByTestId("retry-push").click();
-    }
-    await page.waitForTimeout(3_000);
-  }
-  await expect(page.getByTestId("pending")).toHaveText(/^0$/);
-  await expect(page.getByTestId("push-status")).not.toHaveAttribute("data-phase", "running");
+  // 排空待推池（持久 context 共享推送循环，别把进行中推送泄漏给后续用例）
+  await drainPendingPool(page);
   await page.close();
 });
 
@@ -407,22 +362,11 @@ test("upload-canvas preprocesses .html: script content never enters the vocabula
   ).toHaveLength(0);
   await expect(page.getByTestId("confirm-section")).toBeHidden();
   // 排空待推池（持久 context 共享推送循环）
-  for (let round = 0; round < 15; round++) {
-    await page.reload();
-    await page.waitForTimeout(3_000);
-    const pending = Number(await page.getByTestId("pending").textContent());
-    const phase = await page.getByTestId("push-status").getAttribute("data-phase");
-    if (pending === 0 && phase !== "running") break;
-    if (pending > 0 && phase !== "running") {
-      await page.getByTestId("retry-push").click();
-    }
-    await page.waitForTimeout(3_000);
-  }
-  await expect(page.getByTestId("pending")).toHaveText(/^0$/);
+  await drainPendingPool(page);
   await page.close();
 });
 
-test("upload-canvas rejects non plain-text (e.g. .png) file with zero writes (issue #24)", async ({
+test("upload-canvas click path ignores non plain-text (e.g. .png) with zero writes (issue #24; code-review P0 unified gate)", async ({
   extContext,
   popupUrl,
   mockBbdc,
@@ -441,10 +385,10 @@ test("upload-canvas rejects non plain-text (e.g. .png) file with zero writes (is
     page.getByTestId("upload-canvas").click(),
   ]);
   await chooser.setFiles(pngPath);
-  // i18n（issue #28）：zh-CN 的纯文本拒绝文案。反馈走主状态行（issue #35
-  // 重做返工：上传按钮在主采集行，抽屉收起时 sync-status 不可见）
+  // 点击路径与拖放同闸门（code-review P0）：非白名单在 popup 侧过滤层就地
+  // 摘要忽略——SW 的整批拒绝错误对合法用户不再触发
   await expect(page.getByTestId("status")).toHaveText(
-    /仅支持纯文本文件/,
+    /已收录 0 个文件，忽略 1 个（\.png）/,
     { timeout: 10_000 },
   );
   // 零写入 + 不出现确认页；网络零增量（上一用例的推送循环可能仍在后台

@@ -215,6 +215,18 @@
     "message": "Upload collection failed: $1",
     "description": "Upload collection failed, params: error message"
   },
+  "uploadUnexpectedError": {
+    "message": "Upload failed, please try again",
+    "description": "Generic failure for unexpected upload errors (code-review P1), no params"
+  },
+  "overwriteAccept": {
+    "message": "Upload anyway",
+    "description": "Inline overwrite ask: proceed with the upload, discarding the resident collect/import batch (issue #41 overwrite semantics)"
+  },
+  "overwriteCancel": {
+    "message": "Cancel",
+    "description": "Inline overwrite ask: cancel and keep the resident collect/import batch (issue #41 overwrite semantics)"
+  },
   "confirmSummary": {
     "message": "Collected $2 words via $1 ($3 new)",
     "description": "Confirmation page summary, params: source (Collect/Import/Upload), total, new count"

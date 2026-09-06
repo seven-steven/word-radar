@@ -13,7 +13,16 @@
  * 注入 fake entry 树即可覆盖嵌套 / 分批 / 回退各路径（e2e 的合成 DataTransfer
  * 无法产生 webkitGetAsEntry，目录递归只能在此层测）。
  */
-import { UPLOAD_LIMITS, UPLOAD_TEXT_SUFFIXES } from "./messages.js";
+import {
+  NO_SUFFIX,
+  suffixOf,
+  UPLOAD_LIMITS,
+  UPLOAD_TEXT_SUFFIXES,
+} from "./messages.js";
+
+// NO_SUFFIX 随 suffixOf 收在 messages.ts（popup 展示层与 SW 校验层共用），
+// 这里 re-export 维持既有消费方（popup.ts / drop-files.test.ts）的 import 路径。
+export { NO_SUFFIX };
 
 /** readEntries 的回调形状（DOM 是回调式而非 Promise）。 */
 export type ReadEntriesCallback = (entries: EntryLike[]) => void;
@@ -26,7 +35,8 @@ export interface EntryLike {
   readonly name: string;
   readonly isFile: boolean;
   readonly isDirectory: boolean;
-  /** 仅文件节点：读出 File（DOM 为 file(success) 回调，这里包成 Promise）。 */
+  /** 仅文件节点：读出 File（Promise 形态——DOM 的回调式 file(success, error)
+   *  由 snapshotEntries 在边界处包成 Promise，collectFilesFromEntries 统一 await）。 */
   readonly file?: () => Promise<File>;
   /** 仅目录节点：建一个 readEntries 读取器（每次 createReader 从头迭代）。 */
   readonly createReader?: () => {
@@ -68,8 +78,18 @@ export const domGetEntries: GetEntries = (dir) =>
   dir.createReader ? readAllEntries(dir.createReader) : Promise.resolve([]);
 
 /**
+ * 遍历熔断上限（code-review P1：大目录如 node_modules 全树无界串行遍历会让
+ * popup 数十秒无反馈）。与 UPLOAD_LIMITS 双上限的关系：双上限只统计白名单
+ * 过滤后的文件（filterUploadFiles），本上限统计遍历中的全部文件——熔断只防
+ * 无界遍历，不改变最终判定语义：达上限即停止下钻并照常返回已收集部分，
+ * 由 filterUploadFiles 对这批给出准确的白名单/双上限反馈。
+ */
+export const MAX_TRAVERSE_FILES = 2000;
+
+/**
  * 深度优先递归收集全树文件：目录只展开不收录，文件经 file() 读出后
- * 依序推入 files（复用入少数组，遍历中途抛错时已收集部分仍在）。
+ * 依序推入 files（复用入少数组，遍历中途抛错时已收集部分仍在）；
+ * files.length 达 MAX_TRAVERSE_FILES 即熔断，不再下钻（见上）。
  */
 export async function collectFilesFromEntries(
   roots: readonly EntryLike[],
@@ -78,6 +98,7 @@ export async function collectFilesFromEntries(
 ): Promise<File[]> {
   const walk = async (nodes: readonly EntryLike[]): Promise<void> => {
     for (const node of nodes) {
+      if (files.length >= MAX_TRAVERSE_FILES) return; // 熔断：达上限即停止下钻
       if (node.isFile && node.file) {
         files.push(await node.file());
       } else if (node.isDirectory) {
@@ -90,8 +111,41 @@ export async function collectFilesFromEntries(
 }
 
 /**
+ * DOM entry → EntryLike 的边界适配（code-review P0：真实拖放死亡修复）。
+ * 真实 DOM 的 FileSystemFileEntry.file 是回调式 file(success, error)，
+ * 原样透传会让 `await node.file()` 得 undefined → 读 file.name 抛 TypeError
+ * （jsdom fake 曾直接给 Promise 形态，类型声明掩盖了这一分歧）。这里对文件
+ * 节点把回调包成 Promise，其余字段逐项透传（DOM entry 的 name/isFile 等是
+ * 原型访问器，不能用展开语法复制）。
+ */
+function toAsyncEntry(entry: EntryLike): EntryLike {
+  if (!entry.isFile) return entry; // 目录节点无回调适配需求，原样透传
+  const domFile = (
+    entry as unknown as {
+      file?: (
+        success: (file: File) => void,
+        error?: (err: unknown) => void,
+      ) => void;
+    }
+  ).file;
+  return {
+    name: entry.name,
+    isFile: true,
+    isDirectory: false,
+    file:
+      typeof domFile === "function"
+        ? () =>
+            new Promise<File>((resolve, reject) => {
+              domFile.call(entry, resolve, reject);
+            })
+        : undefined,
+  };
+}
+
+/**
  * 同步摘下 entry 引用：DataTransferItem 在事件处理让出事件循环后可能
- * 失效，webkitGetAsEntry 必须在 drop 监听器内同步调用完。
+ * 失效，webkitGetAsEntry 必须在 drop 监听器内同步调用完；摘下的 DOM
+ * entry 就地做回调式 file() → Promise 适配（toAsyncEntry）。
  */
 function snapshotEntries(dataTransfer: DataTransfer): EntryLike[] {
   const out: EntryLike[] = [];
@@ -104,7 +158,7 @@ function snapshotEntries(dataTransfer: DataTransfer): EntryLike[] {
       }
     ).webkitGetAsEntry;
     const entry = typeof getter === "function" ? getter.call(item) : null;
-    if (entry) out.push(entry);
+    if (entry) out.push(toAsyncEntry(entry));
   }
   return out;
 }
@@ -117,7 +171,11 @@ function snapshotEntries(dataTransfer: DataTransfer): EntryLike[] {
 export async function collectDroppedFiles(
   dataTransfer: DataTransfer,
 ): Promise<File[]> {
-  const fallback = (): File[] => Array.from(dataTransfer.files ?? []);
+  // files 同步快照（code-review P1，snapshotEntries 同款先例）：fallback
+  // 闭包若在首个 await 之后才读 dataTransfer.files，drag data store 已被
+  // 释放、永远拿到空——必须在函数顶部同步摘下。
+  const filesSnapshot = Array.from(dataTransfer.files ?? []);
+  const fallback = (): File[] => filesSnapshot;
   const roots = snapshotEntries(dataTransfer);
   if (roots.length === 0) return fallback();
   const files: File[] = [];
@@ -134,9 +192,6 @@ export interface UploadLimits {
   maxTotalBytes: number;
 }
 
-/** 无后缀文件（含 .gitignore 式点开头隐藏文件）的类别占位：空串排序最前，展示层转 i18n 文案。 */
-export const NO_SUFFIX = "";
-
 export interface UploadFilterOutcome {
   /** 白名单内的文件（保持原顺序）。 */
   accepted: File[];
@@ -146,18 +201,12 @@ export interface UploadFilterOutcome {
   limitError: { count: number; bytes: number } | null;
 }
 
-/** 文件名后缀小写化；点开头 / 以点结尾 / 无点一律视为无后缀。 */
-function suffixOf(name: string): string {
-  const dot = name.lastIndexOf(".");
-  if (dot <= 0 || dot === name.length - 1) return NO_SUFFIX;
-  return name.slice(dot + 1).toLowerCase();
-}
-
 /**
  * 上传文件闸门（issue #41 决议 A6/A7）：先按 UPLOAD_TEXT_SUFFIXES 白名单
  * 过滤（非白名单不报错，只记后缀类别供「已收录 N 个，忽略 M 个（.x .y）」
  * 计数摘要），再对白名单内文件做文件数/总字节双上限检查（File.size 元
  * 数据，不读内容）。超限 = 整批拒绝（limitError 非空），绝不静默截断。
+ * 后缀判定用 messages.ts 的 suffixOf（与 SW 校验同源，点开头一律 NO_SUFFIX）。
  */
 export function filterUploadFiles(
   files: readonly File[],

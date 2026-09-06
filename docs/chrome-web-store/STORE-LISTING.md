@@ -91,9 +91,9 @@ https://langeasy.com.cn/* — 加入生词本前，通过该域的接口查询�
 
 第一段（免登录可复现）：
 1. 安装扩展后，打开任意英文文章页（例如 https://raw.githubusercontent.com/mattpocock/skills/refs/heads/main/skills/productivity/grilling/SKILL.md ）。
-2. 点击工具栏 单词雷达 WordRadar 图标打开弹窗。
-3. 弹窗自动采集当前页生词，显示「本次采集 N 词」（N ≥ 1），「累计采集」计数递增。
-4. 生词此时已存入浏览器本地词库（IndexedDB），无需任何账号。
+2. 点击工具栏 单词雷达 WordRadar 图标打开弹窗（打开不自动采集）。
+3. 点弹窗内「采集当前页」按钮采集当前页生词，确认卡显示「本次共计采集 N 个单词，其中新词 M 个」（N ≥ 1）。
+4. 点「确认推送」后生词才存入浏览器本地词库（IndexedDB），无需任何账号。
 
 第二段（需不背单词账号）：
 1. 在浏览器打开 https://bbdc.cn/ 并登录。

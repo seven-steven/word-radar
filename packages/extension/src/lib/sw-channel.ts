@@ -265,17 +265,18 @@ export type UploadFileOutcome =
   | { ok: false; error: string };
 
 /**
- * issue #24 上传文件采集收窄（同过确认闸门；#38 改文件批）：
+ * 上传两通道（UPLOAD_FILE / UPLOAD_TEXT）的应答同构，收窄逻辑抽成一份
+ * （code-review Simplify）：
  * - SW 返回 BatchPreview（提取成功，批次已驻留）→ `{ok:true,total,newCount}`
  * - SW 返回 `{ok:false,error}`（任一文件后缀非法等）→ 原样透传
- * - 任何其他应答 / 抛错 → `{ok:false}`
+ * - 任何其他应答 / 抛错 → `{ok:false}`（归一 error "upload-unavailable"，
+ *   两条上传通道的失败反馈同文案）
  */
-export async function uploadFile(
-  channel: SwChannel,
-  files: UploadedFilePart[],
+async function narrowUploadOutcome(
+  send: () => Promise<unknown>,
 ): Promise<UploadFileOutcome> {
   try {
-    const raw = await channel.uploadFile(files);
+    const raw = await send();
     if (isBatchPreview(raw)) {
       return { ok: true, total: raw.total, newCount: raw.newCount };
     }
@@ -294,39 +295,25 @@ export async function uploadFile(
 }
 
 /**
- * 粘贴文本通道的应答形态：与 UploadFileOutcome 同构（成功为待确认批次预览，
- * 失败为错误），粘贴与拖放共用确认卡与失败反馈的渲染逻辑。
+ * issue #24 上传文件采集收窄（同过确认闸门；#38 改文件批）。
  */
-export type UploadTextOutcome = UploadFileOutcome;
+export function uploadFile(
+  channel: SwChannel,
+  files: UploadedFilePart[],
+): Promise<UploadFileOutcome> {
+  return narrowUploadOutcome(() => channel.uploadFile(files));
+}
 
 /**
- * issue #42 T5 粘贴文本采集收窄（决议 A3：直进提取管线，同过确认闸门）：
- * - SW 返回 BatchPreview（提取成功，批次已驻留）→ `{ok:true,total,newCount}`
- * - SW 返回 `{ok:false,error}` → 原样透传
- * - 任何其他应答 / 抛错 → `{ok:false}`（归一 error 与 uploadFile 同码
- *   "upload-unavailable"，两条上传通道的失败反馈同文案）
+ * issue #42 T5 粘贴文本采集收窄（决议 A3：直进提取管线，同过确认闸门）。
+ * 应答与 uploadFile 同构（UploadFileOutcome），粘贴与拖放共用确认卡与
+ * 失败反馈的渲染逻辑。
  */
-export async function uploadPastedText(
+export function uploadPastedText(
   channel: SwChannel,
   text: string,
-): Promise<UploadTextOutcome> {
-  try {
-    const raw = await channel.uploadText(text);
-    if (isBatchPreview(raw)) {
-      return { ok: true, total: raw.total, newCount: raw.newCount };
-    }
-    if (
-      typeof raw === "object" &&
-      raw !== null &&
-      (raw as { ok?: unknown }).ok === false &&
-      typeof (raw as { error?: unknown }).error === "string"
-    ) {
-      return { ok: false, error: (raw as { error: string }).error };
-    }
-    return { ok: false, error: "upload-unavailable" };
-  } catch {
-    return { ok: false, error: "upload-unavailable" };
-  }
+): Promise<UploadFileOutcome> {
+  return narrowUploadOutcome(() => channel.uploadText(text));
 }
 
 function isPushStatus(value: unknown): value is PushStatus {  if (typeof value !== "object" || value === null) return false;

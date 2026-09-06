@@ -215,6 +215,18 @@
     "message": "上传采集失败：$1",
     "description": "上传采集失败，参数：错误信息"
   },
+  "uploadUnexpectedError": {
+    "message": "上传失败，请重试",
+    "description": "上传入口意外异常的通用失败提示（code-review P1），无参数"
+  },
+  "overwriteAccept": {
+    "message": "继续上传",
+    "description": "覆盖确认条：继续上传并丢弃 collect/import 驻留批（issue #41 覆盖语义）"
+  },
+  "overwriteCancel": {
+    "message": "取消",
+    "description": "覆盖确认条：取消，保留 collect/import 驻留批（issue #41 覆盖语义）"
+  },
   "confirmSummary": {
     "message": "本次共计$1 $2 个单词，其中新词 $3 个",
     "description": "确认页摘要，参数：来源（采集/导入/上传采集）、总数、新词数"

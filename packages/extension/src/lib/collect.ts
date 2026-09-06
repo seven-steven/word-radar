@@ -179,6 +179,25 @@ export function collectVisibleText(
 }
 
 /**
+ * body 正文采集 + pre 回退（code-review P1 #8：从 collectPageText 导出共用）：
+ * 正常路径采集为空且正文整体在 <pre> 里（raw.githubusercontent.com 式纯文本
+ * 页）时，放开 PRE 排除再提取——普通网页的代码块不受影响（正常路径非空不走
+ * 回退），可见性检查仍然生效（隐藏的 pre 不进结果）。html-text.ts 的
+ * htmlToVisibleText 共用本函数，修复「正文只在 pre 里的 html 提取 0 词」。
+ */
+export function collectBodyTextWithPreFallback(
+  body: Element,
+  win: Window,
+  options: CollectOptions = {},
+): string {
+  const result = collectVisibleText(body, win, options);
+  if (result.trim().length > 0) return result;
+  const withoutPre = new Set(EXCLUDED_TAGS);
+  withoutPre.delete("PRE");
+  return collectVisibleText(body, win, { ...options, excludedTags: withoutPre });
+}
+
+/**
  * 按优先级采集页面文本：
  * 1. 非空选区（trim 后非空白）——直接用 Selection 文本，天然可见；
  * 2. 否则依次取 <article> / <main> / <body>（文档序第一个）做 TreeWalker。
@@ -205,15 +224,6 @@ export function collectPageText(
   if (body === null) {
     return { text: "", source: "body" };
   }
-  const result = collectVisibleText(body, win, options);
-  if (result.trim().length > 0) {
-    return { text: result, source: "body" };
-  }
-  // 回退:正文整体在 <pre> 里的纯文本页(如 raw.githubusercontent.com)。
-  // 正常路径采集为空才走这里,因此普通网页的代码块不受影响;
-  // 可见性检查仍然生效(隐藏的 pre 不进结果)。
-  const withoutPre = new Set(EXCLUDED_TAGS);
-  withoutPre.delete("PRE");
-  const preText = collectVisibleText(body, win, { ...options, excludedTags: withoutPre });
-  return { text: preText, source: "body" };
+  // body 分支带 pre 回退（见 collectBodyTextWithPreFallback）
+  return { text: collectBodyTextWithPreFallback(body, win, options), source: "body" };
 }

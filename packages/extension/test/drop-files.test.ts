@@ -12,6 +12,7 @@ import {
   collectDroppedFiles,
   collectFilesFromEntries,
   filterUploadFiles,
+  MAX_TRAVERSE_FILES,
   NO_SUFFIX,
   readAllEntries,
   type EntryLike,
@@ -24,7 +25,7 @@ function fakeFile(name: string, content: string): File {
   return new File([content], name, { type: "text/plain" });
 }
 
-/** fake 文件 entry：file() 直接回 Promise（DOM 为回调式，此处等价下沉）。 */
+/** fake 文件 entry：file() 直接回 Promise 形态（回调式 DOM 形态由 collectDroppedFiles 的专用用例覆盖）。 */
 function fakeFileEntry(name: string, file: File): EntryLike {
   return { name, isFile: true, isDirectory: false, file: async () => file };
 }
@@ -135,6 +136,24 @@ describe("collectFilesFromEntries（可注入 getEntries 的递归核心）", ()
       }),
     ).rejects.toThrow("permission denied");
   });
+
+  it("遍历熔断：> MAX_TRAVERSE_FILES 个文件的 fake 树提前终止且不抛（返回恰为上限个）", async () => {
+    const total = MAX_TRAVERSE_FILES + 500;
+    const tree: EntryLike[] = [
+      fakeDirEntry(
+        "huge",
+        Array.from({ length: total }, (_, i) =>
+          fakeFileEntry(`f${i}.txt`, fakeFile(`f${i}.txt`, "w")),
+        ),
+        100,
+      ),
+    ];
+    const getEntries: GetEntries = async (dir) =>
+      dir.createReader ? readAllEntries(dir.createReader) : [];
+    const files = await collectFilesFromEntries(tree, getEntries);
+    expect(files).toHaveLength(MAX_TRAVERSE_FILES);
+    expect(() => files).not.toThrow();
+  });
 });
 
 describe("collectDroppedFiles（drop 事件入口）", () => {
@@ -145,6 +164,42 @@ describe("collectDroppedFiles（drop 事件入口）", () => {
       [],
     );
     await expect(collectDroppedFiles(dt)).resolves.toEqual([inner]);
+  });
+
+  it("回调式 file(success, error) 的 DOM entry：snapshotEntries 包成 Promise 后可收集（真实拖放形态）", async () => {
+    const real = fakeFile("cb.txt", "callback");
+    // 模拟真实 DOM：file 是回调式方法（Promise 形态的类型声明是
+    // snapshotEntries 边界适配后的形状；此前原样透传会让 await 得 undefined）
+    const domEntry = {
+      name: "cb.txt",
+      isFile: true,
+      isDirectory: false,
+      file: (success: (f: File) => void, error?: (e: unknown) => void): void => {
+        void error;
+        setTimeout(() => success(real), 0); // 真实 DOM 总是异步回调
+      },
+    };
+    const entry = domEntry as unknown as EntryLike;
+    const dt = fakeDataTransfer([{ webkitGetAsEntry: () => entry }], []);
+    await expect(collectDroppedFiles(dt)).resolves.toEqual([real]);
+  });
+
+  it("回调式 file 的 error 路径：reject 后由 collectDroppedFiles 兜底走 files 回退", async () => {
+    const top = fakeFile("fallback.txt", "flat");
+    const domEntry = {
+      name: "boom.txt",
+      isFile: true,
+      isDirectory: false,
+      file: (success: (f: File) => void, error?: (e: unknown) => void): void => {
+        void success;
+        setTimeout(() => error?.(new Error("read failed")), 0);
+      },
+    };
+    const dt = fakeDataTransfer(
+      [{ webkitGetAsEntry: () => domEntry as unknown as EntryLike }],
+      [top],
+    );
+    await expect(collectDroppedFiles(dt)).resolves.toEqual([top]);
   });
 
   it("items 为空：回退 dataTransfer.files 顶层文件", async () => {

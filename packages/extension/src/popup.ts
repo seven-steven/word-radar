@@ -55,6 +55,7 @@ import {
   retryPush,
   uploadFile,
   uploadPastedText,
+  type UploadFileOutcome,
 } from "./lib/sw-channel.js";
 import { browserCsvFileGateway } from "./lib/csv-file.js";
 import { defaultErrorLogStorage, formatErrorLog, readErrorLog } from "./lib/error-log.js";
@@ -111,11 +112,19 @@ const syncStatusEl = document.querySelector<HTMLElement>('[data-testid="sync-sta
 const exportLogButton = document.querySelector<HTMLButtonElement>('[data-testid="export-log"]');
 const confirmSection = document.querySelector<HTMLElement>('[data-testid="confirm-section"]');
 const confirmSummaryEl = document.querySelector<HTMLElement>('[data-testid="confirm-summary"]');
+// 上传 meta（替换提示/收录摘要，code-review P1）：确认卡展开期间状态行 info
+// 态被 D 互斥隐藏，meta 移入卡内呈现
+const confirmMetaEl = document.querySelector<HTMLElement>('[data-testid="confirm-meta"]');
 const confirmPushButton = document.querySelector<HTMLButtonElement>('[data-testid="confirm-push"]');
 const cancelCollectButton = document.querySelector<HTMLButtonElement>('[data-testid="cancel-collect"]');
 const toolsToggleButton = document.querySelector<HTMLButtonElement>('[data-testid="tools-toggle"]');
 const toolsPanel = document.querySelector<HTMLElement>('[data-testid="tools-panel"]');
 const toolsChevron = document.querySelector<HTMLElement>('[data-testid="tools-chevron"]');
+// 覆盖确认条（code-review P0）：window.confirm 在扩展 action popup 中不显示
+// 且恒 false、popup 直接被关——覆盖询问改为画布下方内联确认条
+const overwriteAskEl = document.querySelector<HTMLElement>('[data-testid="overwrite-ask"]');
+const overwriteAcceptButton = document.querySelector<HTMLButtonElement>('[data-testid="overwrite-accept"]');
+const overwriteDismissButton = document.querySelector<HTMLButtonElement>('[data-testid="overwrite-dismiss"]');
 
 if (versionEl) {
   versionEl.textContent = `core ${CORE_VERSION}`;
@@ -397,16 +406,14 @@ async function importCsvFromFile(): Promise<void> {
 
 
 /**
- * 上传采集（issue #24；#38 改多文件；#41 v1.1-T4 画布化）：
- * - 画布点击 → 多选选择器（accept 白名单兜底）→ 逐文件读文本；
- * - 画布拖放 → collectDroppedFiles 递归全树 → filterUploadFiles 白名单过滤
- *   + 双上限整批校验（超限 = 整批拒绝 + 明确反馈，绝不静默截断）；
- * - 文本批 → SW 合并提取（整批 = 一次采集）→ 驻留待确认批次 → 确认卡。
- * 覆盖语义（决议 A5）：驻留批来源 upload → 静默替换 + 状态行提示；
- * 来源 collect/import → window.confirm 询问，拒绝即中止。
- * 反馈路由（返工锁定）：进行中 / 失败 / 摘要 / 替换提示一律走主状态行
- * statusEl（卡片可见时 info 态被互斥隐藏，卡关闭后仍可读；错误豁免恒可见）；
- * 成功则以确认卡为反馈。
+ * 上传采集（issue #24；#38 改多文件；#41 v1.1-T4 画布化；code-review 返工）：
+ * 三种输入手势（画布点击 / 拖放 / 粘贴文件）统一汇入同一条闸门管线：
+ * File[] → filterUploadFiles（白名单过滤 + 双上限整批校验）→ 摘要反馈
+ * → readUploadFiles（读取 + html/xml 预处理）→ SW 合并提取（整批 =
+ * 一次采集）→ 驻留待确认批次 → 确认卡。点击路径不再绕过白名单/双上限。
+ * 覆盖语义（决议 A5）：驻留批来源 upload → 静默替换（确认卡内提示「已替换」）；
+ * 来源 collect/import → 内联确认条询问（window.confirm 在 action popup 不可用），
+ * 拒绝即丢弃本次输入。
  */
 
 // 驻留批次来源（issue #41 覆盖语义）：renderConfirmPage 时记录，批次确认 /
@@ -414,23 +421,120 @@ async function importCsvFromFile(): Promise<void> {
 // 视同无驻留批（与确认卡可见性同一记忆边界）。
 let lastBatchSource: "collect" | "import" | "upload" | null = null;
 
+/** 确认卡内容快照（code-review #22）：上传失败分支用它恢复被收起的卡片。 */
+interface ConfirmCardSnapshot {
+  sourceKey: "sourceCollect" | "sourceImport" | "sourceUpload";
+  total: number;
+  newCount: number;
+  meta?: string;
+}
+
+// 最近一次确认卡快照：renderConfirmPage 时记录，批次确认 / 取消后清空
+// （此时批次已消费，恢复旧卡反而错误）。上传失败分支恢复用——SW 整批拒绝
+// 时旧 pendingBatch 仍驻留内存，卡片已撤会让它成孤儿（无法确认/取消、
+// badge "?" 常驻）。
+let lastConfirmCard: ConfirmCardSnapshot | null = null;
+
 // 上传进行中防重入（issue #41）：期间忽略画布新的点击/拖放输入。
+// 覆盖确认条可见期间同样置 true（防并发新输入），关闭时复位。
 let isUploading = false;
 
 /**
- * 上传前的覆盖闸门（决议 A5）：卡片可见且有驻留批时——来源 upload 直接
- * 放行（成功后提示「已替换」）；来源 collect/import 弹 confirm 询问，
- * 用户拒绝则中止上传。
+ * 上传前的覆盖闸门（决议 A5；code-review P1 改 requestOverwriteGate 一次
+ * 返回两值，消掉「gate 放行后、hideConfirmPage 前取值」的隐式时序陷阱）：
+ * - 无驻留批（lastBatchSource === null，即 popup 认为没有驻留批）：放行；
+ * - upload 驻留批：静默替换，replacing=true（确认卡内提示「已替换」）；
+ * - collect/import 驻留批：allowed=false → 弹内联确认条。
+ * 判定依据从确认卡可见性改为 lastBatchSource（驻留记忆本身）：collect /
+ * 上传失败路径 hideConfirmPage 不清 lastBatchSource——SW 内存里的批次仍
+ * 驻留，卡片可见性判定会静默越过 confirm。
  */
-function gateOverwrite(): boolean {
-  if (!isRevealOpen(confirmSection)) return true; // 无驻留批：直接放行
-  if (lastBatchSource === "upload") return true; // 上传覆盖上传：静默，成功后提示
-  return window.confirm(t("uploadConfirmOverwrite"));
+function requestOverwriteGate(): { allowed: boolean; replacing: boolean } {
+  if (lastBatchSource === null) return { allowed: true, replacing: false };
+  if (lastBatchSource === "upload") return { allowed: true, replacing: true };
+  return { allowed: false, replacing: false };
 }
 
-/** 本次上传是否将替换上一批上传文件（gate 放行后、hideConfirmPage 前取值）。 */
-function isReplacingUpload(): boolean {
-  return isRevealOpen(confirmSection) && lastBatchSource === "upload";
+// ── 覆盖确认条（code-review P0）：window.confirm 的内联替代 ──────────────
+
+/** 待上传上下文：覆盖确认通过后要继续执行的作业（闭包捕获本次输入）。 */
+let pendingOverwriteJob: (() => Promise<void>) | null = null;
+
+/** 显示确认条并暂存作业：期间 isUploading=true 挡新输入；accept 按钮落焦。 */
+function showOverwriteAsk(job: () => Promise<void>): void {
+  pendingOverwriteJob = job;
+  isUploading = true;
+  if (overwriteAskEl) overwriteAskEl.hidden = false;
+  overwriteAcceptButton?.focus();
+}
+
+/** 关闭确认条并丢弃暂存作业（dismiss / Esc / 上传收尾共用），复位 isUploading。 */
+function hideOverwriteAsk(): void {
+  const hadFocus = overwriteAskEl?.contains(document.activeElement) ?? false;
+  pendingOverwriteJob = null;
+  if (overwriteAskEl) overwriteAskEl.hidden = true;
+  isUploading = false; // 复位防重入：accept 路径不经此函数（自行保持 true 到作业收尾）
+  if (hadFocus) uploadCanvas?.focus(); // 焦点回收：回到上传入口（同 hideConfirmPage 先例）
+}
+
+overwriteAcceptButton?.addEventListener("click", () => {
+  const job = pendingOverwriteJob;
+  if (!job) return;
+  // 收条但不复位 isUploading：上传仍在进行，作业的 withUploadGuard finally 复位
+  pendingOverwriteJob = null;
+  if (overwriteAskEl) overwriteAskEl.hidden = true;
+  void job();
+});
+
+overwriteDismissButton?.addEventListener("click", () => {
+  hideOverwriteAsk(); // 丢弃本次输入：什么都不发生
+});
+
+// Esc 丢弃（同确认卡 Esc=取消的先例）：accept 落焦时 Esc 落到本监听器
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && overwriteAskEl && !overwriteAskEl.hidden) {
+    event.preventDefault();
+    hideOverwriteAsk();
+  }
+});
+
+/**
+ * 上传作业包装：isUploading 防重入置位 + 三入口统一顶层兜底（code-review
+ * P1：意外异常不再变成 void 调用的 unhandled rejection、用户零反馈）+
+ * 收尾一律复位确认条（上传开始后确认条必须隐藏；暂存作业被异常打断时
+ * 一并复位）。
+ */
+function withUploadGuard(job: () => Promise<void>): () => Promise<void> {
+  return async () => {
+    isUploading = true;
+    try {
+      await job();
+    } catch {
+      renderStatusLine(statusEl, t("uploadUnexpectedError"), "error");
+    } finally {
+      hideOverwriteAsk();
+      isUploading = false;
+    }
+  };
+}
+
+/**
+ * 上传入口统一分流（三入口共用）：isUploading 防重入 → 覆盖闸门 →
+ * - 放行：立即执行作业（withUploadGuard 包裹）；
+ * - collect/import 驻留批：不执行上传，暂存作业并显示内联确认条。
+ * replacing 在闸门判定时一并取值注入作业（accept 路径恒 false——需要确认
+ * 的必然是 collect/import 驻留批，不存在「替换上传批」的确认形态）。
+ */
+async function dispatchUpload(
+  job: (replacing: boolean) => Promise<void>,
+): Promise<void> {
+  if (isUploading) return; // 上传进行中 / 确认条待决：防重入
+  const gate = requestOverwriteGate();
+  if (!gate.allowed) {
+    showOverwriteAsk(withUploadGuard(() => job(false)));
+    return;
+  }
+  await withUploadGuard(() => job(gate.replacing))();
 }
 
 /**
@@ -449,137 +553,129 @@ function renderUploadSummary(
   return t3("uploadSummaryIgnored", acceptedCount, ignoredCount, categories);
 }
 
-/** 上传批的公共尾段：SW 合并提取 → 确认卡；替换提示 / 收录摘要挂主状态行。 */
+/**
+ * 上传批的公共尾段（code-review #20 参数化：文件通道与粘贴文本通道共用一
+ * 份成功/失败尾部）：收卡 → 进行中状态行 → send() 发送 → 成功出确认卡
+ * （替换提示 / 收录摘要挂卡内 meta——状态行 info 态在卡片展开期间被 D 互斥
+ * 隐藏，两段都在时以「·」并置）/ 失败恢复确认卡 + 错误状态行。
+ */
 async function runUploadBatch(
-  parts: { name: string; text: string }[],
+  send: () => Promise<UploadFileOutcome>,
+  collectingStatus: string,
   meta: { replaced: boolean; summary: string | null },
 ): Promise<void> {
   hideConfirmPage();
-  // 进行中状态行（issue #38）：单文件带文件名；多文件整批带文件数
-  renderStatusLine(
-    statusEl,
-    parts.length > 1
-      ? t1("uploadCollectingFiles", parts.length)
-      : t1("uploadCollectingFile", parts[0]?.name ?? ""),
-  );
-  const outcome = await uploadFile(chromeSwChannel, parts);
+  renderStatusLine(statusEl, collectingStatus);
+  const outcome = await send();
   if (outcome.ok) {
     // 批次已驻留 SW 内存：确认卡即成功反馈（措辞用「上传采集」）
-    renderConfirmPage("sourceUpload", outcome.total, outcome.newCount);
-    // 替换提示 / 收录摘要走主状态行；两段都在时以「·」并置，互不吞并
     const notes = [meta.replaced ? t("uploadReplacedBatch") : null, meta.summary]
       .filter(Boolean)
       .join(" · ");
-    if (notes) renderStatusLine(statusEl, notes);
+    renderConfirmPage("sourceUpload", outcome.total, outcome.newCount, notes || undefined);
   } else {
+    // 失败恢复确认卡（code-review #22）：开头 hideConfirmPage 已把卡片撤下，
+    // 而 SW 整批拒绝时旧 pendingBatch 仍驻留内存——不恢复就成孤儿（无法确认/
+    // 取消、badge "?" 常驻）。用快照重渲染恢复是正确语义；若失败源于
+    // sendMessage 断连（批次实际已丢），恢复后的确认会得到 SW 的明确错误
+    //（no-pending-batch），可接受边界。
+    const snapshot = lastConfirmCard;
+    if (snapshot) {
+      renderConfirmPage(
+        snapshot.sourceKey,
+        snapshot.total,
+        snapshot.newCount,
+        snapshot.meta,
+      );
+    }
     renderStatusLine(statusEl, t1("uploadFailed", outcome.error), "error");
   }
 }
 
-/** 画布点击（或 Enter/Space）：覆盖闸门 → 多选选择器 → 整批上传。 */
-async function uploadFromCanvas(): Promise<void> {
-  if (isUploading) return; // 上传进行中防重入
-  if (!gateOverwrite()) return; // collect/import 驻留批被拒：中止
-  const replaced = isReplacingUpload();
-  isUploading = true;
-  try {
-    const picked = await browserCsvFileGateway.pickUploadFiles();
-    if (!picked) return; // 用户取消：静默
-    await runUploadBatch(picked, { replaced, summary: null });
-  } finally {
-    isUploading = false;
+/**
+ * File[] 闸门管线（三入口统一，issue #41 决议 A6/A7）：白名单过滤 + 双上限
+ * 整批校验（超限 = 整批拒绝 + 明确反馈，绝不静默截断）+ 摘要 + accepted=0
+ * 早退 + 读取 → runUploadBatch。点击 / 拖放 / 粘贴文件在此汇合，语义完全一致。
+ */
+async function processUploadFiles(files: File[], replacing: boolean): Promise<void> {
+  const gate = filterUploadFiles(files, UPLOAD_LIMITS);
+  if (gate.limitError) {
+    // 整批拒绝：上限（常量）/ 本批量（进位 MB，不低估）都换算进反馈
+    const mb = (bytes: number): number => Math.ceil(bytes / (1024 * 1024));
+    renderStatusLine(
+      statusEl,
+      t4(
+        "uploadLimitExceeded",
+        UPLOAD_LIMITS.maxFiles,
+        UPLOAD_LIMITS.maxTotalBytes / (1024 * 1024),
+        gate.limitError.count,
+        mb(gate.limitError.bytes),
+      ),
+      "error",
+    );
+    return;
   }
+  const summary = renderUploadSummary(
+    gate.accepted.length,
+    files.length - gate.accepted.length,
+    gate.ignoredSuffixes,
+  );
+  if (gate.accepted.length === 0) {
+    // 过滤后一无所剩：只报摘要，不发消息、不出确认卡（三入口同语义）
+    renderStatusLine(statusEl, summary);
+    return;
+  }
+  const parts = await browserCsvFileGateway.readUploadFiles(gate.accepted);
+  if (!parts) return; // 任一文件读取失败：整批静默中止（三入口同语义）
+  await runUploadBatch(
+    () => uploadFile(chromeSwChannel, parts),
+    // 进行中状态行（issue #38）：单文件带文件名；多文件整批带文件数
+    parts.length > 1
+      ? t1("uploadCollectingFiles", parts.length)
+      : t1("uploadCollectingFile", parts[0]?.name ?? ""),
+    { replaced: replacing, summary },
+  );
 }
 
-/** 画布拖放：递归收集 → 白名单过滤 + 双上限 → 读取 → 整批上传。 */
-async function uploadFromDrop(dataTransfer: DataTransfer): Promise<void> {
-  if (isUploading) return; // 上传进行中防重入
-  if (!gateOverwrite()) return; // collect/import 驻留批被拒：中止
-  const replaced = isReplacingUpload();
-  isUploading = true;
-  try {
-    const files = await collectDroppedFiles(dataTransfer);
-    if (files.length === 0) return; // 拖入的既无文件也无 entry：静默
-    const gate = filterUploadFiles(files, UPLOAD_LIMITS);
-    if (gate.limitError) {
-      // 整批拒绝：上限（常量）/ 本批量（进位 MB，不低估）都换算进反馈
-      const mb = (bytes: number): number => Math.ceil(bytes / (1024 * 1024));
-      renderStatusLine(
-        statusEl,
-        t4(
-          "uploadLimitExceeded",
-          UPLOAD_LIMITS.maxFiles,
-          UPLOAD_LIMITS.maxTotalBytes / (1024 * 1024),
-          gate.limitError.count,
-          mb(gate.limitError.bytes),
-        ),
-        "error",
-      );
-      return;
-    }
-    const summary = renderUploadSummary(
-      gate.accepted.length,
-      files.length - gate.accepted.length,
-      gate.ignoredSuffixes,
-    );
-    if (gate.accepted.length === 0) {
-      // 过滤后一无所剩：只报摘要，不发消息、不出确认卡
-      renderStatusLine(statusEl, summary);
-      return;
-    }
-    const parts = await browserCsvFileGateway.readUploadFiles(gate.accepted);
-    if (!parts) return; // 任一文件读取失败：整批静默中止（与选择器路径同语义）
-    await runUploadBatch(parts, { replaced, summary });
-  } finally {
-    isUploading = false;
-  }
+/** 画布点击（或 Enter/Space）作业：多选选择器 → 与拖放同一条闸门管线。 */
+async function performUploadFromCanvas(replacing: boolean): Promise<void> {
+  const picked = await browserCsvFileGateway.pickUploadFiles();
+  if (!picked) return; // 用户取消：静默
+  await processUploadFiles(picked, replacing);
+}
+
+/** 画布拖放作业：collectDroppedFiles 已在监听器内同步起链，这里续其后段。 */
+async function performUploadFromDrop(
+  filesPromise: Promise<File[]>,
+  replacing: boolean,
+): Promise<void> {
+  const files = await filesPromise;
+  if (files.length === 0) return; // 拖入的既无文件也无 entry：静默
+  await processUploadFiles(files, replacing);
 }
 
 /**
- * 画布粘贴（issue #42 v1.1-T5 决议 A3/A4）：画布的第三种输入手势（是上传
- * 目标的一部分，不叫「剪贴板采集」）。
- * - 文件通道（决议 A4）：clipboardData.files 非空 → 装回 DataTransfer 走
- *   uploadFromDrop 同管线（白名单过滤 + 计数摘要 + 双上限，与拖放完全同
- *   语义）；
- * - 文本通道（决议 A3）：text/plain trim 后非空 → 无文件名/后缀概念、不过
- *   白名单，经 UPLOAD_TEXT 直进 SW 文本提取管线 → 待确认批次（确认卡措辞
- *   仍是「上传采集」）；
- * - 两者皆空：静默忽略。粘贴目录技术不可行（OS 剪贴板不传目录内容），
- *   画布辅行文案引导「文件夹请拖放」。
- * 覆盖语义与 T4 一致：粘贴也是再次输入——upload 驻留批静默替换 + 提示；
- * collect/import 驻留批 window.confirm（gateOverwrite），拒绝即中止。
+ * 画布粘贴作业（issue #42 v1.1-T5 决议 A3/A4）：
+ * - 文件通道：与拖放同一条闸门管线（白名单过滤 + 计数摘要 + 双上限）；
+ * - 文本通道：无文件名/后缀概念、不过白名单，经 UPLOAD_TEXT 直进 SW 文本
+ *   提取管线（确认卡措辞仍是「上传采集」）。
  */
-async function uploadFromPaste(snapshot: { files: File[]; text: string }): Promise<void> {
+async function performUploadFromPaste(
+  snapshot: { files: File[]; text: string },
+  replacing: boolean,
+): Promise<void> {
   if (snapshot.files.length > 0) {
-    // 文件通道：装回 DataTransfer 复用拖放管线（含 isUploading 防重入与
-    // gateOverwrite 覆盖闸门）；剪贴板文件没有 webkitGetAsEntry 树，
-    // collectDroppedFiles 自然走 dataTransfer.files 顶层回退。
-    const dt = new DataTransfer();
-    for (const file of snapshot.files) dt.items.add(file);
-    await uploadFromDrop(dt);
+    await processUploadFiles(snapshot.files, replacing);
     return;
   }
-  if (!snapshot.text) return; // 既无文件也无文本：静默忽略
-  if (isUploading) return; // 上传进行中防重入（同两条拖放/点选通道）
-  if (!gateOverwrite()) return; // collect/import 驻留批被拒：中止
-  const replaced = isReplacingUpload();
-  isUploading = true;
-  try {
-    hideConfirmPage();
-    renderStatusLine(statusEl, t("uploadCollectingPasted"));
-    const outcome = await uploadPastedText(chromeSwChannel, snapshot.text);
-    if (outcome.ok) {
-      // 批次已驻留 SW 内存：确认卡即成功反馈（措辞用「上传采集」）；
-      // renderConfirmPage 记录 lastBatchSource="upload"，后续粘贴/拖放/点选
-      // 的覆盖判定与 T4 完全一致，无需额外代码。
-      renderConfirmPage("sourceUpload", outcome.total, outcome.newCount);
-      if (replaced) renderStatusLine(statusEl, t("uploadReplacedBatch"));
-    } else {
-      renderStatusLine(statusEl, t1("uploadFailed", outcome.error), "error");
-    }
-  } finally {
-    isUploading = false;
-  }
+  // 文本通道（决议 A3）：与文件通道共用 runUploadBatch 尾段（code-review
+  // #20）——批次驻留后 renderConfirmPage 记录 lastBatchSource="upload"，
+  // 后续覆盖判定与拖放/点选一致
+  await runUploadBatch(
+    () => uploadPastedText(chromeSwChannel, snapshot.text),
+    t("uploadCollectingPasted"),
+    { replaced: replacing, summary: null },
+  );
 }
 
 async function refreshCounts(): Promise<void> {
@@ -612,12 +708,15 @@ async function checkLogin(): Promise<void> {
 /**
  * 确认页：展示待确认批次的总数 / 新词数，并挂起确认 / 取消按钮。
  * sourceKey 仅影响措辞（采集 / 导入 / 上传采集），计数语义与按钮行为完全一致（review S-3）。
+ * meta（可选，code-review P1）：上传批的替换提示 / 收录摘要，挂卡内
+ * confirm-meta——状态行在卡片展开期间被 D 互斥隐藏，meta 必须随卡呈现。
  * 同时记录驻留批次来源（issue #41 覆盖语义的判定依据）；确认 / 取消后由各自路径清空。
  */
 function renderConfirmPage(
   sourceKey: "sourceCollect" | "sourceImport" | "sourceUpload",
   total: number,
   newCount: number,
+  meta?: string,
 ): void {
   lastBatchSource =
     sourceKey === "sourceCollect"
@@ -625,9 +724,14 @@ function renderConfirmPage(
       : sourceKey === "sourceImport"
         ? "import"
         : "upload";
+  lastConfirmCard = { sourceKey, total, newCount, meta }; // #22 失败恢复用快照
   if (confirmSummaryEl) {
     const source = t(sourceKey);
     confirmSummaryEl.textContent = t3("confirmSummary", source, total, newCount);
+  }
+  if (confirmMetaEl) {
+    confirmMetaEl.textContent = meta ?? "";
+    confirmMetaEl.hidden = !meta;
   }
   setRevealOpen(confirmSection, true);
   if (confirmPushButton) {
@@ -677,7 +781,10 @@ async function confirmPush(): Promise<void> {
   try {
     const outcome = await confirmCollected(chromeSwChannel);
     if (outcome.ok) {
-      lastBatchSource = null; // 批次已消费：驻留来源记忆清空（issue #41）
+      // 批次已消费：驻留来源记忆与卡片快照一并清空（issue #41；code-review
+      // #22——快照残留会让后续失败分支错误恢复已消费的旧卡）
+      lastBatchSource = null;
+      lastConfirmCard = null;
       renderCounts(outcome.counts.total, outcome.counts.pending);
       renderStatusLine(statusEl, t("confirmedPushStarted"));
       hideConfirmPage();
@@ -696,7 +803,9 @@ async function confirmPush(): Promise<void> {
 /** 取消：丢弃待确认批次，什么都不发生（词库、推送状态不变）。 */
 async function cancelCollect(): Promise<void> {
   await discardCollected(chromeSwChannel);
-  lastBatchSource = null; // 批次已丢弃：驻留来源记忆清空（issue #41）
+  // 批次已丢弃：驻留来源记忆与卡片快照一并清空（issue #41；code-review #22）
+  lastBatchSource = null;
+  lastConfirmCard = null;
   hideConfirmPage();
   renderStatusLine(statusEl, t("cancelled"));
 }
@@ -749,13 +858,13 @@ if (uploadCanvas) {
   uploadCanvas.setAttribute("aria-label", t("uploadCanvasHint"));
 
   uploadCanvas.addEventListener("click", () => {
-    void uploadFromCanvas();
+    void dispatchUpload((replacing) => performUploadFromCanvas(replacing));
   });
 
   uploadCanvas.addEventListener("keydown", (event) => {
     if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
-      void uploadFromCanvas();
+      void dispatchUpload((replacing) => performUploadFromCanvas(replacing));
     }
   });
 
@@ -781,22 +890,44 @@ if (uploadCanvas) {
     event.preventDefault();
     dragDepth = 0;
     setDragging(false);
-    if (event.dataTransfer) void uploadFromDrop(event.dataTransfer);
+    if (!event.dataTransfer) return;
+    // webkitGetAsEntry / dataTransfer.files 必须在监听器内同步摘取
+    //（collectDroppedFiles 首行同步快照）：先起收集 promise，再交给
+    // 覆盖闸门 / 确认条流程——确认条 accept 是后续事件，届时 drag data
+    // store 已释放，不能再等 accept 后才读 dataTransfer。
+    const filesPromise = collectDroppedFiles(event.dataTransfer);
+    void dispatchUpload((replacing) => performUploadFromDrop(filesPromise, replacing));
   });
 
   // 粘贴（issue #42）：画布 tabindex=0 聚焦时收到 ⌘V。paste 的 clipboardData
   // 在事件处理让出事件循环后进入保护态（getData 返回空串），文本与文件清单
   // 必须在本监听器内同步摘下（同 drop 的 webkitGetAsEntry 必须同步调用的
-  // 先例），再交给异步的 uploadFromPaste。
+  // 先例），再交给覆盖闸门 / 确认条流程。
   uploadCanvas.addEventListener("paste", (event) => {
     event.preventDefault();
     const clipboard = event.clipboardData;
-    void uploadFromPaste({
+    const snapshot = {
       files: Array.from(clipboard?.files ?? []),
       text: (clipboard?.getData("text/plain") ?? "").trim(),
-    });
+    };
+    // 两者皆空：静默忽略（不进闸门，避免对空输入弹覆盖确认条）。
+    // 粘贴目录技术不可行（OS 剪贴板不传目录内容），辅行文案引导「文件夹请拖放」。
+    if (snapshot.files.length === 0 && !snapshot.text) return;
+    void dispatchUpload((replacing) => performUploadFromPaste(snapshot, replacing));
   });
 }
+
+// 页面级拖放兜底（code-review P1）：文件拖偏画布、落到页面其它区域时，
+// drop 的默认行为会让 popup 导航到 file:// URL（整页被文件内容替换、扩展
+// 弹窗报废）。在 document 级拦掉 dragover / drop 的默认行为——画布内处理
+// 不受影响（画布是 drop 目标，事件先在画布监听器走完同一 preventDefault，
+// 这里只兜住画布之外的落点）。
+document.addEventListener("dragover", (event) => {
+  event.preventDefault();
+});
+document.addEventListener("drop", (event) => {
+  event.preventDefault();
+});
 
 exportLogButton?.addEventListener("click", () => {
   void exportLog();
@@ -847,11 +978,17 @@ void refreshPushStatus().then(startPushStatusPolling);
  *   标记路径，不受标记影响；标记只在右键菜单路径写入、popup 一次性消费。
  */
 async function applyOpenReason(): Promise<void> {
-  const reason = await consumeOpenReason(chromeOpenReasonSession);
-  if (reason === "collect") {
-    void collect();
-  } else if (reason === "upload") {
-    uploadCanvas?.focus();
+  try {
+    const reason = await consumeOpenReason(chromeOpenReasonSession);
+    if (reason === "collect") {
+      void collect();
+    } else if (reason === "upload") {
+      uploadCanvas?.focus();
+    }
+  } catch {
+    // storage.session 读/清失败（code-review 补充）：静默降级默认态——与 SW
+    // 侧写失败降级对称；否则 consumeOpenReason 的 reject 会成为启动期
+    // unhandled rejection（void 调用无人兜底）
   }
 }
 void applyOpenReason();

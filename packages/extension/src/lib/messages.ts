@@ -87,6 +87,22 @@ export const UPLOAD_LIMITS = {
   maxTotalBytes: 20 * 1024 * 1024,
 } as const;
 
+/** 无后缀文件（含 .gitignore 式点开头隐藏文件）的类别占位：空串排序最前，展示层转 i18n 文案。 */
+export const NO_SUFFIX = "";
+
+/**
+ * 文件名后缀小写化；点开头（".gitignore" 式隐藏文件，含 ".txt"）/ 以点结尾 /
+ * 无点一律视为无后缀。popup 拖放过滤（drop-files.ts）与 SW 后缀校验
+ * （background-listener.ts）共用这一份实现，两层永不分歧（code-review P0：
+ * 此前 SW 侧用 lower.endsWith(".suffix") 判定，会把点开头的 ".txt" 误判为
+ * 合法后缀，与拖放过滤的 NO_SUFFIX 语义分歧）。
+ */
+export function suffixOf(name: string): string {
+  const dot = name.lastIndexOf(".");
+  if (dot <= 0 || dot === name.length - 1) return NO_SUFFIX;
+  return name.slice(dot + 1).toLowerCase();
+}
+
 export interface PushStatus {
   phase: "idle" | "running" | "paused" | "completed";
   total: number;
@@ -209,7 +225,7 @@ export interface UploadFileMessage {
  * 批次（与采集/导入/上传批次同形态），应答 `BatchPreview`；入库与推送仅由
  * `CONFIRM_COLLECTED` 触发。驻留即覆盖旧批次（单驻留语义），popup 侧覆盖
  * 闸门语义与拖放/点选一致（upload 驻留批静默替换，collect/import 驻留批
- * window.confirm）。粘贴的文件走 UPLOAD_FILE 通道（决议 A4，与拖放同语义），
+ * 内联确认条询问）。粘贴的文件走 UPLOAD_FILE 通道（决议 A4，与拖放同语义），
  * 不经本消息。
  */
 export interface UploadTextMessage {

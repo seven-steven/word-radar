@@ -5,8 +5,9 @@
  * download：stub URL.createObjectURL / revokeObjectURL 与 anchor.click，
  * 验证 Blob 类型、download 文件名与对象 URL 回收。
  * pickCsvText：手工构造 input 的 files 并派发 change / cancel 事件。
- * pickUploadFiles（issue #38 v1.1-T1）：多选整批返回数组；html/xml 文件
- * 经 htmlToVisibleText 预处理为纯文本。
+ * pickUploadFiles（issue #38 v1.1-T1；code-review P0 改回 File[]）：多选
+ * 整批返回 File 列表，不读文本不预处理。readUploadFiles：逐文件读文本 +
+ * html/xml 经 htmlToVisibleText 预处理为纯文本。
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { browserCsvFileGateway } from "../src/lib/csv-file.js";
@@ -99,7 +100,7 @@ describe("browserCsvFileGateway.pickCsvText", () => {
   });
 });
 
-describe("browserCsvFileGateway.pickUploadFiles（issue #24 验收修订；#38 多文件批）", () => {
+describe("browserCsvFileGateway.pickUploadFiles（issue #24 验收修订；#38 多文件批；code-review P0 改回 File[]）", () => {
   it("accept 过滤覆盖 UPLOAD_TEXT_SUFFIXES 全部后缀（与 SW 校验共用同一常量）", async () => {
     const getInput = trapFileInput();
 
@@ -116,7 +117,7 @@ describe("browserCsvFileGateway.pickUploadFiles（issue #24 验收修订；#38 �
     await expect(promise).resolves.toBeNull();
   });
 
-  it("多选：input.multiple 开启，选择多个文件按序返回数组（整批 = 一次采集）", async () => {
+  it("多选：input.multiple 开启，选择多个文件按序返回 File[]（不读文本不预处理）", async () => {
     const getInput = trapFileInput();
 
     const promise = browserCsvFileGateway.pickUploadFiles();
@@ -130,49 +131,9 @@ describe("browserCsvFileGateway.pickUploadFiles（issue #24 验收修订；#38 �
     Object.defineProperty(input, "files", { value: files });
     input.dispatchEvent(new Event("change"));
 
-    await expect(promise).resolves.toEqual([
-      { name: "a.txt", text: "run and" },
-      { name: "b.md", text: "jump" },
-    ]);
-  });
-
-  it("html 文件在 popup 侧预处理为纯文本：script/style 文本不进结果（issue #38 决议 A2）", async () => {
-    const getInput = trapFileInput();
-
-    const promise = browserCsvFileGateway.pickUploadFiles();
-    const input = getInput();
-    const html = [
-      "<html><head><style>.ghoststyle{color:red}</style></head><body>",
-      "<article><p>alpha bravo</p><script>var ghostToken = 1;</script></article>",
-      "</body></html>",
-    ].join("");
-    const file = new File([html], "page.html", { type: "text/html" });
-    Object.defineProperty(input, "files", { value: [file] });
-    input.dispatchEvent(new Event("change"));
-
-    const picked = await promise;
-    expect(picked).toHaveLength(1);
-    expect(picked?.[0]?.name).toBe("page.html");
-    expect(picked?.[0]?.text).toContain("alpha bravo");
-    expect(picked?.[0]?.text).not.toContain("ghostToken");
-    expect(picked?.[0]?.text).not.toContain("ghoststyle");
-  });
-
-  it("纯文本文件不经预处理，原样直读", async () => {
-    const getInput = trapFileInput();
-
-    const promise = browserCsvFileGateway.pickUploadFiles();
-    const input = getInput();
-    const file = new File(["<p>not processed</p>"], "notes.txt", {
-      type: "text/plain",
-    });
-    Object.defineProperty(input, "files", { value: [file] });
-    input.dispatchEvent(new Event("change"));
-
-    // .txt 不做 DOMParser 预处理：尖括号原文保留（闸门只对 .html/.xml）
-    await expect(promise).resolves.toEqual([
-      { name: "notes.txt", text: "<p>not processed</p>" },
-    ]);
+    // code-review P0：选完即回 File 对象，读取下沉到 readUploadFiles——
+    // 点击路径因此与拖放共享 filterUploadFiles 闸门（此前绕过白名单/双上限）
+    await expect(promise).resolves.toEqual(files);
   });
 
   it("用户取消选择时 resolve null", async () => {
@@ -182,5 +143,52 @@ describe("browserCsvFileGateway.pickUploadFiles（issue #24 验收修订；#38 �
     getInput().dispatchEvent(new Event("cancel"));
 
     await expect(promise).resolves.toBeNull();
+  });
+});
+
+describe("browserCsvFileGateway.readUploadFiles（读取 + html/xml 预处理，code-review P0）", () => {
+  it("html 文件在 popup 侧预处理为纯文本：script/style 文本不进结果（issue #38 决议 A2）", async () => {
+    const html = [
+      "<html><head><style>.ghoststyle{color:red}</style></head><body>",
+      "<article><p>alpha bravo</p><script>var ghostToken = 1;</script></article>",
+      "</body></html>",
+    ].join("");
+    const file = new File([html], "page.html", { type: "text/html" });
+
+    const picked = await browserCsvFileGateway.readUploadFiles([file]);
+    expect(picked).toHaveLength(1);
+    expect(picked?.[0]?.name).toBe("page.html");
+    expect(picked?.[0]?.text).toContain("alpha bravo");
+    expect(picked?.[0]?.text).not.toContain("ghostToken");
+    expect(picked?.[0]?.text).not.toContain("ghoststyle");
+  });
+
+  it("纯文本文件不经预处理，原样直读", async () => {
+    const file = new File(["<p>not processed</p>"], "notes.txt", {
+      type: "text/plain",
+    });
+
+    // .txt 不做 DOMParser 预处理：尖括号原文保留（闸门只对 .html/.xml）
+    await expect(browserCsvFileGateway.readUploadFiles([file])).resolves.toEqual([
+      { name: "notes.txt", text: "<p>not processed</p>" },
+    ]);
+  });
+
+  it("任一文件读取失败 → 整批 resolve null（与既有失败语义一致）", async () => {
+    const ok = new File(["fine"], "ok.txt", { type: "text/plain" });
+    const bad = new File(["boom"], "bad.txt", { type: "text/plain" });
+    const original = FileReader.prototype.readAsText;
+    vi.spyOn(FileReader.prototype, "readAsText").mockImplementation(function (
+      this: FileReader,
+      blob: Blob,
+    ) {
+      if (blob === bad) {
+        // 模拟读取失败：派发 error 事件（readFileText 的 error 监听器 → null）
+        this.dispatchEvent(new Event("error"));
+        return;
+      }
+      return original.call(this, blob);
+    });
+    await expect(browserCsvFileGateway.readUploadFiles([ok, bad])).resolves.toBeNull();
   });
 });

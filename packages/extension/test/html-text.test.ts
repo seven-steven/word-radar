@@ -47,6 +47,22 @@ describe("htmlToVisibleText（issue #38）", () => {
     expect(htmlToVisibleText(html)).toContain("plainbodytoken");
   });
 
+  it("正文全在 pre：pre 回退兜底，不再提取 0 词（code-review P1，与网页采集同语义）", () => {
+    const html = "<body><pre>preticket gravitated through silent fjords</pre></body>";
+
+    const text = htmlToVisibleText(html);
+    expect(text).toContain("preticket");
+    expect(text).toContain("gravitated");
+  });
+
+  it("正文非空时 pre 仍被排除（代码块不采集，回退不改变正常路径）", () => {
+    const html = "<body><p>prosetoken visible</p><pre>codetoken ignored</pre></body>";
+
+    const text = htmlToVisibleText(html);
+    expect(text).toContain("prosetoken");
+    expect(text).not.toContain("codetoken");
+  });
+
   it("xml 字符串按 text/html 宽容解析：正文被提取、标签不残留", () => {
     const xml = "<note><to>xmltoken alpha</to><from>xmltoken bravo</from></note>";
 

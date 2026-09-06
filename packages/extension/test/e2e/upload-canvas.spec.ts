@@ -1,14 +1,16 @@
 /**
- * 上传画布 e2e（issue #41 v1.1-T4；issue #42 v1.1-T5 粘贴手势）：
+ * 上传画布 e2e（issue #41 v1.1-T4；issue #42 v1.1-T5 粘贴手势；code-review
+ * 返工：覆盖询问改内联确认条、上传 meta 移入确认卡）：
  * 拖放多文件合并单一确认批、非白名单后缀计数摘要、双上限整批拒绝、覆盖
- * 语义两条（collect/import 驻留批询问、upload 驻留批静默替换）、粘贴文本
- * 直进提取管线、粘贴文件同拖放语义（白名单过滤 + 计数摘要）。
+ * 语义两条（collect/import 驻留批内联确认条、upload 驻留批静默替换）、
+ * 粘贴文本直进提取管线、粘贴文件同拖放语义（白名单后缀计数摘要）。
  *
- * 已知边界：Playwright 合成 DataTransfer 无法产生 webkitGetAsEntry（浏览器
- * 限制），目录递归进不了 e2e——由 test/drop-files.test.ts 的 fake entry 树
- * 单测覆盖；本文件用 page.evaluate 构造 DataTransfer + File 派发 drop，
- * Chromium 里 items.add(file) 的 webkitGetAsEntry 返回真实 entry，文件
- * 拖放路径（含 entry 递归、白名单过滤、双上限）在此全链路验证。
+ * 已知边界（code-review P1 修正为实况）：Playwright 合成 DragEvent 的
+ * webkitGetAsEntry 恒 null（合成事件不产生 drag data store 的 entry），
+ * 全部 drop 用例走的是 dataTransfer.files 回退路径——e2e 覆盖「回退路径
+ * 全链路」（files 同步摘取 → 白名单过滤 → 双上限 → 读取 → SW 提取 →
+ * 确认卡）；entry 递归（readEntries 分批、回调式 file() 包 Promise）由
+ * test/drop-files.test.ts 的 fake entry 树单测覆盖（含回调式形态）。
  *
  * i18n（issue #28）：测试 Chromium 在 fixtures.ts 钉死 zh-CN locale，断言中文渲染。
  */
@@ -21,7 +23,8 @@ test.beforeEach(({ mockBbdc }) => {
 
 /**
  * 在上传画布上合成一次 drop：DataTransfer + File 构造后 dispatchEvent。
- * Chromium 里 webkitGetAsEntry 可用，popup 走的是与真实拖放同一递归路径。
+ * 合成事件的 webkitGetAsEntry 恒 null → popup 走 dataTransfer.files 回退；
+ * 与真实拖放共享其后的全部闸门管线（过滤/上限/读取/SW 提取）。
  */
 async function dropOnCanvas(
   page: Page,
@@ -70,16 +73,6 @@ async function pasteOnCanvas(
       }),
     );
   }, payload);
-}
-
-/** 记录并接受本页出现的所有 dialog（window.confirm）；seen() 供「无 dialog」断言。 */
-function trackDialogs(page: Page): { seen: () => boolean } {
-  let seen = false;
-  page.on("dialog", (dialog) => {
-    seen = true;
-    void dialog.accept();
-  });
-  return { seen: () => seen };
 }
 
 /**
@@ -164,12 +157,14 @@ test("drag-drop multiple files merges into ONE confirm batch (issue #41)", async
     { name: "drop-b.txt", text: "A diligent blacksmith forged bright iron.\n" },
   ]);
 
-  // 整批 = 一次采集：单一确认卡（「上传采集」措辞）+ 收录摘要（M=0 形态）
+  // 整批 = 一次采集：单一确认卡（「上传采集」措辞）+ 卡内收录摘要（M=0 形态；
+  // code-review P1：meta 移入确认卡，状态行在卡片展开期间被 D 互斥隐藏）
   await expect(page.getByTestId("confirm-summary")).toHaveText(
     /本次共计上传采集 \d+ 个单词，其中新词 \d+ 个/,
     { timeout: 10_000 },
   );
-  await expect(page.getByTestId("status")).toHaveText(/已收录 2 个文件/);
+  await expect(page.getByTestId("confirm-meta")).toBeVisible();
+  await expect(page.getByTestId("confirm-meta")).toHaveText(/已收录 2 个文件/);
   // 确认前：不落库、零网络请求（boot 的 check-login 恢复路径豁免，同 popup.spec）
   await expect(page.getByTestId("total")).toHaveText(String(totalBefore));
   expect(
@@ -199,7 +194,8 @@ test("drag-drop with non-whitelisted files shows the suffix summary and still co
     { name: "virus.exe", text: "binary" },
   ]);
 
-  await expect(page.getByTestId("status")).toHaveText(
+  // 摘要挂卡内 meta（code-review P1）：只报后缀类别（去重排序），不展开文件名
+  await expect(page.getByTestId("confirm-meta")).toHaveText(
     /已收录 2 个文件，忽略 3 个（\.exe \.png）/,
     { timeout: 10_000 },
   );
@@ -244,7 +240,7 @@ test("drag-drop exceeding the double limit rejects the WHOLE batch (issue #41)",
   await page.close();
 });
 
-test("upload over a resident collect batch asks before discarding (issue #41 决议 A5)", async ({
+test("upload over a resident collect batch asks via the inline bar (issue #41 决议 A5; code-review P0)", async ({
   extContext,
   popupUrl,
   fixtureServer,
@@ -265,16 +261,33 @@ test("upload over a resident collect batch asks before discarding (issue #41 决
     { timeout: 15_000 },
   );
 
-  // 驻留批来源 collect → 拖放必须弹 confirm，接受后放行替换
-  const dialogs = trackDialogs(page);
+  // 驻留批来源 collect → 拖放弹内联确认条（window.confirm 在 action popup
+  // 不显示且恒 false，popup 会被直接关掉——code-review P0）
   await dropOnCanvas(page, [
     { name: "over-collect.txt", text: "The sardonic locksmith welded a rusty hinge.\n" },
   ]);
+  const ask = page.getByTestId("overwrite-ask");
+  await expect(ask).toBeVisible();
+
+  // dismiss 路径：丢弃本次上传——确认卡仍是旧 collect 批、状态行不变
+  await page.getByTestId("overwrite-dismiss").click();
+  await expect(ask).toBeHidden();
+  await expect(page.getByTestId("confirm-summary")).toHaveText(
+    /本次共计采集 \d+ 个单词，其中新词 \d+ 个/,
+  );
+  await expect(page.getByTestId("status")).toHaveText(/待确认/);
+
+  // accept 路径：再拖一次 → 「继续上传」→ 确认卡换成上传批
+  await dropOnCanvas(page, [
+    { name: "over-collect2.txt", text: "A jovial falconer traded ten brass bells.\n" },
+  ]);
+  await expect(ask).toBeVisible();
+  await page.getByTestId("overwrite-accept").click();
+  await expect(ask).toBeHidden();
   await expect(page.getByTestId("confirm-summary")).toHaveText(
     /本次共计上传采集 \d+ 个单词，其中新词 \d+ 个/,
     { timeout: 10_000 },
   );
-  expect(dialogs.seen()).toBe(true);
 
   await page.getByTestId("cancel-collect").click();
   await page.close();
@@ -298,20 +311,20 @@ test("re-upload over a resident upload batch replaces silently (issue #41 决议
     { timeout: 10_000 },
   );
 
-  // 第二次拖放：不询问（无 dialog）、状态行提示已替换、确认卡仍是上传批
-  const dialogs = trackDialogs(page);
+  // 第二次拖放：不询问、卡内 meta 提示已替换 + 收录摘要（code-review P1：
+  // meta 移入确认卡）、确认卡是替换后的新批
   await dropOnCanvas(page, [
     { name: "second.txt", text: "A nimble falconer whistled at dawn.\n" },
   ]);
-  // 确认卡是替换后的新批（单文件 → 文件数确定；提词数随管线，不钉死）
-  await expect(page.getByTestId("status")).toHaveText(
+  // 确认卡是替换后的新批（单文件 → 文件数确定；提词数随管线，不钉死）；
+  // 替换提示 + 摘要挂卡内 meta（code-review P1）
+  await expect(page.getByTestId("confirm-meta")).toHaveText(
     /已替换上一批上传文件 · 已收录 1 个文件/,
     { timeout: 10_000 },
   );
   await expect(page.getByTestId("confirm-summary")).toHaveText(
     /本次共计上传采集 \d+ 个单词，其中新词 \d+ 个/,
   );
-  expect(dialogs.seen()).toBe(false);
 
   await page.getByTestId("cancel-collect").click();
   await page.close();
@@ -358,7 +371,8 @@ test("pasted files go through the same whitelist filter and summary as drop (iss
   await page.goto(popupUrl);
   await waitPopupReady(page);
 
-  // 粘贴文件通道：与拖放完全同语义——白名单过滤 + 计数摘要（1 收 1 忽）
+  // 粘贴文件通道：与拖放完全同语义——白名单过滤 + 计数摘要（1 收 1 忽）；
+  // 摘要挂卡内 meta（code-review P1）
   await pasteOnCanvas(page, {
     files: [
       { name: "paste.txt", text: "A whimsical tobacconist shuffled ten envelopes.\n" },
@@ -366,7 +380,7 @@ test("pasted files go through the same whitelist filter and summary as drop (iss
     ],
   });
 
-  await expect(page.getByTestId("status")).toHaveText(
+  await expect(page.getByTestId("confirm-meta")).toHaveText(
     /已收录 1 个文件，忽略 1 个（\.png）/,
     { timeout: 10_000 },
   );
@@ -377,4 +391,65 @@ test("pasted files go through the same whitelist filter and summary as drop (iss
 
   await page.getByTestId("cancel-collect").click();
   await page.close();
+});
+
+test("failed upload restores the resident confirm card (code-review #22)", async ({
+  extContext,
+  popupUrl,
+  fixtureServer,
+}) => {
+  const article = await extContext.newPage();
+  await article.goto(`${fixtureServer.url}/confirm-gate.html`);
+  await article.waitForTimeout(500); // content script document_idle 注入余量
+
+  const page = await extContext.newPage();
+  await page.goto(popupUrl);
+  await waitPopupReady(page);
+
+  // 制造 collect 驻留批（同覆盖确认用例的制备段）
+  await article.bringToFront();
+  await page.getByTestId("collect").click();
+  await expect(page.getByTestId("confirm-summary")).toHaveText(
+    /本次共计采集 \d+ 个单词，其中新词 \d+ 个/,
+    { timeout: 15_000 },
+  );
+
+  // 模拟 SW 整批拒绝：chromeSwChannel 在调用时动态解析
+  // chrome.runtime.sendMessage，页面级覆写即可拦截 UPLOAD_FILE 应答。
+  // 覆写只活在本用例的页面里（页面关闭即失效），不泄漏给其它用例。
+  await page.evaluate(() => {
+    const runtime = chrome.runtime as unknown as {
+      sendMessage: (...args: unknown[]) => Promise<unknown>;
+    };
+    const original = runtime.sendMessage.bind(runtime);
+    runtime.sendMessage = (...args: unknown[]) => {
+      const message = args[0] as { type?: string } | undefined;
+      if (message?.type === "UPLOAD_FILE") {
+        return Promise.resolve({ ok: false, error: "e2e-simulated-rejection" });
+      }
+      return original(...args);
+    };
+  });
+
+  // collect 驻留批 → 拖放先弹内联确认条 → accept 后上传被拒
+  await dropOnCanvas(page, [
+    { name: "orphan.txt", text: "The bwazi falconer carved ten zebra bells.\n" },
+  ]);
+  await expect(page.getByTestId("overwrite-ask")).toBeVisible();
+  await page.getByTestId("overwrite-accept").click();
+
+  // 失败反馈（error 豁免恒可见）+ 确认卡恢复为旧 collect 批（批次未成孤儿）
+  await expect(page.getByTestId("status")).toHaveText(
+    /上传采集失败：e2e-simulated-rejection/,
+    { timeout: 10_000 },
+  );
+  await expect(page.getByTestId("confirm-summary")).toHaveText(
+    /本次共计采集 \d+ 个单词，其中新词 \d+ 个/,
+  );
+
+  // 恢复出的卡片可正常取消（丢弃驻留批，闭环）
+  await page.getByTestId("cancel-collect").click();
+  await expect(page.getByTestId("confirm-section")).toBeHidden();
+  await page.close();
+  await article.close();
 });

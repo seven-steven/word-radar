@@ -44,6 +44,29 @@ export async function waitCountsLoaded(
 }
 
 /**
+ * 排空持久 context 的共享推送循环（popup.spec 4 份拷贝合并，code-review
+ * Simplify）：确认入库的词进入待推池，若不等推送跑完就关页，下一个用例的
+ * popup boot（check-login 恢复路径）会替本用例发起推送——污染后续「确认前
+ * 零网络」断言。检查前置：先读 pending/phase，已排空立即返回（零睡眠）；
+ * 未排空则轮内重开 popup（reload 后 boot 重拉计数/推送状态，与驻页轮询
+ * 等价）+ 固定 3s 循环保底。结束时断言池已清、无推送在跑。
+ */
+export async function drainPendingPool(page: Page): Promise<void> {
+  for (let round = 0; round < 15; round += 1) {
+    const pending = Number(await page.getByTestId("pending").textContent());
+    const phase = await page.getByTestId("push-status").getAttribute("data-phase");
+    if (pending === 0 && phase !== "running") break;
+    if (pending > 0 && phase !== "running") {
+      await page.getByTestId("retry-push").click();
+    }
+    await page.reload();
+    await page.waitForTimeout(3_000);
+  }
+  await expect(page.getByTestId("pending")).toHaveText(/^0$/);
+  await expect(page.getByTestId("push-status")).not.toHaveAttribute("data-phase", "running");
+}
+
+/**
  * e2e 专用扩展目录：复制 dist 并给 host_permissions 加上 fixture 服务与
  * raw.githubusercontent.com（issue #14 后采集主路径是 executeScript；真实
  * 使用中 popup 由 action 点击打开，activeTab 即刻授权，但 e2e 把 popup 当

@@ -17,6 +17,7 @@ import {
   isWordsCollectedMessage,
   isRetryPushMessage,
   isGetPushStatusMessage,
+  suffixOf,
   UPLOAD_TEXT_SUFFIXES,
   type BatchPreview,
   type CheckLoginResponse,
@@ -405,11 +406,17 @@ async function handleUploadFile(
   | { entries: WordEntry[]; preview: BatchPreview }
   | { ok: false; error: string }
 > {
-  // 后缀校验前置：任何文件非法 → 整批拒绝（issue #38 验收：错误含文件名与清单）
+  // 空批防御（code-review P1）：popup 三入口已挡空数组，这里兜底——空批
+  // 穿透会在 SW 驻留 0 词批次（0 词确认卡 + "?" badge）。零写入零驻留。
+  if (files.length === 0) {
+    return { ok: false, error: "empty-upload-batch" };
+  }
+  // 后缀校验前置：任何文件非法 → 整批拒绝（issue #38 验收：错误含文件名与清单）。
+  // 后缀判定用 messages.ts 的 suffixOf，与 popup 拖放过滤同源（code-review P0：
+  // 此前 lower.endsWith(".suffix") 会把点开头的 ".txt" 误判为合法）。
+  const allow = new Set<string>(UPLOAD_TEXT_SUFFIXES);
   for (const file of files) {
-    const lower = file.name.toLowerCase();
-    const allowed = UPLOAD_TEXT_SUFFIXES.some((suffix) => lower.endsWith(`.${suffix}`));
-    if (!allowed) {
+    if (!allow.has(suffixOf(file.name))) {
       const list = UPLOAD_TEXT_SUFFIXES.map((suffix) => `.${suffix}`).join(" / ");
       return { ok: false, error: t2("errorOnlyTextFiles", file.name, list) };
     }

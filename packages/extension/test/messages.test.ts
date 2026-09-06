@@ -24,6 +24,8 @@ import {
   isUploadTextMessage,
   UPLOAD_FILE,
   UPLOAD_TEXT,
+  NO_SUFFIX,
+  suffixOf,
   isWordsCollectedMessage,
 } from "../src/lib/messages.js";
 
@@ -232,6 +234,24 @@ describe("isExportCsvResponse", () => {
     expect(isExportCsvResponse({ ok: true, csv: 1 })).toBe(false);
     expect(isExportCsvResponse({ ok: false })).toBe(false);
     expect(isExportCsvResponse("csv")).toBe(false);
+  });
+});
+
+describe("suffixOf（popup 拖放过滤与 SW 后缀校验的共用谓词，code-review P0）", () => {
+  it("常规后缀：小写化返回", () => {
+    expect(suffixOf("notes.TXT")).toBe("txt");
+    expect(suffixOf("a.b.markdown")).toBe("markdown");
+  });
+
+  it("点开头文件（含 .txt 形态）一律视为无后缀——两层校验自此永不分歧", () => {
+    expect(suffixOf(".txt")).toBe(NO_SUFFIX);
+    expect(suffixOf(".gitignore")).toBe(NO_SUFFIX);
+    expect(suffixOf(".hidden.md")).not.toBe(NO_SUFFIX); // 点在中间仍按后缀算
+  });
+
+  it("以点结尾 / 无点：无后缀", () => {
+    expect(suffixOf("readme.")).toBe(NO_SUFFIX);
+    expect(suffixOf("README")).toBe(NO_SUFFIX);
   });
 });
 

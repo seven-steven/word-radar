@@ -22,17 +22,18 @@ export interface CsvFileGateway {
   pickCsvText(): Promise<{ name: string; text: string } | null>;
   /**
    * 弹出文件选择器让用户挑若干份纯文本文件（issue #24 验收修订；
-   * issue #38 v1.1-T1 改多选：一次操作的全部文件整批算一次采集；
-   * issue #41 画布点击路径复用），读出全部文本后 resolve 数组；
-   * html/xml 在这里预处理为纯文本——DOMParser 是浏览器 API，SW 侧单测
-   * 不 mock DOM（spec Testing Decisions），预处理必须发生在 popup 侧
-   * （html-text.ts）。用户取消 / 未选文件 / 任一读取失败时 resolve null。
+   * issue #38 v1.1-T1 改多选：一次操作的全部文件整批算一次采集），
+   * 选完即以 File[] 返回——不读文本不预处理（code-review P0：读取与
+   * html/xml 预处理收在 readUploadFiles，让点击路径与拖放共享同一条
+   * 「File[] → filterUploadFiles → readUploadFiles」闸门管线，此前点击
+   * 路径绕过白名单/双上限）。用户取消 / 未选文件 resolve null。
    */
-  pickUploadFiles(): Promise<{ name: string; text: string }[] | null>;
+  pickUploadFiles(): Promise<File[] | null>;
   /**
-   * 读取拖放收集到的文件批（issue #41 画布 drop 路径）：FileReader 逐个
-   * readAsText + html/xml 预处理，语义与选择器路径完全一致——任一读取
-   * 失败 → 整批 resolve null。
+   * 读取文件批（issue #41 画布 drop 路径 + code-review P0 起点击路径同用）：
+   * FileReader 逐个 readAsText + html/xml 预处理（DOMParser 是浏览器 API，
+   * SW 侧单测不 mock DOM，预处理必须发生在 popup 侧 html-text.ts）。
+   * 任一读取失败 → 整批 resolve null。
    */
   readUploadFiles(
     files: File[],
@@ -59,11 +60,13 @@ export const browserCsvFileGateway: CsvFileGateway = {
 
   pickUploadFiles() {
     // 后缀清单与 SW 的 handleUploadFile 校验共用 UPLOAD_TEXT_SUFFIXES（17 项）；
-    // MIME 只是兜底（系统未必标注 text/markdown 等），真正的闸门在 SW 后缀校验。
+    // MIME 只是兜底（系统未必标注 text/markdown 等），真正的闸门在
+    // filterUploadFiles（白名单 + 双上限）与 SW 后缀校验。
     // 注意：这里的 .csv 是当纯文本提词（自然语言提取管线），不是结构化导入。
+    // 只回 File[]：读取与 html/xml 预处理在 readUploadFiles（popup.ts 统一管线）。
     return pickTextFiles(
       `${UPLOAD_TEXT_SUFFIXES.map((suffix) => `.${suffix}`).join(",")},text/plain,text/markdown,text/csv`,
-    ).then((picked) => (picked === null ? null : readUploadParts(picked)));
+    );
   },
 
   readUploadFiles(files) {
@@ -108,7 +111,8 @@ async function readUploadParts(
   });
 }
 
-/** 通用文本文件选择（单选）：accept 过滤 + FileReader 读文本，取消/失败 resolve null。 */
+/** 通用文本文件选择（单选）：accept 过滤 + FileReader 读文本，取消/失败 resolve null。
+ *  读取复用 readFileText（code-review Simplify：内联监听与之同型）。 */
 function pickTextFile(accept: string): Promise<{ name: string; text: string } | null> {
   return new Promise((resolve) => {
     const input = document.createElement("input");
@@ -120,12 +124,9 @@ function pickTextFile(accept: string): Promise<{ name: string; text: string } | 
         resolve(null);
         return;
       }
-      const reader = new FileReader();
-      reader.addEventListener("load", () => {
-        resolve({ name: file.name, text: String(reader.result ?? "") });
-      });
-      reader.addEventListener("error", () => resolve(null));
-      reader.readAsText(file);
+      void readFileText(file).then((text) =>
+        text === null ? resolve(null) : resolve({ name: file.name, text }),
+      );
     });
     // 用户在文件对话框点取消（Chrome 113+ 支持 cancel 事件）
     input.addEventListener("cancel", () => resolve(null));
