@@ -31,7 +31,7 @@ The semantic palette is unusual for a brand-marketing site: it ships the full Ap
 - **Canvas Cream** (`{colors.canvas}` — `#fdfcfc`): every page body, every card.
 - **Soft Surface** (`{colors.surface-soft}` — `#f8f7f7`): text-input default background, testimonial row fill, alternating row tint.
 - **Surface Card** (`{colors.surface-card}` — `#f1eeee`): install-snippet pill, disabled button fill, slightly-elevated section row.
-- **Surface Dark** (`{colors.surface-dark}` — `#201d1d`): the hero TUI mockup background and the dark CTA pill on the home page. Identical to `{colors.ink}` — the brand uses one near-black for both text and dark surfaces.
+- **Surface Dark** (`{colors.surface-dark}` — `#201d1d`): the hero TUI mockup background and the dark CTA pill on the home page. Identical to `{colors.ink}` — the brand uses one near-black for both text and dark surfaces. On small chrome surfaces (a browser-action popup), the single dark moment takes the form of a title bar — see The One Dark Moment Rule under Elevation & Depth.
 - **Surface Dark Elevated** (`{colors.surface-dark-elevated}` — `#302c2c`): the prompt-row inside the hero TUI mockup, one notch lighter than the dark surface itself.
 - **Hairline** (`{colors.hairline}` — `rgba(15,0,0,0.12)`): 1px section divider. The translucent warm tint matches the cream canvas's undertone.
 - **Hairline Strong** (`{colors.hairline-strong}` — `#646262`): tab strip's bottom rule and stronger inline divider.
@@ -47,18 +47,23 @@ The semantic palette is unusual for a brand-marketing site: it ships the full Ap
 
 ### Semantic
 
-The full Apple Human Interface Guidelines semantic ramp ships with the system. On marketing pages these colors appear primarily inside the hero TUI mockup as syntax-highlight stand-ins; in the in-product TUI they carry their conventional meaning.
+The full Apple Human Interface Guidelines semantic ramp ships with the system. On marketing pages these colors appear primarily inside the hero TUI mockup as syntax-highlight stand-ins; in the in-product TUI they carry their conventional meaning. On shipped browser surfaces they carry live status (login state, push progress, result counts) under The Text-Deepens Rule below.
 
 - **Accent** (`{colors.accent}` — `#007aff`): primary informational signal, in-product link color, TUI command highlight.
-- **Accent Hover** (`{colors.accent-hover}` — `#0056b3`): pressed informational link.
+- **Accent Hover** (`{colors.accent-hover}` — `#0056b3`): pressed informational link; the text-safe accent step on cream (6.88:1).
 - **Accent Active** (`{colors.accent-active}` — `#004085`): deeply-pressed informational state.
 - **Danger** (`{colors.danger}` — `#ff3b30`): destructive confirmation, error state.
-- **Danger Hover** (`{colors.danger-hover}` — `#d70015`): pressed destructive.
+- **Danger Hover** (`{colors.danger-hover}` — `#d70015`): pressed destructive; the text-safe danger step on cream (5.26:1).
 - **Danger Active** (`{colors.danger-active}` — `#a50011`): deeply-pressed destructive.
 - **Warning** (`{colors.warning}` — `#ff9f0a`): caution callouts.
 - **Warning Hover** (`{colors.warning-hover}` — `#cc7f08`): pressed caution.
 - **Warning Active** (`{colors.warning-active}` — `#995f06`): deeply-pressed caution.
 - **Success** (`{colors.success}` — `#30d158`): positive confirmation, in-TUI success indicator.
+- **Success Hover** (`{colors.success-hover}` — `#1a7f37`): pressed positive confirmation; the text-safe deepened green on the cream canvas (4.96:1, meets AA for the in-product surfaces that render status copy in success color at 14px).
+
+### Named Rules
+
+**The Text-Deepens Rule.** Semantic color used as *text* on the cream canvas always takes the deepened `-hover` step — `accent-hover` (6.88:1), `danger-hover` (5.26:1), `success-hover` (4.96:1), all ≥ AA at body sizes. The ramp originals fail 4.5:1 on cream (`accent` 3.92:1, `danger` 3.46:1, `success` 1.97:1) and are reserved for non-text carriers: status dots, progress fills, and markers. Text deepens; dots and bars keep the bright original.
 
 ## Typography
 
@@ -95,6 +100,8 @@ Berkeley Mono is a paid commercial font. Open-source substitutes that approximat
 
 When substituting, line-height behavior is preserved by keeping `lineHeight: 1.5` for body and `lineHeight: 2` for buttons — adjusting weight is rarely needed.
 
+The shipped product surface packages **JetBrains Mono** as the working substitute: Berkeley Mono is not redistributable, so the extension bundles JetBrains Mono as woff2 (latin subset, weights 400 / 500 / 700, no remote font URL) at the head of the documented fallback stack. The stack appends explicit CJK fallbacks (`PingFang SC`, `Microsoft YaHei`) ahead of the terminal `monospace` so Chinese UI copy stays in the monospaced register instead of dropping to a proportional system default.
+
 ## Layout
 
 ### Spacing System
@@ -124,6 +131,10 @@ Whitespace is structural and generous. Sections sit 96px apart with no decorativ
 | 3 — Inverted dark | `{colors.surface-dark}` fill | Hero TUI mockup, dark CTA pill — the system's only "elevated" surface uses color, not shadow |
 
 There are no drop shadows in the system. Nothing lifts, nothing floats. The only way an element registers as "above" another is the dark surface used in the hero mockup.
+
+### Named Rules
+
+**The One Dark Moment Rule.** Exactly one inverted-dark region per surface. On landing pages it is the full-bleed hero TUI mockup; on small chrome surfaces (a browser-action popup, a settings drawer) it is the title bar — a `{colors.surface-dark}` strip carrying wordmark and status metadata. Dark is never used for body content, and a surface never carries two dark regions.
 
 ### Decorative Depth
 
@@ -156,7 +167,7 @@ There is no photography. Visual elements are limited to:
 
 ## Components
 
-> **No hover states documented** per system policy. Each spec covers Default and Active/Pressed only.
+> Hover feedback, where it exists on interactive surfaces, is a color-only shift inside the existing gray ladder (180ms ease-out — see Motion); it never adds lift, shadow, or scale. Component specs below cover Default and Active/Pressed.
 
 ### Buttons
 
@@ -268,17 +279,33 @@ There is no photography. Visual elements are limited to:
 
 - `{colors.ink}` text with underline. The brand's only link affordance — even links inside body paragraphs use ink color rather than `{colors.accent}` blue. Apple Blue is reserved for the in-product TUI.
 
+### Data Rows
+
+**`count-row`** — the man-page data row (`label ······ value`)
+
+- Background `{colors.canvas}`, rounded `{rounded.none}`, no border. Label at 14px in `{colors.mute}` at left; value in ink at `{typography.body-strong}` with tabular numerals at right.
+- A dot leader spans the middle: a 1px dotted `{colors.ash}` rule on a flex-filling span, hung on the text baseline so it reads as leader dots, not an underline.
+- When a live value changes it flashes `{colors.accent}` → ink over one 180ms beat; the initial load does not flash. Tabular numerals keep digits from jittering as counts tick.
+
+### Browser Surface
+
+Chrome-level rules for browser-rendered product surfaces:
+
+- **Selection inverts, never highlights:** `::selection` is `{colors.ink}` fill with `{colors.canvas}` text — selected copy looks stamped in the system's own ink, not highlighted in OS blue.
+- **The scrollbar joins the gray ladder:** 8px wide, `{colors.hairline-strong}` thumb, transparent track. No default OS chrome, no accent-colored thumb.
+
 ## Do's and Don'ts
 
 ### Do
 
 - Render every text role in Berkeley Mono. The single-font decision is the entire identity.
 - Keep `{colors.canvas}` (`#fdfcfc`) as the only body background. Don't introduce gray section bands.
-- Use ASCII bracket markers (`[+]`, `[-]`, `[x]`, `+`, `−`) as bullets, toggles, and section glyphs. They are the brand's only iconography.
-- Anchor the dark `{component.hero-tui-mockup}` exactly once per landing page as the hero centerpiece. Never use the dark surface for body content.
+- Use ASCII bracket markers (`[+]`, `[-]`, `[x]`, `+`, `−`) as bullets, toggles, and section glyphs. They are the brand's only iconography. Disclosure toggles render `[+]` (closed) / `[-]` (open) in a fixed-width 3ch slot so opening never shifts the label.
+- Anchor the dark `{component.hero-tui-mockup}` exactly once per landing page as the hero centerpiece. Never use the dark surface for body content. On small chrome surfaces the single dark moment is the title bar — a `{colors.surface-dark}` strip carrying wordmark and status.
 - Reserve `{colors.accent}` (Apple Blue) and the rest of the semantic ramp for in-TUI states; marketing chrome stays monochrome.
 - Use `{rounded.sm}` (4px) on every interactive element and `{rounded.none}` (0px) on every container.
 - Stack content sections at `{spacing.section}` (96px) rhythm with only 1px `{colors.hairline}` rules between them.
+- Render key–value data (counts, stats, metadata pairs) as man-page count rows — label, dot leader, tabular numeral (`count-row`).
 
 ### Don't
 
@@ -289,6 +316,16 @@ There is no photography. Visual elements are limited to:
 - Don't pad cards with 24px+ internal padding. List rows sit at 8px vertical; FAQ rows at 12px.
 - Don't render the OpenCode wordmark as a vector logo. It is always block-pixel ASCII.
 - Don't fill the hero TUI mockup with photography or illustration. It is text-only and always shows a faux terminal command line.
+
+## Motion
+
+One tempo. Every state transition in the system — color, background, border, progress fill, drawer reveal — runs at 180ms ease-out. The only exception is the skeleton breathing pulse (1.4s ease-in-out, opacity 1 ↔ 0.45), the system's only looping animation.
+
+**The Single Tempo Rule.** 180ms ease-out for every state change. No second duration, no easing zoo. Where hover feedback exists it is a color-only shift within the gray ladder (`{colors.mute}` → `{colors.ink}` on toggles, ink → `{colors.charcoal}` on links); nothing moves, lifts, glows, or scales on interaction.
+
+- **Count flash:** a live number that changes flashes `{colors.accent}` → ink for one 180ms beat, then rests.
+- **Progress:** the flat fill advances by `transform: scaleX()` with `transform-origin: left` — width never animates.
+- **Reduced motion:** `prefers-reduced-motion: reduce` collapses every transition and animation to effectively zero. The system keeps no motion it cannot live without.
 
 ## Responsive Behavior
 
@@ -333,7 +370,7 @@ There are no raster images in the system aside from the favicon and OG share ima
 ## Known Gaps
 
 - **Mobile screenshots not captured** — responsive behavior synthesizes OpenCode's mobile pattern (hamburger drawer, single-column, footer accordion) from desktop evidence and the breakpoint stack.
-- **Hover states not documented** by system policy.
+- **Marketing-surface hover states not captured** in the extraction set; shipped product surfaces have since settled the grammar: color-only, 180ms, within the gray ladder (see Motion).
 - **In-product TUI screenshots** beyond the marketing hero mockup are not in the captured set; the actual `opencode` terminal interface (full keybindings, panels, status bar) is not documented here.
 - **`/go` page** not extracted — the marketing page for the Go SDK likely shares the same chrome but introduces code-sample blocks not documented above.
 - **Form validation state styling** (success / error inline messages) not present in the captured surfaces.

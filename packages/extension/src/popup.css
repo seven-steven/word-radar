@@ -1,95 +1,165 @@
 /*
- * popup 样式（issue #35 UI/UX 重做）。
- * 全部视觉 token 走 --wr-* 自定义属性；零外部字体、零依赖。
+ * popup 样式（DESIGN.md man-page 重做）：Berkeley Mono 替身 JetBrains Mono
+ * 全程、cream 画布 + ink 墨色、hairline 平面分区、ASCII 括号标记、
+ * 容器 0 圆角 / 交互件 4px。全部视觉 token 走 --wr-* 单一定义点；
+ * 字体经 @import 引 @fontsource latin subset（woff2 打包，无远程 URL）。
  * 经 popup.html 的 <link rel="stylesheet"> 由 Vite/crxjs 打进 dist。
  */
 
+@import "@fontsource/jetbrains-mono/latin-400.css";
+@import "@fontsource/jetbrains-mono/latin-500.css";
+@import "@fontsource/jetbrains-mono/latin-700.css";
+
 :root {
-  /* 色板（石板灰暖色系 + 单一品牌橙 accent） */
-  --wr-bg: #fafaf9;
-  --wr-surface: #ffffff;
-  --wr-text: #1c1917;
-  --wr-text-secondary: #57534e;
-  --wr-hairline: #e7e5e4;
-  --wr-accent: #ea580c;
-  --wr-accent-strong: #c2410c;
-  --wr-success: #16a34a;
-  --wr-danger: #dc2626;
-  --wr-danger-bg: #fef2f2;
-  --wr-confirm-bg: #fff7ed;
-  --wr-progress-from: #f97316;
-  --wr-progress-to: #ef4444;
-  /* 暖色调阴影（不用纯黑） */
-  --wr-shadow: 0 1px 2px rgb(28 25 23 / 0.06), 0 2px 8px rgb(28 25 23 / 0.06);
-  --wr-radius-control: 8px;
-  --wr-radius-card: 12px;
+  /* 色板（DESIGN.md：暖白画布 + 近黑墨 + Apple 语义梯仅用于状态） */
+  --wr-canvas: #fdfcfc;
+  --wr-surface-soft: #f8f7f7;
+  --wr-surface-card: #f1eeee;
+  --wr-surface-dark: #201d1d;
+  --wr-surface-dark-elevated: #302c2c;
+  --wr-ink: #201d1d;
+  --wr-charcoal: #302c2c;
+  --wr-body: #424245;
+  --wr-mute: #646262;
+  --wr-stone: #6e6e73;
+  --wr-ash: #9a9898;
+  --wr-hairline: rgba(15, 0, 0, 0.12);
+  --wr-hairline-strong: #646262;
+  --wr-accent: #007aff;
+  --wr-danger: #ff3b30;
+  --wr-warning: #ff9f0a;
+  --wr-success: #30d158;
+  /* 画布正文的加深档（deepened text ramp）：ramp 原色在 cream 上不达 AA 文本
+     阈值 4.5:1（success 1.97 / danger 3.46 / accent 3.92），正文着色一律走
+     这里（6.88 / 5.26 / 4.96:1）；圆点、进度条等非文本仍用上方 ramp 原色 */
+  --wr-accent-hover: #0056b3;
+  --wr-danger-hover: #d70015;
+  --wr-success-hover: #1a7f37;
+  --wr-ink-deep: #0f0000;
+  --wr-on-dark: #fdfcfc;
+  /* 形状 / 动效 / 字体栈 */
+  --wr-radius-control: 4px;
   --wr-speed: 180ms;
+  --wr-font-mono:
+    "JetBrains Mono", "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo,
+    Monaco, Consolas, "Liberation Mono", "Courier New", "PingFang SC",
+    "Microsoft YaHei", monospace;
 }
 
 * {
   box-sizing: border-box;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 body {
   margin: 0;
-  padding: 16px;
-  width: 320px;
-  background: var(--wr-bg);
-  color: var(--wr-text);
-  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  font-size: 14px;
+  width: 384px;
+  background: var(--wr-canvas);
+  color: var(--wr-body);
+  font-family: var(--wr-font-mono);
+  font-size: 16px;
   line-height: 1.5;
 }
 
-h1 {
+/* ── 头部暗条：全页唯一 surface-dark ───────────────────── */
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  height: 48px;
+  padding: 0 16px;
+  background: var(--wr-surface-dark);
+  color: var(--wr-on-dark);
+}
+
+.header-brand {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.wordmark {
   margin: 0;
   font-size: 16px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
+  font-weight: 500;
+  line-height: 1.5;
+  letter-spacing: 0.02em;
+  color: var(--wr-on-dark);
+  white-space: nowrap;
 }
 
-/* ── 计数条 ─────────────────────────────────────────────── */
+.wordmark-section {
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--wr-ash);
+}
 
-.counts {
+.header-meta {
   display: flex;
-  gap: 24px;
-  margin-top: 8px;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
 }
 
-.count-item {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.count-label {
-  font-size: 11px;
-  letter-spacing: 0.04em;
-  color: var(--wr-text-secondary);
-}
-
-.count-value {
-  font-size: 18px;
-  font-weight: 600;
+.version {
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--wr-ash);
   font-variant-numeric: tabular-nums;
-  line-height: 1.2;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
-/* 数字微反馈（E）：值变化时品牌色高亮一闪，animationend 移除 */
-.count-value.flash {
-  animation: wr-count-flash 180ms ease-out;
+/* 登录态：8px 圆点承载状态色，文字恒 ash（unknown = 骨架）。
+   block + ellipsis：en 长文案溢出时退化为省略号而非画出暗条（i18n 宽度压力兜底） */
+.login-status {
+  position: relative;
+  display: block;
+  min-width: 0;
+  padding-left: 12px; /* 8px 点径 + 4px 间隙 */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--wr-ash);
 }
 
-@keyframes wr-count-flash {
-  from {
-    color: var(--wr-accent);
-  }
-  to {
-    color: var(--wr-text);
-  }
+.login-status::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  translate: 0 -50%;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--wr-ash);
 }
 
-/* ── 骨架（计数 / 登录态加载中）：opacity 呼吸脉冲 ─────── */
+.login-status[data-state="logged-in"]::before {
+  background: var(--wr-success);
+}
+
+.login-status[data-state="logged-out"]::before {
+  background: var(--wr-danger);
+}
+
+.login-status.is-skeleton {
+  padding-left: 0;
+}
+
+.login-status.is-skeleton::before {
+  display: none;
+}
+
+/* ── 骨架（计数 / 登录态加载中）：opacity 呼吸脉冲 ┌──── */
 
 .is-skeleton {
   display: inline-block;
@@ -110,78 +180,123 @@ h1 {
   }
 }
 
+.header .is-skeleton {
+  background: rgb(253 252 252 / 0.16);
+}
+
+/* ── 词库三计数：man-page 计数行（标签 ······ 数值）───── */
+
+.page {
+  padding: 0 16px;
+}
+
+.counts {
+  margin-top: 16px;
+  display: grid;
+  gap: 8px;
+}
+
+.count-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.count-label {
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--wr-mute);
+  white-space: nowrap;
+}
+
+/* 点线引导：空盒的基线即其下边缘，点线恰好落在文字基线上 */
+.count-leader {
+  flex: 1;
+  min-width: 16px;
+  border-bottom: 1px dotted var(--wr-ash);
+}
+
+/* body-strong（16px/500）：字阶内最大计数档；「全页最重一行」让位给确认摘要 */
+.count-value {
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 1.5;
+  font-variant-numeric: tabular-nums;
+  color: var(--wr-ink);
+}
+
+/* 数字微反馈：值变化时 accent 一闪，animationend 移除
+   （popup.ts 按 animationName === "wr-count-flash" 收尾，名字勿改） */
+.count-value.flash {
+  animation: wr-count-flash 180ms ease-out;
+}
+
+@keyframes wr-count-flash {
+  from {
+    color: var(--wr-accent);
+  }
+  to {
+    color: var(--wr-ink);
+  }
+}
+
 /* ── 按钮 ──────────────────────────────────────────────── */
 
 .btn {
   appearance: none;
   border: 1px solid transparent;
   border-radius: var(--wr-radius-control);
-  font: inherit;
-  font-size: 13px;
+  font-family: inherit;
+  font-size: 16px;
   font-weight: 500;
-  padding: 7px 12px;
+  line-height: 2;
+  padding: 4px 20px;
   cursor: pointer;
+  white-space: nowrap;
   transition:
-    background-color var(--wr-speed) ease,
-    border-color var(--wr-speed) ease,
-    color var(--wr-speed) ease,
-    box-shadow var(--wr-speed) ease,
-    transform var(--wr-speed) ease;
+    background-color var(--wr-speed) ease-out,
+    border-color var(--wr-speed) ease-out,
+    color var(--wr-speed) ease-out;
 }
 
 .btn:focus-visible,
-.tools-toggle:focus-visible {
-  outline: 2px solid var(--wr-accent);
+.tools-toggle:focus-visible,
+.link-btn:focus-visible {
+  outline: 1px solid var(--wr-ink);
   outline-offset: 2px;
 }
 
-.btn:active:not(:disabled) {
-  transform: scale(0.98);
-}
-
-.btn:disabled {
-  opacity: 0.55;
-  cursor: default;
-}
-
 .btn-primary {
-  background: var(--wr-accent);
-  color: #ffffff;
+  background: var(--wr-ink);
+  color: var(--wr-canvas);
 }
 
-.btn-primary:hover:not(:disabled) {
-  background: var(--wr-accent-strong);
-  transform: translateY(-1px);
-  box-shadow: 0 2px 6px rgb(234 88 12 / 0.25);
+.btn-primary:active:not(:disabled) {
+  background: var(--wr-ink-deep);
 }
 
 .btn-secondary {
-  background: var(--wr-surface);
-  border-color: var(--wr-hairline);
-  color: var(--wr-text);
+  background: var(--wr-canvas);
+  border-color: var(--wr-hairline-strong);
+  color: var(--wr-ink);
 }
 
-.btn-secondary:hover:not(:disabled) {
-  border-color: #d6d3d1;
-  background: #f5f5f4;
-  transform: translateY(-1px);
+.btn-secondary:active:not(:disabled) {
+  background: var(--wr-surface-soft);
 }
 
-/* 纯文本按钮（取消 / 底部小操作）：无描边无底色 */
-.btn-text {
-  background: transparent;
-  color: var(--wr-text-secondary);
-  padding: 4px 8px;
-}
-
-.btn-text:hover:not(:disabled) {
-  color: var(--wr-text);
-  background: rgb(28 25 23 / 0.05);
+/* 禁用（DESIGN button-disabled）：surface-card 底 + ash 字 */
+.btn:disabled {
+  background: var(--wr-surface-card);
+  border-color: transparent;
+  color: var(--wr-ash);
+  cursor: default;
 }
 
 .btn-small {
-  font-size: 12px;
-  padding: 4px 10px;
+  font-size: 14px;
+  padding: 2px 12px;
 }
 
 /* ── 采集入口行 ────────────────────────────────────────── */
@@ -192,48 +307,47 @@ h1 {
 
 .collect-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
 .status-line {
   margin: 8px 0 0;
-  font-size: 12px;
-  color: var(--wr-text-secondary);
-  min-height: 1em;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--wr-body);
+  min-height: 1.5em;
+  word-break: break-all;
 }
 
 .empty-hint {
   margin: 8px 0 0;
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.5;
-  color: var(--wr-text-secondary);
+  color: var(--wr-mute);
 }
 
-/* 错误态状态行：左侧 3px 红条 + 浅红底（与品牌橙拉开） */
+/* 错误态状态行：danger 深档文字（语义梯只用于状态，无底色无红条） */
 .status-line[data-tone="error"],
 .sync-status[data-tone="error"] {
-  color: var(--wr-danger);
-  background: var(--wr-danger-bg);
-  border-left: 3px solid var(--wr-danger);
-  border-radius: 0 6px 6px 0;
-  padding: 4px 8px;
+  color: var(--wr-danger-hover);
 }
 
-/* ── 显隐防抖（C）：grid-template-rows 0fr→1fr 过渡 ──────
+/* ── 显隐防抖：grid-template-rows 0fr→1fr 过渡 ───────────
    收起态 visibility 延迟切换：收起先折叠再退出可聚焦/可达性树，
-   展开立即 visible 让焦点管理（B）即刻生效。 */
+   展开立即 visible 让焦点管理即刻生效。 */
 
 .reveal {
   display: grid;
   grid-template-rows: 0fr;
-  transition: grid-template-rows 200ms ease;
+  transition: grid-template-rows var(--wr-speed) ease-out;
 }
 
 .reveal-clip {
   overflow: hidden;
   min-height: 0;
   visibility: hidden;
-  transition: visibility 0s linear 200ms;
+  transition: visibility 0s linear var(--wr-speed);
 }
 
 .reveal.open {
@@ -245,50 +359,68 @@ h1 {
   transition-delay: 0s;
 }
 
-/* ── 确认卡片：浅橙底、无描边无阴影、圆角 12 ──────────── */
+/* ── 确认闸门：hairline 平面区块（无底色卡、无阴影、0 圆角） */
 
 .confirm-card {
-  margin-top: 8px;
-  background: var(--wr-confirm-bg);
-  border-radius: var(--wr-radius-card);
-  padding: 12px;
+  margin-top: 12px;
+  border: 1px solid var(--wr-hairline);
+  padding: 12px 16px;
 }
 
+/* 全页最重的一行（heading-md 16px/700）；balance 让折行均匀（Chromium 支持，仅影响断行位置） */
 .confirm-summary {
   margin: 0;
-  font-size: 13px;
+  font-size: 16px;
+  font-weight: 700;
   line-height: 1.5;
+  color: var(--wr-ink);
+  word-break: keep-all;
+  text-wrap: balance;
 }
 
 .confirm-actions {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-top: 8px;
+  margin-top: 12px;
 }
 
 .confirm-actions .btn-primary {
   flex: 1;
 }
 
-/* ── 推送区 ────────────────────────────────────────────── */
+/* ── 推送面板 ──────────────────────────────────────────── */
 
 .push {
   margin-top: 16px;
-  padding-top: 8px;
+  padding-top: 12px;
   border-top: 1px solid var(--wr-hairline);
 }
 
+/* 状态文本按 phase 着色（语义梯只用于状态；正文用加深档保 4.5:1） */
 .push-status {
-  font-size: 12px;
-  color: var(--wr-text-secondary);
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--wr-mute);
 }
 
-/* 进度条：scaleX 填充（不用 width），running 橙红渐变 / paused 转灰 */
+.push-status[data-phase="running"] {
+  color: var(--wr-accent-hover);
+}
+
+.push-status[data-phase="completed"] {
+  color: var(--wr-success-hover);
+}
+
+.push-status[data-phase="paused"] {
+  color: var(--wr-danger-hover);
+}
+
+/* 进度条：hairline 轨道 + accent 纯色填充（scaleX，不用 width） */
 .progress {
   margin-top: 8px;
-  height: 6px;
-  border-radius: 999px;
+  height: 4px;
+  border-radius: 2px;
   background: var(--wr-hairline);
   overflow: hidden;
 }
@@ -296,24 +428,10 @@ h1 {
 .progress-fill {
   width: 100%;
   height: 100%;
-  border-radius: inherit;
-  background: linear-gradient(90deg, var(--wr-progress-from), var(--wr-progress-to));
+  background: var(--wr-accent);
   transform: scaleX(0);
   transform-origin: left;
-  transition: transform 250ms ease;
-}
-
-.progress[data-phase="paused"] .progress-fill {
-  background: #a8a29e;
-}
-
-/* 推送暂停（含错误）：错误态视觉——红条 + 浅红底（与品牌橙拉开） */
-.push-status[data-phase="paused"] {
-  color: var(--wr-danger);
-  background: var(--wr-danger-bg);
-  border-left: 3px solid var(--wr-danger);
-  border-radius: 0 6px 6px 0;
-  padding: 4px 8px;
+  transition: transform var(--wr-speed) ease-out;
 }
 
 .push-stats {
@@ -321,51 +439,66 @@ h1 {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  gap: 4px 6px;
-  font-size: 12px;
-  color: var(--wr-text-secondary);
+  gap: 4px;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--wr-mute);
 }
 
 .stat-num {
   font-variant-numeric: tabular-nums;
   font-weight: 500;
-  color: var(--wr-text);
+  color: var(--wr-ink);
+}
+
+/* failed > 0 时数值转 danger 深档（popup.ts 按计数切 is-failed 类） */
+.stat-num.is-failed {
+  color: var(--wr-danger-hover);
+}
+
+.stat-dot {
+  color: var(--wr-ash);
 }
 
 .push .btn {
   margin-top: 8px;
 }
 
-/* ── 工具抽屉 ──────────────────────────────────────────── */
+/* ── 工具抽屉：ASCII 括号标记 [+]/[-] ─────────────────── */
+
+.tools {
+  margin-top: 12px;
+}
 
 .tools-toggle {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  margin-top: 8px;
+  gap: 8px;
   padding: 4px 0;
   background: none;
   border: none;
-  border-radius: 6px;
-  font: inherit;
-  font-size: 12px;
+  border-radius: var(--wr-radius-control);
+  font-family: inherit;
+  font-size: 14px;
   font-weight: 500;
-  color: var(--wr-text-secondary);
+  line-height: 2;
+  color: var(--wr-mute);
   cursor: pointer;
-  transition: color var(--wr-speed) ease;
+  transition: color var(--wr-speed) ease-out;
 }
 
 .tools-toggle:hover {
-  color: var(--wr-text);
+  color: var(--wr-ink);
 }
 
-.tools-chevron {
+/* [+] ↔ [-] 等宽占位，开合切换不抖动 */
+.tools-marker {
   display: inline-block;
-  width: 1em;
+  min-width: 3ch;
 }
 
 .tools-body {
-  padding-top: 8px;
+  padding: 8px 0;
 }
 
 .tools-actions {
@@ -376,84 +509,58 @@ h1 {
 
 .sync-status {
   margin: 8px 0 0;
-  font-size: 12px;
-  color: var(--wr-text-secondary);
-  min-height: 1em;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--wr-body);
+  min-height: 1.5em;
   word-break: break-all;
 }
 
-/* ── 底部状态条：发丝线上边距，位置钉死 ───────────────── */
+/* ── 底栏：hairline 上边线，link 风格操作 ─────────────── */
 
 .footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 4px 8px;
+  gap: 8px;
   margin-top: 16px;
-  padding-top: 8px;
+  padding: 8px 16px 12px;
   border-top: 1px solid var(--wr-hairline);
-  font-size: 12px;
 }
 
 .footer-side {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 8px;
   min-width: 0;
 }
 
-.version {
-  color: var(--wr-text-secondary);
-  font-variant-numeric: tabular-nums;
+.link-btn {
+  appearance: none;
+  background: none;
+  border: none;
+  border-radius: var(--wr-radius-control);
+  padding: 2px 0;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 2;
+  color: var(--wr-ink);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
   white-space: nowrap;
+  transition: color var(--wr-speed) ease-out;
 }
 
-/* 320px 内不放不下时按列换行，按钮文字永不内部折行 */
-.btn {
-  white-space: nowrap;
+.link-btn:hover:not(:disabled) {
+  color: var(--wr-charcoal);
 }
 
-/* 登录态：绿点/红点（data-state 机制保留），未知=骨架 */
-.login-status {
-  position: relative;
-  padding-left: 14px;
-  color: var(--wr-text-secondary);
-}
-
-.login-status::before {
-  content: "";
-  position: absolute;
-  left: 2px;
-  top: 50%;
-  translate: 0 -50%;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-}
-
-.login-status[data-state="logged-in"] {
-  color: var(--wr-success);
-}
-
-.login-status[data-state="logged-in"]::before {
-  background: var(--wr-success);
-}
-
-.login-status[data-state="logged-out"] {
-  color: var(--wr-danger);
-}
-
-.login-status[data-state="logged-out"]::before {
-  background: var(--wr-danger);
-}
-
-.login-status.is-skeleton {
-  padding-left: 0;
-}
-
-.login-status.is-skeleton::before {
-  display: none;
+.link-btn:disabled {
+  color: var(--wr-ash);
+  text-decoration: none;
+  cursor: default;
 }
 
 /* ── 动效偏好：reduce 下一律瞬时 ──────────────────────── */
@@ -467,4 +574,23 @@ h1 {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
   }
+}
+
+/* ── 浏览器表面：selection 反色 + 滚动条入系（chrome 单色） ── */
+
+::selection {
+  background: var(--wr-ink);
+  color: var(--wr-canvas);
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--wr-hairline-strong);
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
 }

@@ -22,22 +22,10 @@ test.skip(!OUT_DIR, "store screenshot generation only — run via `pnpm screensh
 
 test.setTimeout(240_000); // 真实推送 pacing（~1s/词）
 
-/** popup 以标签页打开时只是 240px 小部件 —— 居中卡片化呈现（纯展示样式，UI 本体不动）。 */
+/** popup 以标签页打开时只是 384px 小部件 —— 居中卡片化呈现（纯展示样式，UI 本体不动）。 */
 const POPUP_STAGE_STYLE = `
-  html, body { height: 100%; }
-  body {
-    min-width: 0;
-    display: grid;
-    place-items: center;
-    background: linear-gradient(160deg, #eef2f7 0%, #dfe6ee 100%);
-    font-family: system-ui, sans-serif;
-  }
-  main {
-    background: #fff;
-    padding: 28px 32px;
-    border-radius: 14px;
-    box-shadow: 0 12px 40px rgba(15, 23, 42, 0.16);
-  }
+  html { height: 100%; display: grid; place-items: center; background: #f1eeee; }
+  body { width: 384px; height: auto; border: 1px solid rgba(15, 0, 0, 0.12); }
 `;
 
 test("generates 1280x800 store screenshots of real extension UI", async ({
@@ -78,11 +66,12 @@ test("generates 1280x800 store screenshots of real extension UI", async ({
   await popup.screenshot({ path: shots("02-collect.png") });
 
   // ── 场景 3：popup 推送完成 ─────────────────────────────────────
+  // 确认即推送：批次入库 + 一轮推送（mock 全成功）。闸门流程下词库 pending
+  // 只在确认时增长（批次确认前不落库），故先确认再等 pending ≥1。
+  await popup.getByTestId("confirm-push").click();
   await expect(popup.getByTestId("pending")).toHaveText(/^[1-9]\d*$/, { timeout: 10_000 });
   const pending = Number(await popup.getByTestId("pending").textContent());
   expect(pending).toBeGreaterThanOrEqual(1);
-  // 确认即推送：批次入库 + 一轮推送（mock 全成功）
-  await popup.getByTestId("confirm-push").click();
   await expect(popup.getByTestId("push-status")).toHaveAttribute(
     "data-phase",
     "completed",

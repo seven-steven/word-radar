@@ -104,12 +104,12 @@
     "description": "Source: file upload collection"
   },
   "statusLoggedIn": {
-    "message": "Logged into 不背单词",
-    "description": "Login status: logged in"
+    "message": "Logged in",
+    "description": "Login status: logged in (brand mention lives in the footer Open 不背单词 button; kept short so the header never overflows at 384px)"
   },
   "statusLoggedOut": {
-    "message": "Not logged into 不背单词",
-    "description": "Login status: logged out"
+    "message": "Not logged in",
+    "description": "Login status: logged out (kept short so the header never overflows at 384px)"
   },
   "pushRunning": {
     "message": "Pushing: pushed $1/$2 · $3 pending",

@@ -18,7 +18,7 @@
 import { test as base, expect, chromium } from "@playwright/test";
 import type { BrowserContext, Page, Route } from "@playwright/test";
 import { createServer, type Server } from "node:http";
-import { cp, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
+import { cp, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -61,12 +61,20 @@ async function makeE2eExtensionDir(): Promise<string> {
   const manifestPath = join(dir, "dist/manifest.json");
   const raw = JSON.parse(await readFile(manifestPath, "utf8")) as {
     host_permissions?: string[];
+    default_locale?: string;
   };
   raw.host_permissions = [
     ...(raw.host_permissions ?? []),
     ...TEST_ONLY_HOST_PERMISSIONS,
   ];
+  // i18n 强制 zh-CN（Playwright Chromium 扩展 i18n 恒走 en 的已知坑）：
+  // 扩展消息解析跟随 Chromium 的 application locale（Playwright Chromium 只打包
+  // en-US 资源，恒 en-US），--lang / context locale 只改 ICU 层、改不了消息链。
+  // 测试副本两处改造——manifest default_locale 改 zh_CN + 删除 _locales/en，
+  // 让 en-US 解析落空回退到 zh_CN，等价模拟中文环境（dist 产物不受影响）。
+  raw.default_locale = "zh_CN";
   await writeFile(manifestPath, `${JSON.stringify(raw, null, 2)}\n`);
+  await rm(join(dir, "dist/_locales/en"), { recursive: true, force: true });
   return join(dir, "dist");
 }
 

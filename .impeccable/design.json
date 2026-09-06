@@ -1,0 +1,114 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-09-06T03:53:55Z",
+  "title": "Design System: word-radar",
+  "extensions": {
+    "motion": [
+      {
+        "name": "state-transition",
+        "value": "180ms ease-out",
+        "purpose": "Single tempo for every state transition — color, background, border, progress fill, drawer reveal."
+      },
+      {
+        "name": "skeleton-pulse",
+        "value": "1.4s ease-in-out infinite (opacity 1 ↔ 0.45)",
+        "purpose": "The only looping animation in the system: loading-skeleton breathing."
+      },
+      {
+        "name": "count-flash",
+        "value": "180ms ease-out (accent #007aff → ink #201d1d)",
+        "purpose": "One-beat acknowledgment when a live count changes; initial load does not flash."
+      },
+      {
+        "name": "reduced-motion",
+        "value": "prefers-reduced-motion: reduce → transition/animation-duration 0.01ms, animation-iteration-count 1",
+        "purpose": "All motion collapses to effectively zero; no animation is load-bearing."
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The single ink-filled CTA; reserved for the one confirm-style action per surface.",
+      "html": "<button class=\"ds-btn-primary\">确认推送</button>",
+      "css": ".ds-btn-primary { font-family: \"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 16px; font-weight: 500; line-height: 2; background: #201d1d; color: #fdfcfc; border: 1px solid transparent; border-radius: 4px; padding: 4px 20px; cursor: pointer; white-space: nowrap; transition: background-color 180ms ease-out; } .ds-btn-primary:active { background: #0f0000; } .ds-btn-primary:focus-visible { outline: 1px solid #201d1d; outline-offset: 2px; } .ds-btn-primary:disabled { background: #f1eeee; color: #9a9898; cursor: default; }"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Outlined hairline-strong alternative for every non-confirm action.",
+      "html": "<button class=\"ds-btn-secondary\">重新采集</button>",
+      "css": ".ds-btn-secondary { font-family: \"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 16px; font-weight: 500; line-height: 2; background: #fdfcfc; color: #201d1d; border: 1px solid #646262; border-radius: 4px; padding: 4px 20px; cursor: pointer; white-space: nowrap; transition: background-color 180ms ease-out, border-color 180ms ease-out, color 180ms ease-out; } .ds-btn-secondary:active { background: #f8f7f7; } .ds-btn-secondary:focus-visible { outline: 1px solid #201d1d; outline-offset: 2px; } .ds-btn-secondary:disabled { background: #f1eeee; border-color: transparent; color: #9a9898; cursor: default; }"
+    },
+    {
+      "name": "Man-Page Count Row",
+      "kind": "custom",
+      "refersTo": "count-row",
+      "description": "Key–value data row: mute label, dotted ash leader on the baseline, tabular ink numeral that flashes accent on change.",
+      "html": "<div class=\"ds-count-row\"><span class=\"ds-count-row-label\">词库总词数</span><span class=\"ds-count-row-leader\"></span><span class=\"ds-count-row-value\">128</span></div>",
+      "css": ".ds-count-row { display: flex; align-items: baseline; gap: 8px; font-family: \"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, monospace; } .ds-count-row-label { font-size: 14px; line-height: 1.5; color: #646262; white-space: nowrap; } .ds-count-row-leader { flex: 1; min-width: 16px; border-bottom: 1px dotted #9a9898; } .ds-count-row-value { font-size: 16px; font-weight: 500; line-height: 1.5; color: #201d1d; font-variant-numeric: tabular-nums; } .ds-count-row-value.flash { animation: ds-count-flash 180ms ease-out; } @keyframes ds-count-flash { from { color: #007aff; } to { color: #201d1d; } }"
+    },
+    {
+      "name": "Dark Title Bar",
+      "kind": "nav",
+      "refersTo": "title-bar",
+      "description": "The single dark moment of a small chrome surface: surface-dark strip with wordmark at left, login-state dot + metadata at right.",
+      "html": "<header class=\"ds-title-bar\"><span class=\"ds-title-bar-brand\">单词雷达 (1)</span><span class=\"ds-title-bar-login\" data-state=\"logged-in\">已登录</span></header>",
+      "css": ".ds-title-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; height: 48px; padding: 0 16px; background: #201d1d; color: #fdfcfc; font-family: \"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, monospace; } .ds-title-bar-brand { font-size: 16px; font-weight: 500; line-height: 1.5; letter-spacing: 0.02em; color: #fdfcfc; white-space: nowrap; } .ds-title-bar-login { position: relative; display: block; padding-left: 12px; font-size: 14px; line-height: 1.5; color: #9a9898; white-space: nowrap; } .ds-title-bar-login::before { content: \"\"; position: absolute; left: 0; top: 50%; translate: 0 -50%; width: 8px; height: 8px; border-radius: 50%; background: #9a9898; } .ds-title-bar-login[data-state=\"logged-in\"]::before { background: #30d158; } .ds-title-bar-login[data-state=\"logged-out\"]::before { background: #ff3b30; }"
+    },
+    {
+      "name": "Push Progress",
+      "kind": "custom",
+      "refersTo": "progress",
+      "description": "Flat status progress: hairline track, solid accent fill advanced by transform scaleX, never by width.",
+      "html": "<div class=\"ds-progress\"><div class=\"ds-progress-fill\" style=\"transform: scaleX(0.6)\"></div></div>",
+      "css": ".ds-progress { height: 4px; border-radius: 2px; background: rgba(15, 0, 0, 0.12); overflow: hidden; } .ds-progress-fill { width: 100%; height: 100%; background: #007aff; transform: scaleX(0); transform-origin: left; transition: transform 180ms ease-out; }"
+    },
+    {
+      "name": "Tools Disclosure Toggle",
+      "kind": "button",
+      "refersTo": "tools-toggle",
+      "description": "ASCII-bracket disclosure toggle: [+]/[-] in a fixed 3ch slot, mute label that deepens to ink on hover.",
+      "html": "<button class=\"ds-tools-toggle\"><span class=\"ds-tools-marker\">[+]</span>工具</button>",
+      "css": ".ds-tools-toggle { display: inline-flex; align-items: center; gap: 8px; padding: 4px 0; background: none; border: none; border-radius: 4px; font-family: \"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 14px; font-weight: 500; line-height: 2; color: #646262; cursor: pointer; transition: color 180ms ease-out; } .ds-tools-toggle:hover { color: #201d1d; } .ds-tools-toggle:focus-visible { outline: 1px solid #201d1d; outline-offset: 2px; } .ds-tools-marker { display: inline-block; min-width: 3ch; }"
+    },
+    {
+      "name": "Skeleton Pulse",
+      "kind": "custom",
+      "refersTo": "skeleton",
+      "description": "Loading placeholder: hairline block breathing between opacity 1 and 0.45; dark variant for the surface-dark title bar.",
+      "html": "<span class=\"ds-skeleton\"></span> <span class=\"ds-skeleton ds-skeleton--dark\"></span>",
+      "css": ".ds-skeleton { display: inline-block; min-width: 2.5em; height: 0.8em; border-radius: 4px; background: rgba(15, 0, 0, 0.12); animation: ds-skeleton-pulse 1.4s ease-in-out infinite; } .ds-skeleton--dark { background: rgb(253 252 252 / 0.16); } @keyframes ds-skeleton-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }"
+    },
+    {
+      "name": "Link Button",
+      "kind": "button",
+      "refersTo": "link-btn",
+      "description": "Footer-edge text action: ink underline link that rests to ash and loses its underline when disabled.",
+      "html": "<button class=\"ds-link-btn\">检查登录</button>",
+      "css": ".ds-link-btn { appearance: none; background: none; border: none; border-radius: 4px; padding: 2px 0; font-family: \"JetBrains Mono\", ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 14px; font-weight: 400; line-height: 2; color: #201d1d; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; white-space: nowrap; transition: color 180ms ease-out; } .ds-link-btn:hover:not(:disabled) { color: #302c2c; } .ds-link-btn:focus-visible { outline: 1px solid #201d1d; outline-offset: 2px; } .ds-link-btn:disabled { color: #9a9898; text-decoration: none; cursor: default; }"
+    }
+  ],
+  "narrative": {
+    "rules": [
+      {
+        "name": "The Text-Deepens Rule",
+        "body": "Semantic color used as text on the cream canvas always takes the deepened `-hover` step — `accent-hover` (6.88:1), `danger-hover` (5.26:1), `success-hover` (4.96:1), all ≥ AA at body sizes. The ramp originals fail 4.5:1 on cream (`accent` 3.92:1, `danger` 3.46:1, `success` 1.97:1) and are reserved for non-text carriers: status dots, progress fills, and markers. Text deepens; dots and bars keep the bright original.",
+        "section": "colors"
+      },
+      {
+        "name": "The One Dark Moment Rule",
+        "body": "Exactly one inverted-dark region per surface. On landing pages it is the full-bleed hero TUI mockup; on small chrome surfaces (a browser-action popup, a settings drawer) it is the title bar — a `surface-dark` strip carrying wordmark and status metadata. Dark is never used for body content, and a surface never carries two dark regions.",
+        "section": "elevation"
+      },
+      {
+        "name": "The Single Tempo Rule",
+        "body": "180ms ease-out for every state change. No second duration, no easing zoo. Where hover feedback exists it is a color-only shift within the gray ladder (mute → ink on toggles, ink → charcoal on links); nothing moves, lifts, glows, or scales on interaction.",
+        "section": "motion"
+      }
+    ]
+  }
+}

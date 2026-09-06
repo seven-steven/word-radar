@@ -137,7 +137,7 @@ function updateEmptyHint(): void {
   }
 }
 
-/** 状态行统一写入口：tone 区分中性 / 错误（错误态红条 + 浅红底，见 popup.css）。
+/** 状态行统一写入口：tone 区分中性 / 错误（错误态 danger 深红文字，见 popup.css）。
  *  statusEl 的 tone 变化即时重算互斥可见性（error 豁免在卡片可见时生效）。 */
 function renderStatusLine(
   el: HTMLElement | null,
@@ -258,7 +258,11 @@ function renderPushStatus(status: PushStatus): void {
   renderPushProgress(status.phase, status.processed, status.total);
   if (pushSucceededEl) pushSucceededEl.textContent = String(status.succeeded);
   if (pushExistingEl) pushExistingEl.textContent = String(status.existing);
-  if (pushFailedEl) pushFailedEl.textContent = String(status.failed);
+  if (pushFailedEl) {
+    pushFailedEl.textContent = String(status.failed);
+    // failed > 0 时数值转 danger（纯视觉类切换，语义在 popup.css）
+    pushFailedEl.classList.toggle("is-failed", status.failed > 0);
+  }
   if (retryPushButton) {
     // A 条件可见：无推送历史且无待推时收起；running 期间禁用
     retryPushButton.hidden = status.phase === "idle" && status.pending === 0;
@@ -454,6 +458,12 @@ function renderConfirmPage(
 }
 
 function hideConfirmPage(): void {
+  // 焦点回收（B 的对称侧）：卡片持有焦点时收起（确认成功 / 取消 / Esc /
+  // 上传开头），reveal-clip 转 visibility:hidden 会把焦点坠回 body——先
+  // 归还给稳定的采集入口；随后状态行更新由 role="status" 播报。
+  if (confirmSection?.contains(document.activeElement)) {
+    collectButton?.focus();
+  }
   setRevealOpen(confirmSection, false);
   updateStatusVisibility(); // D：卡片收起后恢复状态行
   updateEmptyHint();
@@ -556,12 +566,12 @@ exportLogButton?.addEventListener("click", () => {
   void exportLog();
 });
 
-// 工具抽屉：aria-expanded + chevron ▸/▾ 与面板 grid 过渡联动
+// 工具抽屉：aria-expanded + ASCII 括号标记 [+]（收起）/[-]（展开）与面板 grid 过渡联动
 toolsToggleButton?.addEventListener("click", () => {
   const open = !isRevealOpen(toolsPanel);
   setRevealOpen(toolsPanel, open);
   toolsToggleButton.setAttribute("aria-expanded", String(open));
-  if (toolsChevron) toolsChevron.textContent = open ? "▾" : "▸";
+  if (toolsChevron) toolsChevron.textContent = open ? "[-]" : "[+]";
 });
 
 // 推送进行中每 ~500ms 拉一次状态，结束即停。

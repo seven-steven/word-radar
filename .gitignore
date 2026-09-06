@@ -16,3 +16,8 @@ test-results/
 .pnpm-store/
 .pnpm-debug.log*.vscode/
 .vscode/
+
+# Impeccable: durable artifacts (design.json, surfaces/) tracked; ephemeral ignored
+.impeccable/config.local.json
+.impeccable/hook.cache.json
+.impeccable/review/

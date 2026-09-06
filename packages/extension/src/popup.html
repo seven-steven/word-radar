@@ -8,96 +8,113 @@
   </head>
   <body>
     <main>
-      <header>
-        <h1 data-i18n="popupHeading">WordRadar</h1>
+      <!-- 头部暗条：全页唯一深色面 —— wordmark + 登录态点 + 版本 -->
+      <header class="header">
+        <div class="header-brand">
+          <h1 class="wordmark" data-i18n="popupHeading">单词雷达</h1>
+          <span class="wordmark-section" aria-hidden="true">(1)</span>
+        </div>
+        <div class="header-meta">
+          <span class="login-status is-skeleton" data-testid="login-status" data-state="unknown"></span>
+          <span class="version" data-testid="version"></span>
+        </div>
       </header>
 
-      <!-- 计数条：加载中显示骨架脉冲（renderCounts 的 null 态） -->
-      <section class="counts">
-        <div class="count-item">
-          <span class="count-label" data-i18n="countTotal">词库总词数</span>
-          <span class="count-value is-skeleton" data-testid="total"></span>
-        </div>
-        <div class="count-item">
-          <span class="count-label" data-i18n="countPushed">已推送</span>
-          <span class="count-value is-skeleton" data-testid="pushed"></span>
-        </div>
-        <div class="count-item">
-          <span class="count-label" data-i18n="countPending">待推</span>
-          <span class="count-value is-skeleton" data-testid="pending"></span>
-        </div>
-      </section>
-
-      <!-- 采集入口行：主操作（采集）+ 次操作（上传文件，issue #24） -->
-      <section class="collect-entry">
-        <div class="collect-actions">
-          <button type="button" class="btn btn-primary" data-testid="collect" data-i18n="btnRecollect">重新采集</button>
-          <button type="button" class="btn btn-secondary" data-testid="upload-file" data-i18n="btnUploadFile">上传文件</button>
-        </div>
-        <p class="status-line" data-testid="status" data-i18n="statusCollecting">采集中…</p>
-        <p class="empty-hint" data-testid="empty-hint" data-i18n="emptyHint" hidden></p>
-      </section>
-
-      <!-- 确认闸门（issue #22）：待确认批次只存活于内存，确认才入库+推送 -->
-      <section class="reveal" data-testid="confirm-section">
-        <div class="reveal-clip">
-          <div class="confirm-card">
-            <p class="confirm-summary" data-testid="confirm-summary"></p>
-            <div class="confirm-actions">
-              <button type="button" class="btn btn-primary" data-testid="confirm-push" data-i18n="btnConfirmPush">确认推送</button>
-              <button type="button" class="btn btn-text" data-testid="cancel-collect" data-i18n="btnCancel">取消</button>
-            </div>
+      <div class="page">
+        <!-- 词库三计数：man-page 计数行（标签 ······ 等宽数值） -->
+        <section class="counts">
+          <div class="count-item">
+            <span class="count-label" data-i18n="countTotal">词库总词数</span>
+            <span class="count-leader" aria-hidden="true"></span>
+            <span class="count-value is-skeleton" data-testid="total"></span>
           </div>
-        </div>
-      </section>
+          <div class="count-item">
+            <span class="count-label" data-i18n="countPushed">已推送</span>
+            <span class="count-leader" aria-hidden="true"></span>
+            <span class="count-value is-skeleton" data-testid="pushed"></span>
+          </div>
+          <div class="count-item">
+            <span class="count-label" data-i18n="countPending">待推</span>
+            <span class="count-leader" aria-hidden="true"></span>
+            <span class="count-value is-skeleton" data-testid="pending"></span>
+          </div>
+        </section>
 
-      <!-- 推送区：状态文本 + 进度条（scaleX 填充）+ 统计行 + 条件重试 -->
-      <section class="push">
-        <div class="push-status" data-testid="push-status" data-phase="idle" data-i18n="pushStatusIdle">推送状态：空闲</div>
-        <div class="progress" data-testid="push-progress" data-phase="idle" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
-          <div class="progress-fill" data-testid="push-progress-fill"></div>
-        </div>
-        <div class="push-stats">
-          <span data-i18n="pushSuccess">成功</span> <span class="stat-num" data-testid="push-succeeded">0</span>
-          <span class="stat-dot" aria-hidden="true">·</span>
-          <span data-i18n="pushExisting">已存在</span> <span class="stat-num" data-testid="push-existing">0</span>
-          <span class="stat-dot" aria-hidden="true">·</span>
-          <span data-i18n="pushFailed">失败</span> <span class="stat-num" data-testid="push-failed">0</span>
-        </div>
-        <button type="button" class="btn btn-secondary btn-small" data-testid="retry-push" data-i18n="btnRetryPending" hidden>重试待推</button>
-      </section>
+        <!-- 采集入口行：采集 + 上传文件同为 secondary 描边；ink 填充 primary 为确认闸门独占（issue #24） -->
+        <section class="collect-entry">
+          <div class="collect-actions">
+            <button type="button" class="btn btn-secondary" data-testid="collect" data-i18n="btnRecollect">重新采集</button>
+            <button type="button" class="btn btn-secondary" data-testid="upload-file" data-i18n="btnUploadFile">上传文件</button>
+          </div>
+          <!-- role="status"：采集/上传/确认失败等插值文本对读屏器播报（WCAG 4.1.3） -->
+          <p class="status-line" data-testid="status" role="status" data-i18n="statusCollecting">采集中…</p>
+          <p class="empty-hint" data-testid="empty-hint" data-i18n="emptyHint" hidden></p>
+        </section>
 
-      <!-- 工具抽屉：低频工具默认收起（issue #35 返工锁定），点开走 grid 过渡 -->
-      <section class="tools">
-        <button type="button" class="tools-toggle" data-testid="tools-toggle" aria-expanded="false" aria-controls="tools-panel">
-          <span class="tools-chevron" data-testid="tools-chevron" aria-hidden="true">▸</span>
-          <span data-i18n="toolsToggle">工具</span>
-        </button>
-        <div class="reveal" data-testid="tools-panel" id="tools-panel">
+        <!-- 确认闸门（issue #22）：待确认批次只存活于内存，确认才入库+推送；
+             hairline 平面区块，reveal 过渡展开 -->
+        <section class="reveal" data-testid="confirm-section">
           <div class="reveal-clip">
-            <div class="tools-body">
-              <div class="tools-actions">
-                <button type="button" class="btn btn-secondary btn-small" data-testid="import-csv" data-i18n="btnImportCsv">导入 CSV</button>
-                <button type="button" class="btn btn-secondary btn-small" data-testid="export-csv" data-i18n="btnExportCsv">导出 CSV</button>
-                <!-- 导出日志（issue #25）：storage.local 环形缓冲错误日志 → 可读文本 -->
-                <button type="button" class="btn btn-secondary btn-small" data-testid="export-log" data-i18n="btnExportLog">导出日志</button>
+            <div class="confirm-card">
+              <!-- aria-describedby：展开即聚焦 confirm-push，摘要作为可访问描述随按钮读出
+                   （「本次共计采集 N 个单词…」是合同规定的全页最重一行，不能被跳过） -->
+              <p class="confirm-summary" id="confirm-summary" data-testid="confirm-summary"></p>
+              <div class="confirm-actions">
+                <button type="button" class="btn btn-primary" data-testid="confirm-push" aria-describedby="confirm-summary" data-i18n="btnConfirmPush">确认推送</button>
+                <button type="button" class="btn btn-secondary" data-testid="cancel-collect" data-i18n="btnCancel">取消</button>
               </div>
-              <p class="sync-status" data-testid="sync-status"></p>
             </div>
           </div>
-        </div>
-      </section>
+        </section>
+
+        <!-- 推送面板：状态文本按 phase 着色 + 纯色进度（scaleX）+ 统计行 + 条件重试 -->
+        <section class="push">
+          <!-- role="status"：推送 running/completed/paused 轮询改写对读屏器播报 -->
+          <div class="push-status" data-testid="push-status" role="status" data-phase="idle" data-i18n="pushStatusIdle">推送状态：空闲</div>
+          <div class="progress" data-testid="push-progress" data-phase="idle" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+            <div class="progress-fill" data-testid="push-progress-fill"></div>
+          </div>
+          <div class="push-stats">
+            <span data-i18n="pushSuccess">成功</span> <span class="stat-num" data-testid="push-succeeded">0</span>
+            <span class="stat-dot" aria-hidden="true">·</span>
+            <span data-i18n="pushExisting">已存在</span> <span class="stat-num" data-testid="push-existing">0</span>
+            <span class="stat-dot" aria-hidden="true">·</span>
+            <span data-i18n="pushFailed">失败</span> <span class="stat-num" data-testid="push-failed">0</span>
+          </div>
+          <button type="button" class="btn btn-secondary btn-small" data-testid="retry-push" data-i18n="btnRetryPending" hidden>重试待推</button>
+        </section>
+
+        <!-- 工具抽屉：低频工具默认收起，ASCII 括号标记 [+] / [-] 指示开合 -->
+        <section class="tools">
+          <button type="button" class="tools-toggle" data-testid="tools-toggle" aria-expanded="false" aria-controls="tools-panel">
+            <span class="tools-marker" data-testid="tools-chevron" aria-hidden="true">[+]</span>
+            <span data-i18n="toolsToggle">工具</span>
+          </button>
+          <div class="reveal" data-testid="tools-panel" id="tools-panel">
+            <div class="reveal-clip">
+              <div class="tools-body">
+                <div class="tools-actions">
+                  <button type="button" class="btn btn-secondary btn-small" data-testid="import-csv" data-i18n="btnImportCsv">导入 CSV</button>
+                  <button type="button" class="btn btn-secondary btn-small" data-testid="export-csv" data-i18n="btnExportCsv">导出 CSV</button>
+                  <!-- 导出日志（issue #25）：storage.local 环形缓冲错误日志 → 可读文本 -->
+                  <button type="button" class="btn btn-secondary btn-small" data-testid="export-log" data-i18n="btnExportLog">导出日志</button>
+                </div>
+                <!-- role="status"：导入/导出/日志结果对读屏器播报（与主状态行同权） -->
+                <p class="sync-status" data-testid="sync-status" role="status"></p>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
     </main>
 
-    <!-- 底部状态条：左侧登录态 + 右侧版本/检查登录（位置钉死） -->
+    <!-- 底栏：hairline 上边线，左侧登录态延伸操作 + 右侧检查登录 -->
     <footer class="footer">
       <div class="footer-side">
-        <span class="login-status is-skeleton" data-testid="login-status" data-state="unknown"></span>
-        <button type="button" class="btn btn-text btn-small" data-testid="open-bbdc" hidden data-i18n="btnOpenBbdc">打开不背单词</button>
+        <button type="button" class="link-btn" data-testid="open-bbdc" hidden data-i18n="btnOpenBbdc">打开不背单词</button>
       </div>
       <div class="footer-side">
-        <span class="version" data-testid="version"></span>
-        <button type="button" class="btn btn-text btn-small" data-testid="check-login" data-i18n="btnCheckLogin">检查登录</button>
+        <button type="button" class="link-btn" data-testid="check-login" data-i18n="btnCheckLogin">检查登录</button>
       </div>
     </footer>
     <script type="module" src="./popup.ts"></script>
