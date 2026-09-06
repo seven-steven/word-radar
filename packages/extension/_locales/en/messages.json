@@ -171,6 +171,10 @@
     "message": "Collecting $1…",
     "description": "Upload collection in progress, params: filename"
   },
+  "uploadCollectingFiles": {
+    "message": "Collecting from $1 files…",
+    "description": "Upload collection in progress for a multi-file batch (issue #38), params: file count"
+  },
   "uploadFailed": {
     "message": "Upload collection failed: $1",
     "description": "Upload collection failed, params: error message"

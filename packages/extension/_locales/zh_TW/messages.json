@@ -171,6 +171,10 @@
     "message": "上传采集 $1 中…",
     "description": "上传采集进行中，参数：文件名"
   },
+  "uploadCollectingFiles": {
+    "message": "正在上传采集 $1 个文件…",
+    "description": "上传采集进行中（多文件整批，issue #38），参数：文件数"
+  },
   "uploadFailed": {
     "message": "上传采集失败：$1",
     "description": "上传采集失败，参数：错误信息"

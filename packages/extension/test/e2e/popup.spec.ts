@@ -231,6 +231,64 @@ test("upload-file target walks collect → confirm → push with .txt text (issu
   await page.close();
 });
 
+test("upload-file target treats multiple selected files as ONE batch (issue #38)", async ({
+  extContext,
+  popupUrl,
+  mockBbdc,
+}) => {
+  const page = await extContext.newPage();
+  await page.goto(popupUrl);
+
+  // 两个独有词文件：多文件协议（issue #38）一次选中、整批 = 一次采集
+  const pathA = "/tmp/word-radar-e2e-multi-a.txt";
+  const pathB = "/tmp/word-radar-e2e-multi-b.txt";
+  writeFileSync(pathA, "The curious cartographer charted a silent fjord.\n");
+  writeFileSync(pathB, "A diligent blacksmith forged bright iron.\n");
+
+  await waitCountsLoaded(page); // 基线读取前置：等 total 脱骨架（骨架屏契约）
+  const totalBefore = Number(await page.getByTestId("total").textContent());
+  mockBbdc.reset();
+
+  const [chooser] = await Promise.all([
+    page.waitForEvent("filechooser"),
+    page.getByTestId("upload-file").click(),
+  ]);
+  await chooser.setFiles([pathA, pathB]);
+  // 整批 = 一次采集：两个文件合成单张确认卡（「上传采集」措辞）
+  await expect(page.getByTestId("confirm-summary")).toHaveText(
+    /本次共计上传采集 \d+ 个单词，其中新词 \d+ 个/,
+    { timeout: 10_000 },
+  );
+  // 确认前：不落库、零网络请求
+  await expect(page.getByTestId("total")).toHaveText(String(totalBefore));
+  expect(mockBbdc.requests).toHaveLength(0);
+
+  // 确认 → 整批合并入词库 → 计数刷新 → 推送启动
+  await page.getByTestId("confirm-push").click();
+  await expect
+    .poll(async () => Number(await page.getByTestId("total").textContent()))
+    .toBeGreaterThan(totalBefore);
+  await expect
+    .poll(() => mockBbdc.addWordRequests().length, { timeout: 20_000 })
+    .toBeGreaterThan(0);
+  await expect(page.getByTestId("confirm-section")).toBeHidden();
+  // 排空待推池（同上：持久 context 共享推送循环，别把进行中推送泄漏给后续用例）
+  for (let round = 0; round < 15; round++) {
+    await page.reload();
+    await page.waitForTimeout(3_000);
+    const pending = Number(await page.getByTestId("pending").textContent());
+    const phase = await page.getByTestId("push-status").getAttribute("data-phase");
+    if (pending === 0 && phase !== "running") break;
+    if (pending > 0 && phase !== "running") {
+      await page.getByTestId("retry-push").click();
+    }
+    await page.waitForTimeout(3_000);
+  }
+  await expect(page.getByTestId("pending")).toHaveText(/^0$/);
+  await expect(page.getByTestId("push-status")).not.toHaveAttribute("data-phase", "running");
+  await page.close();
+});
+
 test("upload-file target accepts .csv as plain text via NL pipeline, not IMPORT_CSV (issue #24)", async ({
   extContext,
   popupUrl,
@@ -260,6 +318,101 @@ test("upload-file target accepts .csv as plain text via NL pipeline, not IMPORT_
     mockBbdc.requests.filter((r) => !r.url.includes("check-login")),
   ).toHaveLength(0);
   await expect(page.getByTestId("confirm-section")).toBeVisible();
+  await page.close();
+});
+
+test("upload-file target accepts .srt subtitle (17-item allowlist, issue #38)", async ({
+  extContext,
+  popupUrl,
+  mockBbdc,
+}) => {
+  const page = await extContext.newPage();
+  await page.goto(popupUrl);
+
+  // 新后缀走通：.srt（字幕）在 issue #38 的 17 项白名单内
+  const srtPath = "/tmp/word-radar-e2e-upload.srt";
+  writeFileSync(
+    srtPath,
+    "1\n00:00:01,000 --> 00:00:04,000\nThe wanderer climbed beyond the fog.\n",
+  );
+
+  const [chooser] = await Promise.all([
+    page.waitForEvent("filechooser"),
+    page.getByTestId("upload-file").click(),
+  ]);
+  await chooser.setFiles(srtPath);
+  // i18n（issue #28）：zh-CN 确认摘要，来源措辞「上传采集」
+  await expect(page.getByTestId("confirm-summary")).toHaveText(
+    /本次共计上传采集 \d+ 个单词，其中新词 \d+ 个/,
+    { timeout: 10_000 },
+  );
+  // 确认前零网络（check-login 恢复路径除外）
+  expect(
+    mockBbdc.requests.filter((r) => !r.url.includes("check-login")),
+  ).toHaveLength(0);
+  await expect(page.getByTestId("confirm-section")).toBeVisible();
+  await page.close();
+});
+
+test("upload-file target preprocesses .html: script content never enters the vocabulary (issue #38 决议 A2)", async ({
+  extContext,
+  popupUrl,
+  mockBbdc,
+}) => {
+  const page = await extContext.newPage();
+  await page.goto(popupUrl);
+
+  // .html 预处理（popup 侧 DOMParser→可见正文）：script/style 的源码文本
+  // 不进提取管线，正文词正常进词库
+  const htmlPath = "/tmp/word-radar-e2e-upload.html";
+  writeFileSync(
+    htmlPath,
+    '<html><head><style>.ghoststyle { color: red }</style></head><body>' +
+      "<article><p>The meticulous falconer tamed a stubborn kestrel.</p>" +
+      '<script>var e2eghost = "qqghosttoken";</script>' +
+      "</article></body></html>",
+  );
+
+  await waitCountsLoaded(page);
+  const totalBefore = Number(await page.getByTestId("total").textContent());
+  mockBbdc.reset();
+
+  const [chooser] = await Promise.all([
+    page.waitForEvent("filechooser"),
+    page.getByTestId("upload-file").click(),
+  ]);
+  await chooser.setFiles(htmlPath);
+  await expect(page.getByTestId("confirm-summary")).toHaveText(
+    /本次共计上传采集 \d+ 个单词，其中新词 \d+ 个/,
+    { timeout: 10_000 },
+  );
+
+  // 确认 → 正文词合并入词库并推送
+  await page.getByTestId("confirm-push").click();
+  await expect
+    .poll(async () => Number(await page.getByTestId("total").textContent()))
+    .toBeGreaterThan(totalBefore);
+  await expect
+    .poll(() => mockBbdc.addWordRequests().length, { timeout: 20_000 })
+    .toBeGreaterThan(0);
+  // script 里的幽灵 token 从未触达任何接口（DOMParser 预处理生效的集成证据）
+  expect(
+    mockBbdc.requests.filter((r) => JSON.stringify(r).includes("qqghosttoken")),
+  ).toHaveLength(0);
+  await expect(page.getByTestId("confirm-section")).toBeHidden();
+  // 排空待推池（持久 context 共享推送循环）
+  for (let round = 0; round < 15; round++) {
+    await page.reload();
+    await page.waitForTimeout(3_000);
+    const pending = Number(await page.getByTestId("pending").textContent());
+    const phase = await page.getByTestId("push-status").getAttribute("data-phase");
+    if (pending === 0 && phase !== "running") break;
+    if (pending > 0 && phase !== "running") {
+      await page.getByTestId("retry-push").click();
+    }
+    await page.waitForTimeout(3_000);
+  }
+  await expect(page.getByTestId("pending")).toHaveText(/^0$/);
   await page.close();
 });
 

@@ -1,9 +1,10 @@
 /**
- * issue #24 上传文件采集单测：
- * - background-listener 的 UPLOAD_FILE 分支：文本走同一提取管线 → 驻留待确认
- *   批次（不合并、不推送、零网络）；非法后缀零写入 + 错误日志
- *   stage=upload；确认后与采集批次同语义合并。
- * - sw-channel 的 uploadFile 收窄。
+ * issue #24 上传文件采集单测（issue #38 v1.1-T1 改文件批）：
+ * - background-listener 的 UPLOAD_FILE 分支：文件批整批 = 一次采集——文本
+ *   合并后走同一提取管线 → 驻留待确认批次（不合并、不推送、零网络）；
+ *   任一文件非法后缀 → 整批拒绝、零写入 + 错误日志 stage=upload；
+ *   新批次覆盖旧批次（单驻留语义）；确认后与采集批次同语义合并。
+ * - sw-channel 的 uploadFile 收窄（files 批形状）。
  */
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -15,6 +16,7 @@ import {
 import {
   CONFIRM_COLLECTED,
   UPLOAD_FILE,
+  WORDS_COLLECTED,
   type PushStatus,
 } from "../src/lib/messages.js";
 import type { PushCoordinator } from "../src/lib/push-coordinator.js";
@@ -78,7 +80,7 @@ const flush = async (): Promise<void> => {
   await new Promise<void>((resolve) => setTimeout(resolve, 0));
 };
 
-describe("createBackgroundListener UPLOAD_FILE（issue #24）", () => {
+describe("createBackgroundListener UPLOAD_FILE（issue #24；#38 文件批）", () => {
   /** 与网页采集同源的提取管线：注入确定性 extract 验证被调用与传参。 */
   const freshExtract = () =>
     vi.fn((text: string): WordEntry[] =>
@@ -101,7 +103,7 @@ describe("createBackgroundListener UPLOAD_FILE（issue #24）", () => {
     const sendResponse = vi.fn();
 
     const keep = listener(
-      { type: UPLOAD_FILE, text: "run and jump", fileName: "notes.txt" },
+      { type: UPLOAD_FILE, files: [{ name: "notes.txt", text: "run and jump" }] },
       {},
       sendResponse,
     );
@@ -115,6 +117,82 @@ describe("createBackgroundListener UPLOAD_FILE（issue #24）", () => {
     expect(coordinator.start).not.toHaveBeenCalled();
     expect(sendResponse).toHaveBeenCalledWith({ total: 3, newCount: 1 });
     expect(errorLogger.log).not.toHaveBeenCalled();
+  });
+
+  it("多文件整批 = 一次采集：文本以空行合并成单文本，只跑一次提取、一次 diff（issue #38）", async () => {
+    const extract = freshExtract();
+    const repository = fakeRepository();
+    const listener = createBackgroundListener({
+      repository,
+      bbdcClient: fakeBbdcClient(),
+      actionBadge: fakeActionBadge(),
+      pushCoordinator: fakePushCoordinator(),
+      errorLogger: { log: vi.fn() },
+      extract,
+    });
+    const sendResponse = vi.fn();
+
+    listener(
+      {
+        type: UPLOAD_FILE,
+        files: [
+          { name: "a.txt", text: "run and" },
+          { name: "b.md", text: "jump" },
+        ],
+      },
+      {},
+      sendResponse,
+    );
+    await flush();
+
+    // 整批合并：extract 只收到一次合并文本（\n\n 连接），预览是合并后词数
+    expect(extract).toHaveBeenCalledTimes(1);
+    expect(extract).toHaveBeenCalledWith("run and\n\njump");
+    expect(repository.countNew).toHaveBeenCalledTimes(1);
+    expect(sendResponse).toHaveBeenCalledWith({ total: 3, newCount: 3 });
+  });
+
+  it("新批次覆盖旧批次：先 WORDS_COLLECTED 再 UPLOAD_FILE，CONFIRM 合并的是上传批次（issue #38）", async () => {
+    const extract = freshExtract();
+    const repository = fakeRepository();
+    const listener = createBackgroundListener({
+      repository,
+      bbdcClient: fakeBbdcClient(),
+      actionBadge: fakeActionBadge(),
+      pushCoordinator: fakePushCoordinator(),
+      errorLogger: { log: vi.fn() },
+      extract,
+    });
+
+    listener(
+      {
+        type: WORDS_COLLECTED,
+        entries: [
+          { lemma: "alphaword", flags: 0 },
+          { lemma: "betaword", flags: 0 },
+        ],
+      },
+      {},
+      vi.fn(),
+    );
+    await flush();
+    listener(
+      { type: UPLOAD_FILE, files: [{ name: "serendipity.txt", text: "serendipity" }] },
+      {},
+      vi.fn(),
+    );
+    await flush();
+
+    const sendResponse = vi.fn();
+    listener({ type: CONFIRM_COLLECTED }, {}, sendResponse);
+    await flush();
+    await flush();
+
+    // 单驻留语义：上传批次覆盖了网页采集批次
+    expect(repository.mergeCollected).toHaveBeenCalledWith([
+      { lemma: "serendipity", flags: 0 },
+    ]);
+    expect(sendResponse).toHaveBeenCalledWith({ total: 1, pending: 1 });
   });
 
   it("确认（CONFIRM_COLLECTED）合并上传批次并触发推送：与采集批次同语义", async () => {
@@ -131,7 +209,7 @@ describe("createBackgroundListener UPLOAD_FILE（issue #24）", () => {
     });
 
     listener(
-      { type: UPLOAD_FILE, text: "serendipity", fileName: "words.md" },
+      { type: UPLOAD_FILE, files: [{ name: "words.md", text: "serendipity" }] },
       {},
       vi.fn(),
     );
@@ -149,7 +227,7 @@ describe("createBackgroundListener UPLOAD_FILE（issue #24）", () => {
     expect(sendResponse).toHaveBeenCalledWith({ total: 1, pending: 1 });
   });
 
-  it("验收修订：.csv / .markdown 等纯文本后缀合法——.csv 走自然语言提取管线（不是 IMPORT_CSV 的结构化解析）", async () => {
+  it("验收修订：.csv / .markdown / .srt 等纯文本后缀合法——.csv 走自然语言提取管线（不是 IMPORT_CSV 的结构化解析）", async () => {
     const extract = freshExtract();
     const repository = fakeRepository();
     const listener = createBackgroundListener({
@@ -161,9 +239,9 @@ describe("createBackgroundListener UPLOAD_FILE（issue #24）", () => {
       extract,
     });
 
-    for (const fileName of ["notes.csv", "readme.markdown", "app.log", "dump.json", "a.text"]) {
+    for (const fileName of ["notes.csv", "readme.markdown", "app.log", "dump.json", "a.text", "eps.srt", "lyrics.lrc"]) {
       const sendResponse = vi.fn();
-      listener({ type: UPLOAD_FILE, text: "run and jump", fileName }, {}, sendResponse);
+      listener({ type: UPLOAD_FILE, files: [{ name: fileName, text: "run and jump" }] }, {}, sendResponse);
       await flush();
       expect(sendResponse).toHaveBeenCalledWith({ total: 3, newCount: 3 });
     }
@@ -186,7 +264,7 @@ describe("createBackgroundListener UPLOAD_FILE（issue #24）", () => {
     const sendResponse = vi.fn();
 
     const keep = listener(
-      { type: UPLOAD_FILE, text: "binary-ish", fileName: "photo.png" },
+      { type: UPLOAD_FILE, files: [{ name: "photo.png", text: "binary-ish" }] },
       {},
       sendResponse,
     );
@@ -203,6 +281,43 @@ describe("createBackgroundListener UPLOAD_FILE（issue #24）", () => {
     expect(errorLogger.log).toHaveBeenCalledTimes(1);
     const event = errorLogger.log.mock.calls[0]?.[0] as { stage: string };
     expect(event.stage).toBe("upload"); // 与 IMPORT_CSV 的 import 阶段可区分
+  });
+
+  it("混入非法后缀 → 整批拒绝：零提取、零 diff，错误含非法文件名（issue #38）", async () => {
+    const extract = freshExtract();
+    const repository = fakeRepository();
+    const errorLogger = { log: vi.fn() };
+    const listener = createBackgroundListener({
+      repository,
+      bbdcClient: fakeBbdcClient(),
+      actionBadge: fakeActionBadge(),
+      pushCoordinator: fakePushCoordinator(),
+      errorLogger,
+      extract,
+    });
+    const sendResponse = vi.fn();
+
+    listener(
+      {
+        type: UPLOAD_FILE,
+        files: [
+          { name: "good.txt", text: "run and jump" },
+          { name: "sketch.exe", text: "malformed" },
+        ],
+      },
+      {},
+      sendResponse,
+    );
+    await flush();
+
+    expect(extract).not.toHaveBeenCalled();
+    expect(repository.countNew).not.toHaveBeenCalled();
+    expect(sendResponse.mock.calls[0]?.[0]).toEqual({
+      ok: false,
+      error: expect.stringContaining("sketch.exe"),
+    });
+    const event = errorLogger.log.mock.calls[0]?.[0] as { stage: string };
+    expect(event.stage).toBe("upload");
   });
 
   it("countNew 抛错：应答 upload-failed 并写错误日志 stage=upload", async () => {
@@ -222,7 +337,7 @@ describe("createBackgroundListener UPLOAD_FILE（issue #24）", () => {
     const sendResponse = vi.fn();
 
     listener(
-      { type: UPLOAD_FILE, text: "run", fileName: "a.txt" },
+      { type: UPLOAD_FILE, files: [{ name: "a.txt", text: "run" }] },
       {},
       sendResponse,
     );
@@ -235,27 +350,27 @@ describe("createBackgroundListener UPLOAD_FILE（issue #24）", () => {
   });
 });
 
-describe("sw-channel uploadFile 收窄（issue #24）", () => {
+describe("sw-channel uploadFile 收窄（issue #24；#38 文件批）", () => {
   it("BatchPreview → {ok:true,total,newCount}", async () => {
     const channel = {
       uploadFile: vi.fn(async () => ({ total: 4, newCount: 2 })),
     };
+    const files = [{ name: "a.txt", text: "some text" }];
     await expect(
-      uploadFile(channel, "some text", "a.txt"),
+      uploadFile(channel, files),
     ).resolves.toEqual({ ok: true, total: 4, newCount: 2 });
-    expect(channel.uploadFile).toHaveBeenCalledWith("some text", "a.txt");
+    expect(channel.uploadFile).toHaveBeenCalledWith(files);
   });
 
   it("错误应答原样透传；异常应答/抛错归一为 upload-unavailable", async () => {
     await expect(
       uploadFile(
-        { uploadFile: vi.fn(async () => ({ ok: false, error: "a.csv: 仅支持" })) },
-        "x",
-        "a.csv",
+        { uploadFile: vi.fn(async () => ({ ok: false, error: "a.exe: 仅支持" })) },
+        [{ name: "a.exe", text: "x" }],
       ),
-    ).resolves.toEqual({ ok: false, error: "a.csv: 仅支持" });
+    ).resolves.toEqual({ ok: false, error: "a.exe: 仅支持" });
     await expect(
-      uploadFile({ uploadFile: vi.fn(async () => "garbage") }, "x", "a.txt"),
+      uploadFile({ uploadFile: vi.fn(async () => "garbage") }, [{ name: "a.txt", text: "x" }]),
     ).resolves.toEqual({ ok: false, error: "upload-unavailable" });
     await expect(
       uploadFile(
@@ -264,8 +379,7 @@ describe("sw-channel uploadFile 收窄（issue #24）", () => {
             throw new Error("sw gone");
           }),
         },
-        "x",
-        "a.txt",
+        [{ name: "a.txt", text: "x" }],
       ),
     ).resolves.toEqual({ ok: false, error: "upload-unavailable" });
   });

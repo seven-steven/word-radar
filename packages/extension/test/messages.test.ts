@@ -20,6 +20,8 @@ import {
   isGetCountsMessage,
   isImportCsvMessage,
   isMarkPushedMessage,
+  isUploadFileMessage,
+  UPLOAD_FILE,
   isWordsCollectedMessage,
 } from "../src/lib/messages.js";
 
@@ -228,5 +230,43 @@ describe("isExportCsvResponse", () => {
     expect(isExportCsvResponse({ ok: true, csv: 1 })).toBe(false);
     expect(isExportCsvResponse({ ok: false })).toBe(false);
     expect(isExportCsvResponse("csv")).toBe(false);
+  });
+});
+
+describe("isUploadFileMessage（issue #38 文件批）", () => {
+  it("接受合法文件批消息（含空 files 数组与空文本）", () => {
+    expect(
+      isUploadFileMessage({
+        type: "UPLOAD_FILE",
+        files: [{ name: "a.txt", text: "run" }],
+      }),
+    ).toBe(true);
+    expect(isUploadFileMessage({ type: "UPLOAD_FILE", files: [] })).toBe(true);
+    expect(
+      isUploadFileMessage({
+        type: "UPLOAD_FILE",
+        files: [{ name: "a.txt", text: "" }],
+      }),
+    ).toBe(true);
+  });
+
+  it("拒绝缺 files、非数组 files、成员缺字段与畸形值", () => {
+    expect(isUploadFileMessage({ type: "UPLOAD_FILE" })).toBe(false);
+    expect(isUploadFileMessage({ type: "UPLOAD_FILE", files: "a.txt" })).toBe(false);
+    expect(
+      isUploadFileMessage({ type: "UPLOAD_FILE", files: [{ name: "a.txt" }] }),
+    ).toBe(false);
+    expect(
+      isUploadFileMessage({ type: "UPLOAD_FILE", files: [{ text: "run" }] }),
+    ).toBe(false);
+    expect(
+      isUploadFileMessage({ type: "UPLOAD_FILE", files: [{ name: 1, text: "run" }] }),
+    ).toBe(false);
+    // 旧单文件协议形状（text/fileName）不再被接受
+    expect(
+      isUploadFileMessage({ type: "UPLOAD_FILE", text: "run", fileName: "a.txt" }),
+    ).toBe(false);
+    expect(isUploadFileMessage(null)).toBe(false);
+    expect(isUploadFileMessage(UPLOAD_FILE)).toBe(false);
   });
 });

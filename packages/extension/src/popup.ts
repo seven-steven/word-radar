@@ -10,9 +10,11 @@
  * chrome.* 调用收在边界模块里：
  * - active-tab.ts：popup → content（COLLECT_WORDS / 应答）+ 新标签页打开
  * - sw-channel.ts：popup → service worker（GET_COUNTS / CHECK_LOGIN /
- *   EXPORT_CSV / IMPORT_CSV / CONFIRM_COLLECTED / DISCARD_COLLECTED）
+ *   EXPORT_CSV / IMPORT_CSV / UPLOAD_FILE / CONFIRM_COLLECTED / DISCARD_COLLECTED）
  * - i18n.ts：chrome.i18n（applyStaticI18n 静态回填 + t/t1/t2/t3 动态文案）
- * 本地文件操作收在 csv-file.ts（下载 / 文件选择，可注入）。
+ * 本地文件操作收在 csv-file.ts（下载 / 文件选择，可注入；上传为多选，
+ * issue #38：一次上传的全部文件整批 = 一次采集，html/xml 经 html-text.ts
+ * 在 popup 侧预处理为纯文本）。
  *
  * 词库读写 + HTTP 调用 全部发生在 service worker；popup 不直连 IndexedDB、不发 HTTP。
  *
@@ -381,10 +383,11 @@ async function importCsvFromFile(): Promise<void> {
 
 
 /**
- * 上传文件采集（issue #24）：文件网关读本地 .txt/.md → SW 用与网页采集同一
- * core 提取管线处理并驻留待确认批次（确认前零网络请求）→ 确认页展示
- * 「本次共计上传采集 N 个单词，其中新词 M 个」。确认 = 合并 + 一轮推送
- * （同采集）；取消丢弃批次。
+ * 上传文件采集（issue #24；#38 v1.1-T1 改多文件）：文件网关一次读出全部
+ * 选中文件（html/xml 已在网关侧预处理为纯文本）→ SW 把整批合并成单文本
+ * 走与网页采集同一 core 提取管线并驻留待确认批次（整批 = 一次采集，确认前
+ * 零网络请求）→ 确认页展示「本次共计上传采集 N 个单词，其中新词 M 个」。
+ * 确认 = 合并 + 一轮推送（同采集）；取消丢弃批次。
  */
 async function uploadFileFromDisk(): Promise<void> {
   const picked = await browserCsvFileGateway.pickUploadText();
@@ -393,9 +396,15 @@ async function uploadFileFromDisk(): Promise<void> {
   // 反馈路由（返工锁定）：上传按钮在主采集行，抽屉收起时 sync-status 完全
   // 不可见——进行中 / 失败的反馈一律走主状态行 statusEl；成功则以确认卡为反馈。
   hideConfirmPage();
-  renderStatusLine(statusEl, t1("uploadCollectingFile", picked.name));
+  // 进行中状态行（issue #38）：单文件带文件名；多文件整批带文件数
+  renderStatusLine(
+    statusEl,
+    picked.length > 1
+      ? t1("uploadCollectingFiles", picked.length)
+      : t1("uploadCollectingFile", picked[0]?.name ?? ""),
+  );
   try {
-    const outcome = await uploadFile(chromeSwChannel, picked.text, picked.name);
+    const outcome = await uploadFile(chromeSwChannel, picked);
     if (outcome.ok) {
       // 批次已驻留 SW 内存：确认卡即成功反馈（措辞用「上传采集」，计数语义与采集一致）
       renderConfirmPage("sourceUpload", outcome.total, outcome.newCount);

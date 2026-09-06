@@ -23,6 +23,7 @@ import {
   type ExportCsvResponse,
   type ImportCsvResponse,
   type PushStatus,
+  type UploadedFilePart,
 } from "./messages.js";
 import { createBbdcClient, type BbdcClient } from "./bbdc-client.js";
 import { chromeActionBadge, composeBadge } from "./action-badge.js";
@@ -98,10 +99,12 @@ export interface BackgroundListenerDeps {
  *   零写入）→ countNew 算新词 diff → 驻留待确认批次（与采集批次同形态，
  *   覆盖任何旧批次）→ 应答 {total,newCount}；不写库、不推送，入库与
  *   推送仅由 CONFIRM_COLLECTED 触发
- * - UPLOAD_FILE（issue #24，验收修订）：纯文本文件（UPLOAD_TEXT_SUFFIXES）
- *   走同一 core 提取管线后驻留待确认批次（同采集语义）；非法后缀零写入 +
- *   错误日志 stage=upload。注意：.csv 在这里当纯文本提词，不做 IMPORT_CSV
- *   的结构化解析
+ * - UPLOAD_FILE（issue #24，验收修订；#38 改文件批）：本地纯文本文件批
+ *   （UPLOAD_TEXT_SUFFIXES 17 项）整批 = 一次采集——文本合并后走同一 core
+ *   提取管线，驻留待确认批次（同采集语义）；任一文件后缀非法 → 整批拒绝、
+ *   零写入 + 错误日志 stage=upload。html/xml 已由 popup 侧预处理为纯文本，
+ *   这里收到的 text 一律当纯文本。注意：.csv 在这里当纯文本提词，不做
+ *   IMPORT_CSV 的结构化解析
  *
  * 其他消息一律忽略（返回 false，不持有消息通道）。
  *
@@ -271,10 +274,12 @@ export function createBackgroundListener(deps: BackgroundListenerDeps) {
       return true;
     }
     if (isUploadFileMessage(message)) {
-      // 上传文件采集（issue #24）：原始文本走与网页采集同一 core 提取管线，
-      // 提取结果只驻留待确认批次（不写库、不推送，确认动作是唯一入库路径）。
+      // 上传文件采集（issue #24；#38 改文件批）：一次上传的全部文件整批
+      // 算一次采集——文本合并后走与网页采集同一 core 提取管线，提取结果只
+      // 驻留待确认批次（不写库、不推送，确认动作是唯一入库路径）。
+      // html/xml 已由 popup 侧预处理为纯文本，这里收到的 text 一律当纯文本。
       // 与 IMPORT_CSV 的区别：这是自然语言文本，不是 lemma,flags 结构化词表。
-      void handleUploadFile(message.text, message.fileName, {
+      void handleUploadFile(message.files, {
         repository: deps.repository,
         extract: deps.extract ?? extractWordEntries,
       })
@@ -357,28 +362,35 @@ async function handleImportCsv(
 }
 
 /**
- * 上传文件采集（issue #24，验收修订）：校验后缀属于 UPLOAD_TEXT_SUFFIXES
- * （txt/md/markdown/csv/log/text/json 等纯文本）→ core 提取管线（与网页采集
- * 同源）→ countNew 算新词 diff（零网络请求），返回 {entries,preview} 由调用
- * 方驻留为待确认批次——不直接 mergeCollected。
+ * 上传文件采集（issue #24，验收修订；#38 v1.1-T1 改文件批）：一次上传的
+ * 全部文件整批 = 一次采集。先逐文件校验后缀属于 UPLOAD_TEXT_SUFFIXES
+ * （17 项纯文本）——任何一个非法 → 整批拒绝、零提取零写入（错误文案含
+ * 首个非法文件名与支持后缀清单）；合法则全部文本以空行连接成单文本，
+ * 走 core 提取管线（与网页采集同源）→ countNew 算新词 diff（零网络请求），
+ * 返回 {entries,preview} 由调用方驻留为待确认批次（驻留即覆盖旧批次，
+ * 单驻留语义不变）——不直接 mergeCollected。
  *
  * .csv 特例（用户明确决策）：上传入口的 .csv 走自然语言提取管线（从文本中
  * 提词），不是 IMPORT_CSV 的 lemma,flags 结构化解析——结构化词表只走导入。
  */
 async function handleUploadFile(
-  text: string,
-  fileName: string,
+  files: UploadedFilePart[],
   deps: { repository: BackgroundRepository; extract: (text: string) => WordEntry[] },
 ): Promise<
   | { entries: WordEntry[]; preview: BatchPreview }
   | { ok: false; error: string }
 > {
-  const lower = fileName.toLowerCase();
-  const allowed = UPLOAD_TEXT_SUFFIXES.some((suffix) => lower.endsWith(`.${suffix}`));
-  if (!allowed) {
-    const list = UPLOAD_TEXT_SUFFIXES.map((suffix) => `.${suffix}`).join(" / ");
-    return { ok: false, error: t2("errorOnlyTextFiles", fileName, list) };
+  // 后缀校验前置：任何文件非法 → 整批拒绝（issue #38 验收：错误含文件名与清单）
+  for (const file of files) {
+    const lower = file.name.toLowerCase();
+    const allowed = UPLOAD_TEXT_SUFFIXES.some((suffix) => lower.endsWith(`.${suffix}`));
+    if (!allowed) {
+      const list = UPLOAD_TEXT_SUFFIXES.map((suffix) => `.${suffix}`).join(" / ");
+      return { ok: false, error: t2("errorOnlyTextFiles", file.name, list) };
+    }
   }
+  // 整批 = 一次采集：全部文件文本合并成单文本，只跑一次提取
+  const text = files.map((file) => file.text).join("\n\n");
   const entries = deps.extract(text);
   const newCount = await deps.repository.countNew(entries);
   return { entries, preview: { total: entries.length, newCount } };

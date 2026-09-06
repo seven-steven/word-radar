@@ -20,6 +20,8 @@ export type { Counts };
  *   + `DISCARD_COLLECTED`（取消：丢弃待确认批次）
  * - popup → background（T11）：`EXPORT_CSV`（导出词库为 CSV 文本）
  *   + `IMPORT_CSV`（CSV 文本同过确认闸门：驻留待确认批次，不直接入库）
+ * - popup → background（issue #24；#38 改文件批）：`UPLOAD_FILE`（本地纯文本
+ *   文件批整批算一次采集，同过确认闸门；html/xml 由 popup 侧预处理为纯文本）
  *
  * background 是 WORDS_COLLECTED / GET_COUNTS / MARK_PUSHED / CONFIRM_COLLECTED /
  * DISCARD_COLLECTED / EXPORT_CSV / IMPORT_CSV 的唯一接收方
@@ -40,12 +42,16 @@ export const IMPORT_CSV = "IMPORT_CSV" as const;
 export const UPLOAD_FILE = "UPLOAD_FILE" as const;
 
 /**
- * 上传文件采集允许的纯文本后缀（issue #24 验收修订：放宽到各类纯文本）。
+ * 上传文件采集允许的纯文本后缀（issue #24 验收修订放宽；issue #38 v1.1-T1
+ * 扩至 17 项：新增字幕 srt/vtt/lrc、轻标记 org/rst/adoc、字幕高级格式
+ * ass/ssa 与结构文档 html/xml；rtf 为富文本格式，明确不进）。
  * popup 文件选择器的 accept 过滤与 SW 的后缀校验共用这一份清单。
  *
  * 注意：这里的 .csv 走自然语言提取管线（extractWordEntries，从文本中
  * 提词），不是 IMPORT_CSV 的 lemma,flags 结构化解析——用户明确决策：
- * 上传入口一律当纯文本，结构化词表只走导入入口。
+ * 上传入口一律当纯文本，结构化词表只走导入入口。html/xml 由 popup 侧
+ * 预处理为纯文本（html-text.ts，issue #38 决议 A2）后才进消息，SW 收到的
+ * text 一律当纯文本。
  */
 export const UPLOAD_TEXT_SUFFIXES = [
   "txt",
@@ -55,6 +61,16 @@ export const UPLOAD_TEXT_SUFFIXES = [
   "log",
   "text",
   "json",
+  "srt",
+  "vtt",
+  "lrc",
+  "org",
+  "rst",
+  "adoc",
+  "ass",
+  "ssa",
+  "html",
+  "xml",
 ] as const;
 
 export interface PushStatus {
@@ -146,22 +162,29 @@ export interface ImportCsvMessage {
   fileName: string;
 }
 
+/** 文件批的单个成员（issue #38 v1.1-T1）：文件名 + popup 侧读出的完整文本。 */
+export interface UploadedFilePart {
+  name: string;
+  text: string;
+}
+
 /**
- * popup → background（issue #24 验收修订）：上传一份本地纯文本文件
- * （后缀见 UPLOAD_TEXT_SUFFIXES：txt/md/markdown/csv/log/text/json）。
- * 走与网页采集相同的 core 提取管线（extractWordEntries），提取结果只驻留
- * 待确认批次（与采集/导入批次同形态），应答 `BatchPreview`；入库与推送仅由
- * `CONFIRM_COLLECTED` 触发。与 IMPORT_CSV（lemma,flags CSV）语义不同：
- * 这是自然语言文本，不是结构化词表——即便上传 .csv 也当纯文本提词，
- * 不走结构化解析（用户明确决策）。文件名后缀不合法时零写入，
- * 应答 {ok:false,error}。
+ * popup → background（issue #24 验收修订；issue #38 v1.1-T1 改文件批）：
+ * 上传一次操作选中的全部本地纯文本文件（后缀见 UPLOAD_TEXT_SUFFIXES 17 项）。
+ * 整批 = 一次采集：全部文件文本合并后走与网页采集相同的 core 提取管线
+ * （extractWordEntries），提取结果只驻留待确认批次（与采集/导入批次同形态），
+ * 应答 `BatchPreview`；入库与推送仅由 `CONFIRM_COLLECTED` 触发。
+ * 与 IMPORT_CSV（lemma,flags CSV）语义不同：这是自然语言文本，不是结构化
+ * 词表——即便上传 .csv 也当纯文本提词，不走结构化解析（用户明确决策）。
+ * 任一文件名后缀不合法 → 整批拒绝，零写入，应答 {ok:false,error}
+ * （含首个非法文件名与支持后缀清单）。html/xml 已由 popup 侧预处理为
+ * 纯文本（DOMParser 是浏览器 API，见 html-text.ts），SW 收到的 text 一律
+ * 当纯文本。
  */
 export interface UploadFileMessage {
   type: typeof UPLOAD_FILE;
-  /** 文件的完整文本（popup 侧 FileReader 读出）。 */
-  text: string;
-  /** 源文件名：校验后缀（UPLOAD_TEXT_SUFFIXES）+ 错误提示包装。 */
-  fileName: string;
+  /** 文件批：每项 {name, text}（html/xml 的 text 已是预处理后的纯文本）。 */
+  files: UploadedFilePart[];
 }
 
 /** service worker → popup 的导出应答。 */
@@ -297,8 +320,13 @@ export function isUploadFileMessage(
   return (
     isObject(value) &&
     value.type === UPLOAD_FILE &&
-    typeof value.text === "string" &&
-    typeof value.fileName === "string"
+    Array.isArray(value.files) &&
+    value.files.every(
+      (part) =>
+        isObject(part) &&
+        typeof part.name === "string" &&
+        typeof part.text === "string",
+    )
   );
 }
 

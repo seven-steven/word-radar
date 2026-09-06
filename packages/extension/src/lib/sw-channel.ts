@@ -23,6 +23,7 @@ import {
   type MarkPushedMessage,
   type CheckLoginMessage,
   type UploadFileMessage,
+  type UploadedFilePart,
 } from "./messages.js";
 
 /**
@@ -44,8 +45,8 @@ export interface SwChannel {
   exportCsv(): Promise<unknown>;
   /** T11：把本地 CSV 文本交给 SW（解析后驻留待确认批次，确认才入库）。 */
   importCsv(csvText: string, fileName: string): Promise<unknown>;
-  /** issue #24：把本地纯文本（UPLOAD_TEXT_SUFFIXES）交给 SW（同一提取管线，驻留待确认批次）。 */
-  uploadFile(text: string, fileName: string): Promise<unknown>;
+  /** issue #24；#38 改文件批：把本地纯文本文件批（UPLOAD_TEXT_SUFFIXES）交给 SW（整批 = 一次采集，驻留待确认批次）。 */
+  uploadFile(files: UploadedFilePart[]): Promise<unknown>;
   /** 确认待确认批次（issue #22）：SW 合并入词库并触发一轮推送。 */
   confirmCollected(): Promise<unknown>;
   /** 取消：丢弃 SW 内存中的待确认批次。 */
@@ -79,8 +80,8 @@ export const chromeSwChannel: SwChannel = {
     const message: ImportCsvMessage = { type: IMPORT_CSV, csvText, fileName };
     return chrome.runtime.sendMessage(message);
   },
-  uploadFile(text: string, fileName: string) {
-    const message: UploadFileMessage = { type: UPLOAD_FILE, text, fileName };
+  uploadFile(files: UploadedFilePart[]) {
+    const message: UploadFileMessage = { type: UPLOAD_FILE, files };
     return chrome.runtime.sendMessage(message);
   },
   confirmCollected() {
@@ -256,18 +257,17 @@ export type UploadFileOutcome =
   | { ok: false; error: string };
 
 /**
- * issue #24 上传文件采集收窄（同过确认闸门）：
+ * issue #24 上传文件采集收窄（同过确认闸门；#38 改文件批）：
  * - SW 返回 BatchPreview（提取成功，批次已驻留）→ `{ok:true,total,newCount}`
- * - SW 返回 `{ok:false,error}`（非 .txt/.md 文件等）→ 原样透传
+ * - SW 返回 `{ok:false,error}`（任一文件后缀非法等）→ 原样透传
  * - 任何其他应答 / 抛错 → `{ok:false}`
  */
 export async function uploadFile(
   channel: SwChannel,
-  text: string,
-  fileName: string,
+  files: UploadedFilePart[],
 ): Promise<UploadFileOutcome> {
   try {
-    const raw = await channel.uploadFile(text, fileName);
+    const raw = await channel.uploadFile(files);
     if (isBatchPreview(raw)) {
       return { ok: true, total: raw.total, newCount: raw.newCount };
     }
