@@ -7,9 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/
 
 ## [Unreleased]
 
-### Changed
+## [1.0.0] - 2026-09-06
 
-- Logo 图标矢量化重绘：`word-radar.svg` 从内嵌 1024px 位图的伪 SVG（945KB）重写为纯矢量路径（1KB，缩小约 900 倍）——圆角矩形 `rx=229` + 五锚点三次贝塞尔 W 笔画 + 5-stop 水平渐变 `#FF501E→#FCB736`；16/48/128 PNG 从矢量源重新光栅化，边缘更干净（模糊 RMSE 0.038，残差为原位图噪点）
+首个 Chrome Web Store 上架版本。
+
+### 新增
+
+- 采集确认闸门（issue #22）：采集先入确认页集中展示拟入库词条，确认后才开始入库与推送，确认为唯一路径；确认失败保留批次、采集 ack 异常显式重采、CSV 导入同过确认闸门
+- 推送进度实时展示 + badge 回执（issue #23）：popup 事件驱动实时进度（替换轮询），badge 计数回执；badge 异常语义修正（`auth-expired` 与 `!` 分离）+ 推送中断后自动恢复（#26）
+- 错误日志环形缓冲 + 弹窗导出（issue #25）：后台错误留痕，popup 一键导出排查
+- 上传文件采集（issue #24）：popup「上传文件」按钮，`.txt` / `.md` 等纯文本文件走同一确认闸门入库；右键菜单上传入口经决策回退移除（`contextMenus` 权限同步移除）
+- 全量 i18n：manifest 名称 / 描述 / 弹窗标题 `__MSG__` 化，`en` / `zh_CN` / `zh_TW`（繁体复用简体文案）三 locale，中文环境扩展名「单词雷达 WordRadar」、popup 标题「单词雷达」
+- popup 视觉全面重做（issue #35 → `docs/design/DESIGN.md`）：Berkeley Mono man-page 视觉世界——JetBrains Mono 打包字体（65KB woff2，CJK 回退系统字体）、暗色 man-page title bar 头部、dot-leader 点线计数行、`[+]` / `[-]` 括号图标语言、单一 180ms 动效节奏、`prefers-reduced-motion` 全禁、`::selection` 反色与 hairline 滚动条
+
+### 修复
+
+- badge `?` 被残留推送回执遮蔽
+- `CHECK_LOGIN` 残留 `renderBadge` 调用清理（#26 review）
+- e2e shared persistent context 跨测试状态污染
+
+### 测试与工程
+
+- e2e 扩至 20 specs 全绿；断言钉死 zh-CN locale 跟随实际环境
+- popup bundle 解耦：`CORE_VERSION` 走 `core/version` 子路径，静态资源直引不再拉入全量 core
+- `verify-manifest` i18n 校验去重 + 纯函数化（issue #33）
+- logo 矢量化重绘：`word-radar.svg` 从内嵌 1024px 位图的伪 SVG（945KB）重写为纯矢量路径（1KB，缩小约 900 倍）；16/48/128 PNG 从矢量源重新光栅化，边缘更干净（模糊 RMSE 0.038，残差为原位图噪点）
+
+### 文档
+
+- CWS Dashboard 字段结构（5 tab + 2 独立页）与上限实测报告，发版 skill 同步
+- `PRODUCT.md` 捕获产品事实；`DESIGN.md` 锁定目标设计系统；README 权限表与 STORE-LISTING 随 `contextMenus` 移除同步
 
 ## [0.1.0] - 2026-08-22
 
@@ -91,5 +118,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/
 
 - `CONTEXT.md`：项目词汇表，登记 C1–C6 引入的工程词
 - 采集场景、权限口径与手工验收清单同步
+
+[1.0.0]: https://github.com/seven-steven/word-radar/releases/tag/v1.0.0
 
 [0.1.0]: https://github.com/seven-steven/word-radar/releases/tag/v0.1.0

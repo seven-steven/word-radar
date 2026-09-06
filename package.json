@@ -1,6 +1,6 @@
 {
   "name": "word-radar",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "description": "单词雷达 - 一键提取网页英文生词并推送到不背单词生词本",
   "type": "module",
