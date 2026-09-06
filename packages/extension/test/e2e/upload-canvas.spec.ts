@@ -115,6 +115,39 @@ test("upload canvas replaces the upload button and renders the hint (issue #41)"
   await page.close();
 });
 
+test("openReason=upload marker routes the reopened popup straight to the canvas with focus (issue #40 v1.1-T3)", async ({
+  extContext,
+  popupUrl,
+}) => {
+  const page = await extContext.newPage();
+  await page.goto(popupUrl);
+  await waitPopupReady(page);
+
+  // 模拟 SW 侧右键菜单唤起标记：右键菜单原生 UI 在 e2e 无法点击（链路由
+  // test/context-menu.test.ts 的 SW 单测覆盖「标记写入 + openPopup」），
+  // 本例只验 popup 消费端——boot 读到 upload 标记 → 直达上传画布并落焦。
+  await page.evaluate(() => chrome.storage.session.set({ openReason: "upload" }));
+  await page.reload();
+  await waitPopupReady(page);
+
+  // boot 一次性消费标记后 uploadCanvas.focus()（画布 tabindex=0 已就位）
+  await expect
+    .poll(() =>
+      page.evaluate(() => document.activeElement?.getAttribute("data-testid") ?? null),
+    )
+    .toBe("upload-canvas");
+
+  // 标记读到即清：再次打开回到默认态（无标记 → 不聚焦画布，T2 默认态）
+  await page.reload();
+  await waitPopupReady(page);
+  const focused = await page.evaluate(
+    () => document.activeElement?.getAttribute("data-testid") ?? null,
+  );
+  expect(focused).not.toBe("upload-canvas");
+
+  await page.close();
+});
+
 test("drag-drop multiple files merges into ONE confirm batch (issue #41)", async ({
   extContext,
   popupUrl,

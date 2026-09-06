@@ -282,5 +282,13 @@
   "pushProgress": {
     "message": "Push progress",
     "description": "Accessible label for the push progress bar"
+  },
+  "menuCollectPage": {
+    "message": "Collect this page",
+    "description": "Context-menu entry to open the popup and collect the current page (http/https pages only, issue #40)"
+  },
+  "menuUploadFiles": {
+    "message": "Upload files to collect words",
+    "description": "Context-menu entry to open the popup straight at the upload canvas, any page (issue #40)"
   }
 }

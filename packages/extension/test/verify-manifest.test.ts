@@ -21,6 +21,9 @@ const validManifest = {
     "128": "src/assets/icons/icon-128.png",
   },
   default_locale: "en",
+  // ADR 0001：openPopup 门槛；issue #40：右键菜单权限
+  minimum_chrome_version: "127",
+  permissions: ["storage", "activeTab", "scripting", "contextMenus"],
 };
 
 const validMessages = {
@@ -320,6 +323,40 @@ describe("verify-manifest: verifyManifest", () => {
       const result = verifyManifest({ rootVersion: "0.1.0", srcManifest: validManifest, zipManifest: m, srcLocales: validSrcLocales });
       expect(result.ok).toBe(false);
       expect(result.errors.some((e) => /128/.test(e))).toBe(true);
+    });
+  });
+
+  describe("chrome requirements (ADR 0001 + issue #40)", () => {
+    it("passes when minimum_chrome_version is 127 and permissions include contextMenus", () => {
+      const result = verifyManifest({
+        rootVersion: "0.1.0",
+        srcManifest: validManifest,
+        zipManifest: validManifest,
+        srcLocales: validSrcLocales,
+      });
+      expect(result).toEqual({ ok: true, errors: [] });
+    });
+
+    it("fails when minimum_chrome_version is below 127 (openPopup gate, ADR 0001)", () => {
+      const m = { ...validManifest, minimum_chrome_version: "114" };
+      const result = verifyManifest({ rootVersion: "0.1.0", srcManifest: m, zipManifest: m, srcLocales: validSrcLocales });
+      expect(result.ok).toBe(false);
+      expect(result.errors.some((e) => /minimum_chrome_version.*127/.test(e))).toBe(true);
+    });
+
+    it("fails when minimum_chrome_version is missing", () => {
+      const m = { ...validManifest } as Record<string, unknown>;
+      delete m.minimum_chrome_version;
+      const result = verifyManifest({ rootVersion: "0.1.0", srcManifest: m, zipManifest: m, srcLocales: validSrcLocales });
+      expect(result.ok).toBe(false);
+      expect(result.errors.some((e) => /minimum_chrome_version/.test(e))).toBe(true);
+    });
+
+    it("fails when permissions do not include contextMenus (issue #40)", () => {
+      const m = { ...validManifest, permissions: ["storage", "activeTab", "scripting"] };
+      const result = verifyManifest({ rootVersion: "0.1.0", srcManifest: m, zipManifest: m, srcLocales: validSrcLocales });
+      expect(result.ok).toBe(false);
+      expect(result.errors.some((e) => /contextMenus/.test(e))).toBe(true);
     });
   });
 });

@@ -12,6 +12,10 @@ import { createBackgroundListener } from "./lib/background-listener.js";
 import { createBbdcClient } from "./lib/bbdc-client.js";
 import { createWordRepository } from "./lib/word-repository.js";
 import { cleanupLegacyAutoPush } from "./lib/settings.js";
+import {
+  createContextMenuListener,
+  registerContextMenus,
+} from "./lib/context-menu.js";
 
 const HEARTBEAT_KEY = "word-radar-installed";
 
@@ -25,6 +29,16 @@ const bbdcClient = createBbdcClient({ fetch: globalThis.fetch.bind(globalThis) }
 chrome.runtime.onInstalled.addListener(() => {
   void chrome.storage.local.set({ [HEARTBEAT_KEY]: true });
 });
+
+// 右键菜单（issue #40 v1.1-T3，ADR 0001）：onInstalled 在扩展更新时会再次
+// 触发，registerContextMenus 内部先 removeAll 再 create（幂等）。
+chrome.runtime.onInstalled.addListener(() => {
+  registerContextMenus();
+});
+
+// 菜单点击：写唤起标记（storage.session openReason）+ openPopup——popup boot
+// 读标记分流（collect 自动采集 / upload 直达上传画布），见 lib/open-reason.ts。
+chrome.contextMenus.onClicked.addListener(createContextMenuListener());
 
 // 「自动推送」开关已移除（issue #22）：每次 SW 启动清理旧存储键（幂等）。
 void cleanupLegacyAutoPush();

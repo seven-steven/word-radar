@@ -22,6 +22,10 @@ const OUT_DIR = resolve(REPO_ROOT, "dist");
 const ICON_SIZES = ["16", "48", "128"];
 const I18N_PLACEHOLDER_PATTERN = /^__MSG_(\w+)__$/;
 const I18N_REQUIRED_LOCALES = ["en", "zh_CN", "zh_TW"];
+// ADR 0001：右键菜单的 openPopup 到 Chrome 127 才对所有扩展开放
+const MIN_CHROME_VERSION = 127;
+// issue #40：右键菜单入口需要 contextMenus 权限
+const REQUIRED_PERMISSIONS = ["contextMenus"];
 
 /**
  * locale 装载结果：`{ messages }` 装载成功；`{ error }` 携带缺失/解析失败原因
@@ -212,7 +216,8 @@ function checkLocaleConsistency(messageKeys, localeData, label) {
 
 /**
  * 断言 MV3 基本形态：manifest_version=3、name、version、action.default_popup、
- * background.service_worker、icons 三尺寸（16/48/128）。
+ * background.service_worker、icons 三尺寸（16/48/128）；以及 Chrome 要求
+ * （ADR 0001）：minimum_chrome_version ≥ 127、permissions 含 contextMenus。
  */
 function checkMv3Shape(manifest, label) {
   const errors = [];
@@ -227,6 +232,20 @@ function checkMv3Shape(manifest, label) {
   }
   for (const size of ICON_SIZES) {
     if (!manifest.icons?.[size]) errors.push(`${label} manifest: missing icons["${size}"]`);
+  }
+
+  const minChrome = Number(manifest.minimum_chrome_version);
+  if (!Number.isFinite(minChrome) || minChrome < MIN_CHROME_VERSION) {
+    errors.push(
+      `${label} manifest: minimum_chrome_version must be >= ${MIN_CHROME_VERSION}` +
+        ` (chrome.action.openPopup gate, ADR 0001), got "${manifest.minimum_chrome_version ?? ""}"`,
+    );
+  }
+  const permissions = Array.isArray(manifest.permissions) ? manifest.permissions : [];
+  for (const permission of REQUIRED_PERMISSIONS) {
+    if (!permissions.includes(permission)) {
+      errors.push(`${label} manifest: permissions must include "${permission}" (issue #40 context-menu entries)`);
+    }
   }
 
   return errors;

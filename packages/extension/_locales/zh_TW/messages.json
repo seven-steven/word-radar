@@ -282,5 +282,13 @@
   "pushProgress": {
     "message": "推送进度",
     "description": "推送进度条的可访问名称"
+  },
+  "menuCollectPage": {
+    "message": "采集当前页",
+    "description": "右键菜单：打开弹窗并采集当前页（仅 http/https 页面，issue #40）"
+  },
+  "menuUploadFiles": {
+    "message": "上传文件采集生词",
+    "description": "右键菜单：打开弹窗直达上传画布（不限页面，issue #40）"
   }
 }

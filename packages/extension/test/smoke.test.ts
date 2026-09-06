@@ -19,13 +19,14 @@ describe("@word-radar/extension", () => {
     // 权限锁定（spec §Out of Scope 基础上的一处扩权，2026-08-19 用户拍板）：
     // storage + activeTab/scripting —— 后两者用于「旧标签未注入时 executeScript 补注入」
     // （popup 打开即用户手势，activeTab 只作用于当前标签，无 <all_urls> host 权限）。
-    // contextMenus 已随右键「采集目标」菜单一并移除（issue #24 用户决策：
-    // 上传文件只走 popup 内按钮）。仍不申请 cookies/notifications/tabs 等
-    // 敏感权限。
+    // contextMenus 曾随右键「采集目标」菜单移除（issue #24），issue #40 v1.1-T3
+    // 重新引入：仅注册「采集当前页」「上传文件采集生词」两个右键入口项，
+    // 不读取页面内容。仍不申请 cookies/notifications/tabs 等敏感权限。
     expect(manifest.permissions).toEqual([
       "storage",
       "activeTab",
       "scripting",
+      "contextMenus",
     ]);
     const perms = manifest.permissions ?? [];
     for (const forbidden of ["cookies", "notifications", "tabs"]) {
@@ -35,6 +36,11 @@ describe("@word-radar/extension", () => {
       "https://bbdc.cn/*",
       "https://langeasy.com.cn/*",
     ]);
+  });
+
+  it("requires Chrome 127+ (openPopup gate, ADR 0001)", () => {
+    // 右键菜单入口的 chrome.action.openPopup 到 127 才对所有扩展开放
+    expect(manifest.minimum_chrome_version).toBe("127");
   });
 
   it("declares the bbdc host permission", () => {

@@ -65,6 +65,7 @@ import {
 } from "./lib/drop-files.js";
 import { UPLOAD_LIMITS } from "./lib/messages.js";
 import { isStatusLineVisible } from "./lib/status-visibility.js";
+import { consumeOpenReason, chromeOpenReasonSession } from "./lib/open-reason.js";
 import type { PushStatus } from "./lib/messages.js";
 import { applyStaticI18n, t, t1, t3, t4 } from "./lib/i18n.js";
 
@@ -833,5 +834,26 @@ function startPushStatusPolling(): void {
 void refreshCounts();
 void refreshLogin();
 void refreshPushStatus().then(startPushStatusPolling);
+
+/**
+ * 右键菜单唤起分流（issue #40 v1.1-T3，决议 B1/B3/B4）：openPopup 无「打开
+ * 原因」参数，SW 侧点击菜单项后写 storage.session 的 openReason 标记再
+ * openPopup；本处在 boot 时一次性消费（读到即清，先清后执行，防中断残留）：
+ * - "collect" → 复用「采集当前页」按钮路径 void collect()（同一确认闸门，
+ *   待确认批次呈现；无独立链路，由 SW 单测的标记写入 + 既有按钮路径 e2e
+ *   组合保证）；
+ * - "upload" → 上传画布 focus()（tabindex=0 已就位，直达上传入口）；
+ * - 无标记 → 默认态（什么都不做）：点工具栏图标打开的 popup 不经过 SW 写
+ *   标记路径，不受标记影响；标记只在右键菜单路径写入、popup 一次性消费。
+ */
+async function applyOpenReason(): Promise<void> {
+  const reason = await consumeOpenReason(chromeOpenReasonSession);
+  if (reason === "collect") {
+    void collect();
+  } else if (reason === "upload") {
+    uploadCanvas?.focus();
+  }
+}
+void applyOpenReason();
 
 export {};
