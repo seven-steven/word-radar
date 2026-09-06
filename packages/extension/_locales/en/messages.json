@@ -208,8 +208,12 @@
     "description": "Confirmation before an upload discards a collect/import batch (issue #41)"
   },
   "uploadLimitExceeded": {
-    "message": "Limit exceeded: max $1 files / $2 MB; got $3 files / $4 MB",
-    "description": "Upload double-limit whole-batch rejection, params: max file count, max MB, actual file count, actual MB"
+    "message": "Limit exceeded: max $1 files / $2 MB; got $3 files / $4",
+    "description": "Upload double-limit whole-batch rejection, params: max file count, max MB, actual file count, actual bytes (B/KB/MB, sweeper #27)"
+  },
+  "uploadReadFailed": {
+    "message": "Some files could not be read; upload aborted",
+    "description": "Aborted when any file in the upload batch fails to read (sweeper #25), no params"
   },
   "uploadFailed": {
     "message": "Upload collection failed: $1",

@@ -228,7 +228,8 @@ test("drag-drop exceeding the double limit rejects the WHOLE batch (issue #41)",
   await dropOnCanvas(page, files);
 
   await expect(page.getByTestId("status")).toHaveText(
-    /超出上限：最多 200 个文件、20 MB；本次 201 个文件/,
+    // sweeper #27：本批量 201 文件 × 1 字节按 B 如实呈现（不再被 ceil 夸大成 1 MB）
+    /超出上限：最多 200 个文件、20 MB；本次 201 个文件、201 B/,
     { timeout: 10_000 },
   );
   await expect(page.getByTestId("confirm-section")).toBeHidden();
@@ -448,6 +449,54 @@ test("failed upload restores the resident confirm card (code-review #22)", async
   );
 
   // 恢复出的卡片可正常取消（丢弃驻留批，闭环）
+  await page.getByTestId("cancel-collect").click();
+  await expect(page.getByTestId("confirm-section")).toBeHidden();
+  await page.close();
+  await article.close();
+});
+
+test("new collect implicitly cancels a pending overwrite ask (sweeper #24)", async ({
+  extContext,
+  popupUrl,
+  fixtureServer,
+}) => {
+  const article = await extContext.newPage();
+  await article.goto(`${fixtureServer.url}/confirm-gate.html`);
+  await article.waitForTimeout(500); // content script document_idle 注入余量
+
+  const page = await extContext.newPage();
+  await page.goto(popupUrl);
+  await waitPopupReady(page);
+
+  // 制造 collect 驻留批，拖放触发覆盖确认条
+  await article.bringToFront();
+  await page.getByTestId("collect").click();
+  await expect(page.getByTestId("confirm-summary")).toHaveText(
+    /本次共计采集 \d+ 个单词，其中新词 \d+ 个/,
+    { timeout: 15_000 },
+  );
+  await dropOnCanvas(page, [
+    { name: "stale.txt", text: "The quiet potter shaped a clay bowl.\n" },
+  ]);
+  await expect(page.getByTestId("overwrite-ask")).toBeVisible();
+
+  // 新采集意图 = 隐式取消挂起确认（sweeper #24）：确认条消失、卡片重渲为
+  // 新的 collect 批——否则挂起任务会在用户点「继续上传」时覆盖新批
+  await page.getByTestId("collect").click();
+  await expect(page.getByTestId("overwrite-ask")).toBeHidden();
+  await expect(page.getByTestId("confirm-summary")).toHaveText(
+    /本次共计采集 \d+ 个单词，其中新词 \d+ 个/,
+    { timeout: 10_000 },
+  );
+
+  // 对新批再拖放：重新询问（而非沿用旧问题的挂起任务）
+  await dropOnCanvas(page, [
+    { name: "fresh.txt", text: "A bold cartographer redrew the coast.\n" },
+  ]);
+  await expect(page.getByTestId("overwrite-ask")).toBeVisible();
+
+  // 清理：dismiss 丢弃上传 + cancel 丢弃驻留批，不污染后续用例
+  await page.getByTestId("overwrite-dismiss").click();
   await page.getByTestId("cancel-collect").click();
   await expect(page.getByTestId("confirm-section")).toBeHidden();
   await page.close();

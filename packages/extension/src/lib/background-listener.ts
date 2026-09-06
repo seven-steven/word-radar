@@ -316,9 +316,16 @@ export function createBackgroundListener(deps: BackgroundListenerDeps) {
         extract: deps.extract ?? extractWordEntries,
       })
         .then((result) => {
-          pendingBatch = result.entries;
-          renderBadge(); // 上传驻留待确认批次 → badge "?"（issue #23）
-          sendResponse(result.preview);
+          if ("entries" in result) {
+            pendingBatch = result.entries;
+            renderBadge(); // 上传驻留待确认批次 → badge "?"（issue #23）
+            sendResponse(result.preview);
+          } else {
+            // 空文本等防御性拒绝（sweeper #26）：零驻留 + 错误写环形缓冲
+            // （stage=upload，与 UPLOAD_FILE 同手势）
+            errorLogger.log({ stage: "upload", summary: result.error });
+            sendResponse(result);
+          }
         }, (error: unknown) => {
           errorLogger.log({ stage: "upload", summary: t1("errorUploadFailed", errorSummary(error)) });
           sendResponse({ ok: false, error: "upload-failed" });
@@ -433,11 +440,21 @@ async function handleUploadFile(
  * ——与网页采集的整页文本同一待遇，直接进 core 提取管线 → countNew 算新词
  * diff（零网络请求），返回 {entries,preview} 由调用方驻留为待确认批次
  * （驻留即覆盖旧批次，单驻留语义不变）——不直接 mergeCollected。
+ * 空文本防御（sweeper #26，与 UPLOAD_FILE 的空批防御对称）：popup 侧
+ * uploadFromPaste 已挡空串，这里是 SW 防御层——全空白文本拒绝，零驻留
+ * 零写入。注意：非空文本提取 0 词是合法结果，照常驻留出 0 词卡（与网页
+ * 采集空页语义一致），不拦。
  */
 async function handleUploadText(
   text: string,
   deps: { repository: BackgroundRepository; extract: (text: string) => WordEntry[] },
-): Promise<{ entries: WordEntry[]; preview: BatchPreview }> {
+): Promise<
+  | { entries: WordEntry[]; preview: BatchPreview }
+  | { ok: false; error: string }
+> {
+  if (text.trim() === "") {
+    return { ok: false, error: "empty-upload-text" };
+  }
   const entries = deps.extract(text);
   const newCount = await deps.repository.countNew(entries);
   return { entries, preview: { total: entries.length, newCount } };

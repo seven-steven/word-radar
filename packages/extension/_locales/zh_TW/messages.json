@@ -208,8 +208,12 @@
     "description": "上传覆盖 collect/import 驻留批次的确认询问（issue #41）"
   },
   "uploadLimitExceeded": {
-    "message": "超出上限：最多 $1 个文件、$2 MB；本次 $3 个文件、$4 MB",
-    "description": "上传双上限整批拒绝，参数：文件数上限、字节上限（MB）、本次文件数、本次字节（MB）"
+    "message": "超出上限：最多 $1 个文件、$2 MB；本次 $3 个文件、$4",
+    "description": "上传双上限整批拒绝，参数：文件数上限、字节上限（MB）、本次文件数、本次字节（B/KB/MB 如实换算，sweeper #27）"
+  },
+  "uploadReadFailed": {
+    "message": "部分文件读取失败，上传已中止",
+    "description": "上传批任一文件读取失败的中止反馈（sweeper #25），无参数"
   },
   "uploadFailed": {
     "message": "上传采集失败：$1",

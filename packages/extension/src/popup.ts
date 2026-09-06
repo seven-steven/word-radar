@@ -597,11 +597,22 @@ async function runUploadBatch(
  * 整批校验（超限 = 整批拒绝 + 明确反馈，绝不静默截断）+ 摘要 + accepted=0
  * 早退 + 读取 → runUploadBatch。点击 / 拖放 / 粘贴文件在此汇合，语义完全一致。
  */
+/**
+ * 上传批量的人类可读字节（sweeper #27）：Math.ceil 换算会把 201 字节报成
+ * 「1 MB」，误导用户以为触发的是体积上限——小批量按 B / KB 如实呈现；
+ * 一位小数去尾零（1.0 KB → 1 KB）。上限常量本身是整 MB，展示侧仍写「20 MB」。
+ */
+function formatUploadBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const trim = (value: string): string => value.replace(/\.0$/, "");
+  if (bytes < 1024 * 1024) return `${trim((bytes / 1024).toFixed(1))} KB`;
+  return `${trim((bytes / (1024 * 1024)).toFixed(1))} MB`;
+}
+
 async function processUploadFiles(files: File[], replacing: boolean): Promise<void> {
   const gate = filterUploadFiles(files, UPLOAD_LIMITS);
   if (gate.limitError) {
-    // 整批拒绝：上限（常量）/ 本批量（进位 MB，不低估）都换算进反馈
-    const mb = (bytes: number): number => Math.ceil(bytes / (1024 * 1024));
+    // 整批拒绝：上限（常量，整 MB）与本批量（sweeper #27：B/KB/MB 如实换算）
     renderStatusLine(
       statusEl,
       t4(
@@ -609,7 +620,7 @@ async function processUploadFiles(files: File[], replacing: boolean): Promise<vo
         UPLOAD_LIMITS.maxFiles,
         UPLOAD_LIMITS.maxTotalBytes / (1024 * 1024),
         gate.limitError.count,
-        mb(gate.limitError.bytes),
+        formatUploadBytes(gate.limitError.bytes),
       ),
       "error",
     );
@@ -626,7 +637,12 @@ async function processUploadFiles(files: File[], replacing: boolean): Promise<vo
     return;
   }
   const parts = await browserCsvFileGateway.readUploadFiles(gate.accepted);
-  if (!parts) return; // 任一文件读取失败：整批静默中止（三入口同语义）
+  if (!parts) {
+    // 读取失败（sweeper #25）：不再静默中止——与超限/摘要/SW 拒绝同为明确
+    // 反馈，状态行停留旧文案会让用户以为上传仍在进行
+    renderStatusLine(statusEl, t("uploadReadFailed"), "error");
+    return;
+  }
   await runUploadBatch(
     () => uploadFile(chromeSwChannel, parts),
     // 进行中状态行（issue #38）：单文件带文件名；多文件整批带文件数
@@ -756,6 +772,10 @@ function hideConfirmPage(): void {
 }
 
 async function collect(): Promise<void> {
+  // 挂起的上传覆盖确认 = 隐式取消（sweeper #24）：新采集会替换 SW 驻留批并
+  // 重渲卡片——确认条若继续挂起，用户稍后点「继续上传」覆盖的将是他未同意
+  // 丢弃的新 collect 批。收条丢弃暂存任务；对新批的覆盖询问由下次输入重新触发。
+  if (pendingOverwriteJob) hideOverwriteAsk();
   renderStatusLine(statusEl, t("statusCollecting"));
   if (collectButton) collectButton.disabled = true;
   hideConfirmPage();

@@ -456,6 +456,31 @@ describe("createBackgroundListener UPLOAD_TEXT（issue #42 v1.1-T5 粘贴文本�
     expect(errorLogger.log).not.toHaveBeenCalled();
   });
 
+  it("空文本防御：全空白 text → {ok:false,error:'empty-upload-text'}，零提取零驻留（sweeper #26，与空批防御对称）", async () => {
+    const extract = freshExtract();
+    const repository = fakeRepository();
+    const errorLogger = { log: vi.fn() };
+    const listener = createBackgroundListener({
+      repository,
+      bbdcClient: fakeBbdcClient(),
+      actionBadge: fakeActionBadge(),
+      pushCoordinator: fakePushCoordinator(),
+      errorLogger,
+      extract,
+    });
+    const sendResponse = vi.fn();
+
+    const keep = listener({ type: UPLOAD_TEXT, text: "   \n\t " }, {}, sendResponse);
+
+    expect(keep).toBe(true);
+    await flush();
+    expect(extract).not.toHaveBeenCalled();
+    expect(repository.countNew).not.toHaveBeenCalled();
+    expect(sendResponse).toHaveBeenCalledWith({ ok: false, error: "empty-upload-text" });
+    const event = errorLogger.log.mock.calls[0]?.[0] as { stage: string };
+    expect(event.stage).toBe("upload");
+  });
+
   it("新批次覆盖旧批次：先 WORDS_COLLECTED 再 UPLOAD_TEXT，CONFIRM 合并的是粘贴批次", async () => {
     const extract = freshExtract();
     const repository = fakeRepository();
