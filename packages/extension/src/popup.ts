@@ -211,6 +211,10 @@ function renderCounts(total: number | null, pending: number | null): void {
   prevTotal = total;
   prevPending = pending;
   prevPushed = pushed;
+  // 词库待推池是 Retry 可见性的判定源（updateRetryVisibility 注释），counts
+  // 可能晚于 push 状态渲染到达——到达即重评，避免「全推完仍显示 Retry」驻留
+  lastPoolPending = pending;
+  updateRetryVisibility(lastPushStatus);
   lastKnownTotal = total;
   updateEmptyHint();
 }
@@ -271,6 +275,33 @@ function resetPushProgress(): void {
   }
 }
 
+/**
+ * Retry 可见性的双源状态（用户报告「全推完仍显示 Retry」的修复）：
+ * - lastPushStatus：SW PushStatus（renderPushStatus 写入）
+ * - lastPoolPending：词库待推池计数（renderCounts 写入；null=尚未到达）
+ * 两路异步渲染，任一路到达都经 updateRetryVisibility 重评（晚到的一方
+ * 触发收敛），避免「轮次渲染早于计数到达」的状态驻留。
+ */
+let lastPushStatus: PushStatus | null = null;
+let lastPoolPending: number | null = null;
+
+/**
+ * Retry 可见性：判定源是【词库待推池】而非 SW 轮次快照——Retry 的动作语义
+ * 就是「把词库待推池再推一轮」，池空即无可重试（含全部成功的 completed 轮
+ * 与空轮，用户报「Push completed 0 失败 0 待推」时按钮仍渲染、还撑出滚动条）。
+ * 池里有词则一律显示（completed 后失败保留词/真网 401 逃逸词的兜底入口，
+ * e2e badge 用例靠它；PushStatus.total 是本轮快照量、看不到池，不能用）。
+ * counts 未到达（null）时保守按 total>0 显示（避免 boot 闪隐）；
+ * running 恒显示（禁用）。
+ */
+function updateRetryVisibility(status: PushStatus | null): void {
+  if (!retryPushButton || !status) return;
+  const poolHasWords =
+    lastPoolPending === null ? status.total > 0 : lastPoolPending > 0;
+  retryPushButton.hidden = status.phase !== "running" && !poolHasWords;
+  retryPushButton.disabled = status.phase === "running";
+}
+
 function renderPushStatus(status: PushStatus): void {
   const label = status.phase === "running"
     ? t3("pushRunning", status.processed, status.total, status.pending)
@@ -292,9 +323,8 @@ function renderPushStatus(status: PushStatus): void {
     pushFailedEl.classList.toggle("is-failed", status.failed > 0);
   }
   if (retryPushButton) {
-    // A 条件可见：无推送历史且无待推时收起；running 期间禁用
-    retryPushButton.hidden = status.phase === "idle" && status.pending === 0;
-    retryPushButton.disabled = status.phase === "running";
+    lastPushStatus = status;
+    updateRetryVisibility(status);
   }
 }
 

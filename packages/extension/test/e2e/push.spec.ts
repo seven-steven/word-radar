@@ -5,6 +5,7 @@
  * 断言重点：确认即推送是唯一路径 + 请求形状（URL / newwordlist JSON / opcode）
  * + 最终 PushStatus 一致性。真实 bbdc.cn 登录路径永不自动化（安全边界）。
  */
+import { writeFileSync } from "node:fs";
 import { test, expect, waitCountsLoaded } from "./fixtures.js";
 
 test.beforeEach(({ mockBbdc }) => {
@@ -79,6 +80,12 @@ test("confirm merges the batch and pushes the whole pending pool to mocked bbdc"
 
   // 6) 待推清零（全部成功推走）
   await expect(popup.getByTestId("pending")).toHaveText("0");
+
+  // 7) 全部成功 + 词库待推清零 → Retry 收起：判定源是词库待推池（Retry 的
+  //    动作语义），池空即无可重试（用户报「Push completed 0 失败 0 待推」仍
+  //    渲染按钮 + 撑出滚动条）。注意不能用 PushStatus.total——它是本轮快照，
+  //    看不到池里失败保留的词（badge 用例的兜底重试靠「池>0 → 显示」）
+  await expect(popup.getByTestId("retry-push")).toBeHidden();
 
   await popup.close();
   await article.close();
@@ -254,4 +261,64 @@ test("push progress updates live in popup and badge shows x/y then ✓ (issue #2
 
   await reopened.close();
   await article.close();
+});
+
+/**
+ * 空轮收起 Retry + popup 无溢出（用户报告）：确认一批「0 新词」批次（全在库）
+ * → 确认即推送触发的「推送全部待推」拿到空池 → completed total=0 的空轮。
+ * 此时空轮无可推无失败可重试，Retry 必须收起；且这行收起后 popup 内容须收进
+ * 视口不出现滚动条（用户报「Push completed Failed 0 & pending 0」时 Retry 仍
+ * 渲染 + popup 右侧出滚动条——空轮按钮那一行正是撑出滚动条的增量）。
+ */
+test("completed EMPTY round collapses retry-push and keeps popup scroll-free", async ({
+  extContext,
+  popupUrl,
+}) => {
+  const page = await extContext.newPage();
+  await page.goto(popupUrl);
+
+  // 独有词（持久词库）两段式：先导入确认一遍（2 新词入池 + 一轮真实推送），
+  // 再导入同一 CSV 确认（新词 0 → 空轮）。上一用例 afterEach 已排空待推池。
+  const csvPath = "/tmp/word-radar-e2e-empty-round.csv";
+  writeFileSync(csvPath, "lemma,flags\nemptyroundgamma,0\nemptyrounddelta,0\n");
+
+  const importOnce = async (): Promise<void> => {
+    const [chooser] = await Promise.all([
+      page.waitForEvent("filechooser"),
+      page.getByTestId("import-csv").click(),
+    ]);
+    await chooser.setFiles(csvPath);
+    await page.getByTestId("confirm-push").click();
+  };
+
+  // 工具抽屉默认收起（issue #35 重做）：导入按钮在抽屉内，先展开
+  await page.getByTestId("tools-toggle").click();
+
+  // 第一段：2 新词入池 → 确认即推送（total=2 非空轮），等它走完
+  await importOnce();
+  await expect(page.getByTestId("push-status")).not.toHaveAttribute(
+    "data-phase",
+    "running",
+    { timeout: 120_000 },
+  );
+
+  // 第二段：同批再确认（新词 0）→ 触发空轮；succeeded 从第一轮的 2 重置为 0
+  // 是两轮的区分锚（data-phase 在两次确认前后同为 completed，不能单独作锚）
+  await importOnce();
+  await expect(page.getByTestId("push-status")).toHaveAttribute(
+    "data-phase",
+    "completed",
+    { timeout: 30_000 },
+  );
+  await expect(page.getByTestId("push-succeeded")).toHaveText("0");
+
+  // 空轮：Retry 收起（无意义入口）+ popup 内容收进视口（不出滚动条）
+  await expect(page.getByTestId("retry-push")).toBeHidden();
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollHeight <= window.innerHeight,
+    ),
+  ).toBe(true);
+
+  await page.close();
 });
