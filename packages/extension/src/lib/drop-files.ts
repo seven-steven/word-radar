@@ -3,9 +3,10 @@
  * 递归收集文件树（目录深度不限、只收文件），再按上传白名单过滤并做
  * 文件数/总字节双上限整批校验。
  *
- * DOM 依赖面：DataTransfer / DataTransferItem.webkitGetAsEntry / File.size
- * 元数据——不读任何文件内容（内容读取收在 csv-file.ts 的 readUploadFiles，
- * FileReader 一律不出 csv-file.ts）。
+ * DOM 依赖面：DataTransfer / DataTransferItem.getAsFileSystemHandle（File
+ * System Access，Chromium 86+）→ DataTransferItem.webkitGetAsEntry →
+ * dataTransfer.files 三级读取 / File.size 元数据——不读任何文件内容（内容
+ * 读取收在 csv-file.ts 的 readUploadFiles，FileReader 一律不出 csv-file.ts）。
  *
  * 测试友好：目录递归核心只依赖可注入的 getEntries 读取器。真实实现
  * domGetEntries 走 createReader().readEntries 的分批循环——readEntries
@@ -111,6 +112,52 @@ export async function collectFilesFromEntries(
 }
 
 /**
+ * File System Access handle 的最小树节点（handle 形态递归核心，bug A/B 定稿
+ * 方案）：真实 FileSystemFileHandle / FileSystemDirectoryHandle 与测试 fake
+ * 的公共结构形状（结构化类型，不引用 DOM 库类型——getFile/values 声明为可选
+ * 成员，真实 handle 与 HandleLike 天然结构同形、可直接传入，无需 toAsyncEntry
+ * 式边界包装）。真实 FileSystemDirectoryHandle.values() 是 async generator，
+ * 读法必须 for await...of。
+ */
+export interface HandleLike {
+  readonly kind: "file" | "directory";
+  readonly name: string;
+  /** 仅文件节点：读出 File（真实 FileSystemFileHandle.getFile 即此形态）。 */
+  readonly getFile?: () => Promise<File>;
+  /** 仅目录节点：异步迭代子 handle（真实 FileSystemDirectoryHandle.values() 即此形态）。 */
+  readonly values?: () => AsyncIterableIterator<HandleLike>;
+}
+
+/**
+ * handle 形态的深度优先递归收集：语义与 collectFilesFromEntries 完全对齐——
+ * 目录只展开不收录，文件经 getFile() 读出后依序推入 files（复用入少数组，
+ * 遍历中途抛错时已收集部分仍在、错误向上冒泡由 collectDroppedFiles 兜底）；
+ * files.length 达 MAX_TRAVERSE_FILES 即熔断，不再下钻（同款语义见上）。
+ */
+export async function collectFilesFromHandles(
+  roots: readonly HandleLike[],
+  files: File[] = [],
+): Promise<File[]> {
+  const walk = async (nodes: readonly HandleLike[]): Promise<void> => {
+    for (const node of nodes) {
+      if (files.length >= MAX_TRAVERSE_FILES) return; // 熔断：达上限即停止下钻
+      if (node.kind === "file" && node.getFile) {
+        files.push(await node.getFile());
+      } else if (node.kind === "directory" && node.values) {
+        // values() 是 async generator，for await...of 逐个摘下；先物化子数组
+        // 再递归——迭代器中途抛错时整个目录颗粒无收、先行部分仍在 files，
+        // 与 entry 路径 readEntries 分批循环的失败语义对齐
+        const children: HandleLike[] = [];
+        for await (const child of node.values()) children.push(child);
+        await walk(children);
+      }
+    }
+  };
+  await walk(roots);
+  return files;
+}
+
+/**
  * DOM entry → EntryLike 的边界适配（code-review P0：真实拖放死亡修复）。
  * 真实 DOM 的 FileSystemFileEntry.file 是回调式 file(success, error)，
  * 原样透传会让 `await node.file()` 得 undefined → 读 file.name 抛 TypeError
@@ -164,27 +211,97 @@ function snapshotEntries(dataTransfer: DataTransfer): EntryLike[] {
 }
 
 /**
- * drop 事件入口：优先 items 的 webkitGetAsEntry 递归全树；entry 不可得
- * （合成事件 / 浏览器不支持）或遍历一无所获时回退 dataTransfer.files
- * 顶层文件；目录遍历中途失败则尽力返回已收集部分（不重复不放大）。
+ * 同步摘下 handle promise（bug B 修复的第一级原料）：getAsFileSystemHandle
+ * 是 async，但「调用本身」必须发生在 drop 监听器的同步执行段内——事件处理
+ * 让出事件循环后 drag data store 释放/进入保护态，再调恒 null。popup.ts 的
+ * drop 监听器同步起链（collectDroppedFiles 首个 await 之前的同步前缀恰在
+ * 监听器同步段运行），所以这里只同步摘下 promise 数组，await 放后段。
+ * 单条目失败（非函数 / promise reject / 返回 null）记 null，不放大为整批
+ * 失败；真实返回值 FileSystemHandle 与 HandleLike 结构同形（kind/name 字面
+ * 量匹配，getFile/values 在运行时原型链上），无需包装。
+ */
+function snapshotHandlePromises(
+  dataTransfer: DataTransfer,
+): Array<Promise<HandleLike | null>> {
+  const out: Array<Promise<HandleLike | null>> = [];
+  const items = dataTransfer.items;
+  if (!items) return out;
+  for (const item of Array.from(items)) {
+    const getter = (
+      item as DataTransferItem & {
+        getAsFileSystemHandle?: () => Promise<FileSystemHandle | null>;
+      }
+    ).getAsFileSystemHandle;
+    if (typeof getter !== "function") {
+      out.push(Promise.resolve(null)); // 旧引擎 / 合成环境无此 API：该条目记 null
+      continue;
+    }
+    out.push(
+      getter
+        .call(item)
+        .then((handle) =>
+          handle && (handle.kind === "file" || handle.kind === "directory")
+            ? handle
+            : null,
+        )
+        .catch(() => null),
+    );
+  }
+  return out;
+}
+
+/**
+ * drop 事件入口（bug B 定稿方案：三级回退）——
+ * 1. getAsFileSystemHandle（Chromium 86+，File System Access handle）：真实
+ *    环境拖放目录的现役路径（webkitGetAsEntry 的 entry 递归在真实 Chromium
+ *    拖目录时曾收集为空，根因未定位，迁移策略绕开）；
+ * 2. webkitGetAsEntry entry 递归（原样保留的旧路径，e2e 合成事件 / 旧引擎）；
+ * 3. dataTransfer.files 顶层文件快照。
+ * 逐级回退条件：该级无原料（全 null / 不可得）、遍历抛错、收集为空。任何
+ * 一级失败都不抛出到调用方（与既有 catch 语义一致，尽力返回已收集部分）。
+ *
+ * 时序约束（关键）：第一/二级的 API 读取都受「drag data store 存活窗口」
+ * 约束——getAsFileSystemHandle 虽返回 Promise 但调用本身必须同步、
+ * webkitGetAsEntry 是同步 API 也必须在监听器内调用。所以同步前缀（首个
+ * await 之前）一次取齐三级原料：files 快照 + handle promise 数组 + entry
+ * 快照，await 一律放后段。
  */
 export async function collectDroppedFiles(
   dataTransfer: DataTransfer,
 ): Promise<File[]> {
-  // files 同步快照（code-review P1，snapshotEntries 同款先例）：fallback
-  // 闭包若在首个 await 之后才读 dataTransfer.files，drag data store 已被
-  // 释放、永远拿到空——必须在函数顶部同步摘下。
+  // ── 同步段：三级原料一次取齐（时序约束见上） ──
   const filesSnapshot = Array.from(dataTransfer.files ?? []);
   const fallback = (): File[] => filesSnapshot;
-  const roots = snapshotEntries(dataTransfer);
-  if (roots.length === 0) return fallback();
-  const files: File[] = [];
-  try {
-    await collectFilesFromEntries(roots, domGetEntries, files);
-  } catch {
-    // 目录读取中途失败（权限等）：保留已收集部分，由下方空判走回退
+  const handlePromises = snapshotHandlePromises(dataTransfer);
+  const entryRoots = snapshotEntries(dataTransfer);
+
+  // ── await 段：第一级 handle（全 null / 抛错 / 收集为空 → 下一级）──
+  const handles = (await Promise.all(handlePromises)).filter(
+    (handle): handle is HandleLike => handle !== null,
+  );
+  if (handles.length > 0) {
+    const files: File[] = [];
+    try {
+      await collectFilesFromHandles(handles, files);
+    } catch {
+      // handle 遍历中途失败（权限等）：保留已收集部分，空则走下一级
+    }
+    if (files.length > 0) return files;
   }
-  return files.length > 0 ? files : fallback();
+
+  // ── 第二级 entry 递归（原样保留的回退路径）──
+  if (entryRoots.length > 0) {
+    const files: File[] = [];
+    try {
+      await collectFilesFromEntries(entryRoots, domGetEntries, files);
+    } catch {
+      // 目录读取中途失败（权限等）：保留已收集部分，空则走下一级
+    }
+    if (files.length > 0) return files;
+  }
+
+  // ── 第三级 dataTransfer.files 顶层文件 ──
+  return fallback();
 }
 
 export interface UploadLimits {

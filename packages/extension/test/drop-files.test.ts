@@ -2,21 +2,25 @@
 /**
  * 拖放文件收集与上传闸门单测（issue #41 v1.1-T4，jsdom）。
  *
- * e2e 的合成 DataTransfer 无法产生 webkitGetAsEntry（浏览器限制），目录
- * 递归只能在 DOM 边界层测：注入 fake entry 树覆盖嵌套目录 / 空目录 /
- * readEntries 分批循环（>100 项的经典坑）与 dataTransfer.files 回退；
- * filterUploadFiles 为纯函数，直接测白名单过滤与双上限整批拒绝。
+ * e2e 的合成 DataTransfer 无法产生 webkitGetAsEntry / 真实 FileSystemHandle
+ * （浏览器限制），目录递归只能在 DOM 边界层测：注入 fake entry / handle 树
+ * 覆盖嵌套目录 / 空目录 / readEntries 分批循环（>100 项的经典坑）/ 三级
+ * 回退（handle → entry → files）；真实形状的 handle 树由 test/e2e/
+ * opfs-collect.spec.ts 的 OPFS 探针补验。filterUploadFiles 为纯函数，直接
+ * 测白名单过滤与双上限整批拒绝。
  */
 import { describe, expect, it } from "vitest";
 import {
   collectDroppedFiles,
   collectFilesFromEntries,
+  collectFilesFromHandles,
   filterUploadFiles,
   MAX_TRAVERSE_FILES,
   NO_SUFFIX,
   readAllEntries,
   type EntryLike,
   type GetEntries,
+  type HandleLike,
   type ReadEntriesCallback,
 } from "../src/lib/drop-files.js";
 
@@ -60,12 +64,31 @@ function fakeDirEntry(
   };
 }
 
-/** fake DataTransfer：只需 items（带 webkitGetAsEntry）与 files 两个结构面。 */
+/** fake DataTransfer：只需 items（webkitGetAsEntry / getAsFileSystemHandle）与 files 两个结构面。 */
 function fakeDataTransfer(
-  items: Array<{ webkitGetAsEntry: () => EntryLike | null }>,
+  items: Array<{
+    webkitGetAsEntry?: () => EntryLike | null;
+    getAsFileSystemHandle?: () => Promise<HandleLike | null>;
+  }>,
   files: File[] = [],
 ): DataTransfer {
   return { items, files } as unknown as DataTransfer;
+}
+
+/** fake 文件 handle：getFile 直回 Promise（真实 FileSystemFileHandle.getFile 同形）。 */
+function fakeFileHandle(name: string, file: File): HandleLike {
+  return { kind: "file", name, getFile: async () => file };
+}
+
+/** fake 目录 handle：values() 是 async generator（真实 FileSystemDirectoryHandle.values() 同形）。 */
+function fakeDirHandle(name: string, children: HandleLike[]): HandleLike {
+  return {
+    kind: "directory",
+    name,
+    values: async function* () {
+      yield* children;
+    },
+  };
 }
 
 describe("readAllEntries（readEntries 分批循环坑）", () => {
@@ -215,6 +238,195 @@ describe("collectDroppedFiles（drop 事件入口）", () => {
       [top],
     );
     await expect(collectDroppedFiles(dt)).resolves.toEqual([top]);
+  });
+
+  it("items 带 getAsFileSystemHandle：handle 第一级优先，entry 路径不再跑", async () => {
+    const fromHandle = fakeFile("from-handle.txt", "handle");
+    const fromEntry = fakeFile("from-entry.txt", "entry");
+    const dt = fakeDataTransfer(
+      [
+        {
+          // 两路都给：handle 收集成功时结果只含 handle 侧文件（真实环境拖
+          // 目录的正路；entry 曾在真实 Chromium 拖目录时收集为空）
+          webkitGetAsEntry: () => fakeFileEntry("from-entry.txt", fromEntry),
+          getAsFileSystemHandle: async () =>
+            fakeDirHandle("dir", [fakeFileHandle("from-handle.txt", fromHandle)]),
+        },
+      ],
+      [],
+    );
+    await expect(collectDroppedFiles(dt)).resolves.toEqual([fromHandle]);
+  });
+
+  it("getAsFileSystemHandle 全 null：回退 webkitGetAsEntry 路径（第二级）", async () => {
+    const inner = fakeFile("entry-inner.txt", "entry");
+    const dt = fakeDataTransfer(
+      [
+        {
+          webkitGetAsEntry: () =>
+            fakeDirEntry("dir", [fakeFileEntry("entry-inner.txt", inner)]),
+          getAsFileSystemHandle: async () => null,
+        },
+      ],
+      [],
+    );
+    await expect(collectDroppedFiles(dt)).resolves.toEqual([inner]);
+  });
+
+  it("getAsFileSystemHandle reject：单条目失败不放大，逐级回退到 files", async () => {
+    const top = fakeFile("reject-fallback.txt", "flat");
+    const dt = fakeDataTransfer(
+      [
+        {
+          webkitGetAsEntry: () => null,
+          getAsFileSystemHandle: () => Promise.reject(new Error("store gone")),
+        },
+      ],
+      [top],
+    );
+    await expect(collectDroppedFiles(dt)).resolves.toEqual([top]);
+  });
+
+  it("handle 遍历中途 values() 抛错但已收集非空：提前返回 partial，不下钻第二级", async () => {
+    const loose = fakeFile("loose.txt", "partial");
+    const dt = fakeDataTransfer(
+      [
+        {
+          // entry 路径给 null：若误下钻第二级只会收空 → 结果非空即证明
+          // partial 来自第一级的提前返回，而非任何回退路径的产物
+          webkitGetAsEntry: () => null,
+          getAsFileSystemHandle: async () => fakeFileHandle("loose.txt", loose),
+        },
+        {
+          getAsFileSystemHandle: async () => ({
+            kind: "directory",
+            name: "boom",
+            values: async function* (): AsyncIterableIterator<HandleLike> {
+              throw new Error("values rejected");
+            },
+          }),
+        },
+      ],
+      [],
+    );
+    // 抛错被 collectDroppedFiles 兜底：已收集的散文件保住（catch 清空或
+    // files.length>0 门写反 → 本例拿到 [] 而红）
+    await expect(collectDroppedFiles(dt)).resolves.toEqual([loose]);
+  });
+
+  it("handle 首个 getFile 即抛错（收集为 0）：穿透 entry 级第二级回退", async () => {
+    // 根 entry 须用回调式 file(success, error) 形态：snapshotEntries 会把根
+    // 过 toAsyncEntry 包成回调 Promise，Promise 形态的 fakeFileEntry 作根会
+    // 永不 settle（子节点不做适配，才可用 Promise 形态）
+    const inner = fakeFile("entry-inner.txt", "entry");
+    const domEntry = {
+      name: "entry-inner.txt",
+      isFile: true,
+      isDirectory: false,
+      file: (success: (f: File) => void, error?: (e: unknown) => void): void => {
+        void error;
+        setTimeout(() => success(inner), 0);
+      },
+    };
+    const dt = fakeDataTransfer(
+      [
+        {
+          webkitGetAsEntry: () => domEntry as unknown as EntryLike,
+          getAsFileSystemHandle: async () => ({
+            kind: "file",
+            name: "boom.txt",
+            getFile: async () => {
+              throw new Error("getFile rejected");
+            },
+          }),
+        },
+      ],
+      [],
+    );
+    // 0 收集 ≠ 部分成功：必须继续下钻 entry 级（穿透门写坏 → 本例拿到 [] 而红）
+    await expect(collectDroppedFiles(dt)).resolves.toEqual([inner]);
+  });
+});
+
+describe("collectFilesFromHandles（File System Access handle 递归核心）", () => {
+  it("嵌套目录 + 空目录 + 散文件的混合树：深度优先只收文件，保序", async () => {
+    const f1 = fakeFile("f1.txt", "one");
+    const f2 = fakeFile("f2.md", "two");
+    const f3 = fakeFile("f3.txt", "three");
+    const loose = fakeFile("loose.txt", "four");
+    const tree: HandleLike[] = [
+      fakeFileHandle("f1.txt", f1),
+      fakeDirHandle("d1", [
+        fakeFileHandle("f2.md", f2),
+        fakeDirHandle("d2", [
+          fakeFileHandle("f3.txt", f3),
+          fakeDirHandle("empty", []),
+        ]),
+      ]),
+      fakeFileHandle("loose.txt", loose),
+    ];
+    const files = await collectFilesFromHandles(tree);
+    expect(files).toEqual([f1, f2, f3, loose]);
+  });
+
+  it("空目录：返回空数组", async () => {
+    await expect(
+      collectFilesFromHandles([fakeDirHandle("empty", [])]),
+    ).resolves.toHaveLength(0);
+  });
+
+  it("遍历熔断：> MAX_TRAVERSE_FILES 个文件的 fake 树提前终止且不抛（返回恰为上限个）", async () => {
+    const total = MAX_TRAVERSE_FILES + 500;
+    const files = await collectFilesFromHandles([
+      fakeDirHandle(
+        "huge",
+        Array.from({ length: total }, (_, i) =>
+          fakeFileHandle(`f${i}.txt`, fakeFile(`f${i}.txt`, "w")),
+        ),
+      ),
+    ]);
+    expect(files).toHaveLength(MAX_TRAVERSE_FILES);
+  });
+
+  it("getFile 抛错：错误向上冒泡（由 collectDroppedFiles 兜底），已收集部分仍在入少数组", async () => {
+    const ok = fakeFile("ok.txt", "keep");
+    const files: File[] = [];
+    const tree: HandleLike[] = [
+      fakeFileHandle("ok.txt", ok),
+      {
+        kind: "file",
+        name: "boom.txt",
+        getFile: async () => {
+          throw new Error("read failed");
+        },
+      },
+    ];
+    await expect(collectFilesFromHandles(tree, files)).rejects.toThrow(
+      "read failed",
+    );
+    expect(files).toEqual([ok]);
+  });
+
+  it("values() 中途抛错：错误向上冒泡，此前收集的部分仍在入少数组", async () => {
+    const ok = fakeFile("ok.txt", "keep");
+    const files: File[] = [];
+    const tree: HandleLike[] = [
+      fakeFileHandle("ok.txt", ok),
+      {
+        kind: "directory",
+        name: "boom",
+        values: async function* () {
+          yield fakeFileHandle("got.txt", fakeFile("got.txt", "partial"));
+          throw new Error("values boom");
+        },
+      },
+    ];
+    await expect(collectFilesFromHandles(tree, files)).rejects.toThrow(
+      "values boom",
+    );
+    // 物化子数组先于递归：迭代器中途抛错时该目录颗粒无收（与 entry 路径
+    // readEntries 分批失败的语义对齐），但先行的散文件保住
+    expect(files.map((file) => file.name)).toEqual(["ok.txt"]);
   });
 });
 

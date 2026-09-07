@@ -184,8 +184,12 @@
     "description": "上传画布指引文案（issue #41）"
   },
   "uploadCanvasPasteHint": {
-    "message": "可粘贴文本或文件；文件夹请拖放",
-    "description": "上传画布辅行指引：粘贴手势与文件夹引导（issue #42）"
+    "message": "可粘贴文本或文件",
+    "description": "上传画布辅行指引：粘贴手势（issue #42）；文件夹不再只靠拖放，改走「选择文件夹」按钮"
+  },
+  "uploadPickDir": {
+    "message": "选择文件夹",
+    "description": "上传画布「选择文件夹」按钮：showDirectoryPicker 目录点选入口（bug A 修复）"
   },
   "uploadSummaryFiles": {
     "message": "已收录 $1 个文件",

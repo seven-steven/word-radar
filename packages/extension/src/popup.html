@@ -52,12 +52,17 @@
                聚焦后 ⌘V 粘贴文本或文件（issue #42）；role="button" + tabindex 让指引
                文案本身可聚焦可操作，dragover 高亮由 data-dragging 驱动（popup.css），
                aria-label 启动时按 locale 回填（popup.ts），辅行作 aria-describedby 供
-               读屏器播报粘贴/文件夹引导 -->
+               读屏器播报粘贴引导；「选择文件夹」按钮是文件夹的显式点选入口（bug A） -->
           <div class="upload-canvas" data-testid="upload-canvas" role="button" tabindex="0" data-dragging="false" aria-describedby="upload-canvas-sub">
             <span class="upload-canvas-marker" aria-hidden="true">[+]</span>
             <span class="upload-canvas-lines">
               <span data-i18n="uploadCanvasHint">点击选择文件，或拖放文件 / 文件夹</span>
-              <span class="upload-canvas-sub" id="upload-canvas-sub" data-i18n="uploadCanvasPasteHint">可粘贴文本或文件；文件夹请拖放</span>
+              <span class="upload-canvas-sub" id="upload-canvas-sub" data-i18n="uploadCanvasPasteHint">可粘贴文本或文件</span>
+              <!-- 「选择文件夹」次级入口（bug A）：<input type=file> 天生不能选
+                   目录，文件夹选择走 File System Access 的 showDirectoryPicker
+                   （popup.ts）；点击必须 stopPropagation——画布自身的 click 会
+                   开多选文件选择器，冒泡会连开两条选择器 -->
+              <button type="button" class="upload-pick-dir" data-testid="upload-pick-dir" data-i18n="uploadPickDir">选择文件夹</button>
             </span>
           </div>
           <!-- 覆盖确认条（issue #41 决议 A5 的内联形态；code-review P0）：

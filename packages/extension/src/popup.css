@@ -370,6 +370,35 @@ body {
   color: var(--wr-mute);
 }
 
+/* 「选择文件夹」次级入口（bug A）：画布内的低调文字按钮——跟随辅行的
+   12px/mute 层级，下划线提示可点（link-btn 同款手势），hover 转墨；
+   color-only 反馈（DESIGN.md：无阴影无位移），focus-visible 同画布 */
+.upload-pick-dir {
+  appearance: none;
+  background: none;
+  border: none;
+  border-radius: var(--wr-radius-control);
+  padding: 0;
+  align-self: flex-start;
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--wr-mute);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+  transition: color var(--wr-speed) ease-out;
+}
+
+.upload-pick-dir:hover {
+  color: var(--wr-ink);
+}
+
+.upload-pick-dir:focus-visible {
+  outline: 1px solid var(--wr-ink);
+  outline-offset: 2px;
+}
+
 /* ── 覆盖确认条（issue #41 决议 A5 内联形态，code-review P0）：hairline
    描边小条，替代 window.confirm（action popup 中不显示且恒 false）；8px
    间距对齐 status-line 节奏，color-only 原则（无阴影无位移） ── */

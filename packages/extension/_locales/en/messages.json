@@ -184,8 +184,12 @@
     "description": "Upload canvas hint text (issue #41)"
   },
   "uploadCanvasPasteHint": {
-    "message": "Paste text or files; drop folders",
-    "description": "Upload canvas sub-hint: paste gesture and folder guidance (issue #42)"
+    "message": "Paste text or files",
+    "description": "Upload canvas sub-hint: paste gesture (issue #42); folder picking moved to the dedicated choose-folder button, no longer drop-only"
+  },
+  "uploadPickDir": {
+    "message": "Choose folder",
+    "description": "Upload canvas choose-folder button: showDirectoryPicker directory entry (bug A fix)"
   },
   "uploadSummaryFiles": {
     "message": "Collected $1 files",

@@ -61,6 +61,7 @@ import { browserCsvFileGateway } from "./lib/csv-file.js";
 import { defaultErrorLogStorage, formatErrorLog, readErrorLog } from "./lib/error-log.js";
 import {
   collectDroppedFiles,
+  collectFilesFromHandles,
   filterUploadFiles,
   NO_SUFFIX,
 } from "./lib/drop-files.js";
@@ -108,6 +109,8 @@ const emptyHintEl = document.querySelector<HTMLElement>('[data-testid="empty-hin
 const exportCsvButton = document.querySelector<HTMLButtonElement>('[data-testid="export-csv"]');
 const importCsvButton = document.querySelector<HTMLButtonElement>('[data-testid="import-csv"]');
 const uploadCanvas = document.querySelector<HTMLElement>('[data-testid="upload-canvas"]');
+// 「选择文件夹」次级入口（bug A）：showDirectoryPicker 目录 picker（见下）
+const uploadPickDirButton = document.querySelector<HTMLButtonElement>('[data-testid="upload-pick-dir"]');
 const syncStatusEl = document.querySelector<HTMLElement>('[data-testid="sync-status"]');
 const exportLogButton = document.querySelector<HTMLButtonElement>('[data-testid="export-log"]');
 const confirmSection = document.querySelector<HTMLElement>('[data-testid="confirm-section"]');
@@ -660,6 +663,29 @@ async function performUploadFromCanvas(replacing: boolean): Promise<void> {
   await processUploadFiles(picked, replacing);
 }
 
+/**
+ * 画布「选择文件夹」作业（bug A 定稿）：<input type=file> 天生不能选目录，
+ * 文件夹点选走 File System Access 的 showDirectoryPicker（Chromium-only，
+ * minimum_chrome_version 127 恒有）→ collectFilesFromHandles 递归 → 与点击/
+ * 拖放/粘贴完全同一条闸门管线。用户取消（AbortError）静默返回（与点击路径
+ * 取消语义一致）；空目录收集为 0 也静默（同拖放 0 文件语义）。
+ */
+async function performUploadFromDirectory(replacing: boolean): Promise<void> {
+  let handle: FileSystemDirectoryHandle;
+  try {
+    const pick = window.showDirectoryPicker;
+    if (typeof pick !== "function") return; // 防御：入口按钮已在 boot 隐藏，此处兜底
+    handle = await pick({ mode: "read" });
+  } catch (error) {
+    // 用户取消是正常流：AbortError 静默；其余错误交 withUploadGuard 出明确反馈
+    if ((error as DOMException)?.name === "AbortError") return;
+    throw error;
+  }
+  const files = await collectFilesFromHandles([handle]);
+  if (files.length === 0) return; // 空目录 / 全熔断：静默
+  await processUploadFiles(files, replacing);
+}
+
 /** 画布拖放作业：collectDroppedFiles 已在监听器内同步起链，这里续其后段。 */
 async function performUploadFromDrop(
   filesPromise: Promise<File[]>,
@@ -882,6 +908,11 @@ if (uploadCanvas) {
   });
 
   uploadCanvas.addEventListener("keydown", (event) => {
+    // 键盘事件源自画布内后代可交互元素（「选择文件夹」按钮）时直接放行：
+    // preventDefault 会取消按钮的原生激活（合成 click 不再触发，目录路径
+    // 死掉），还会把 Enter/Space 劫持成 performUploadFromCanvas 的多选
+    // 【文件】选择器——按钮 click 上的 stopPropagation 只拦得住鼠标路径
+    if (event.target !== uploadCanvas) return;
     if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
       void dispatchUpload((replacing) => performUploadFromCanvas(replacing));
@@ -931,10 +962,38 @@ if (uploadCanvas) {
       text: (clipboard?.getData("text/plain") ?? "").trim(),
     };
     // 两者皆空：静默忽略（不进闸门，避免对空输入弹覆盖确认条）。
-    // 粘贴目录技术不可行（OS 剪贴板不传目录内容），辅行文案引导「文件夹请拖放」。
+    // 粘贴目录技术不可行（OS 剪贴板不传目录内容）；文件夹不再靠拖放独占，
+    // 改走画布内「选择文件夹」按钮（performUploadFromDirectory），辅行只留
+    // 粘贴引导。
     if (snapshot.files.length === 0 && !snapshot.text) return;
     void dispatchUpload((replacing) => performUploadFromPaste(snapshot, replacing));
   });
+}
+
+// ── 画布「选择文件夹」入口（bug A 定稿）─────────────────
+// TS 5.9 lib.dom 尚未收录 Window.showDirectoryPicker（File System Access，
+// Chromium 86+；minimum_chrome_version 127 恒有），模块内局部 declare 兜底，
+// 不引第三方类型包。
+declare global {
+  interface Window {
+    showDirectoryPicker?(options?: {
+      mode?: "read" | "readwrite";
+    }): Promise<FileSystemDirectoryHandle>;
+  }
+}
+
+if (uploadPickDirButton) {
+  // showDirectoryPicker 缺失时隐藏入口（防御，理论上 127+ 恒有）
+  if (typeof window.showDirectoryPicker !== "function") {
+    uploadPickDirButton.hidden = true;
+  } else {
+    uploadPickDirButton.addEventListener("click", (event) => {
+      // 按钮在画布内：画布自身的 click 会开多选文件选择器，冒泡会连开
+      // 两条选择器——必须在此截断
+      event.stopPropagation();
+      void dispatchUpload((replacing) => performUploadFromDirectory(replacing));
+    });
+  }
 }
 
 // 页面级拖放兜底（code-review P1）：文件拖偏画布、落到页面其它区域时，

@@ -3,7 +3,8 @@
  * 返工：覆盖询问改内联确认条、上传 meta 移入确认卡）：
  * 拖放多文件合并单一确认批、非白名单后缀计数摘要、双上限整批拒绝、覆盖
  * 语义两条（collect/import 驻留批内联确认条、upload 驻留批静默替换）、
- * 粘贴文本直进提取管线、粘贴文件同拖放语义（白名单后缀计数摘要）。
+ * 粘贴文本直进提取管线、粘贴文件同拖放语义（白名单后缀计数摘要）、
+ * 「选择文件夹」按钮键盘激活走目录路径（画布 keydown target 守卫）。
  *
  * 已知边界（code-review P1 修正为实况）：Playwright 合成 DragEvent 的
  * webkitGetAsEntry 恒 null（合成事件不产生 drag data store 的 entry），
@@ -101,10 +102,72 @@ test("upload canvas replaces the upload button and renders the hint (issue #41)"
   await expect(canvas).toHaveAttribute("role", "button");
   await expect(canvas).toHaveAttribute("tabindex", "0");
   await expect(canvas).toContainText("点击选择文件，或拖放文件 / 文件夹");
-  await expect(canvas).toContainText("可粘贴文本或文件；文件夹请拖放");
+  // 辅行（bug A 后）：只剩粘贴引导——文件夹有了显式点选入口，不再「请拖放」。
+  // 全等断言（code-review）：toContainText 是子串匹配，文案若回退带上旧
+  // 「；文件夹请拖放」尾巴这里必须红——过期指引不能静默上线
+  await expect(page.locator("#upload-canvas-sub")).toHaveText("可粘贴文本或文件");
+  // 「选择文件夹」次级入口（bug A）：存在性 + 可访问名（role=button +
+  // name=「选择文件夹」）。picker 的 OS 对话框无法自动化（合成事件不可达
+  // showDirectoryPicker）；键盘激活链路 mock 到 handle 层，见下方
+  // 「keyboard Enter on the focused pick-dir button」用例
+  const pickDir = page.getByTestId("upload-pick-dir");
+  await expect(pickDir).toBeVisible();
+  await expect(page.getByRole("button", { name: "选择文件夹" })).toHaveCount(1);
+  await expect(pickDir).toHaveAttribute("data-i18n", "uploadPickDir");
   // 旧「上传文件」按钮已删（决议 A3）：testid 引用清零
   await expect(page.getByTestId("upload-file")).toHaveCount(0);
 
+  await page.close();
+});
+
+test("keyboard Enter on the focused pick-dir button runs the DIRECTORY path (canvas keydown must not hijack it)", async ({
+  extContext,
+  popupUrl,
+}) => {
+  const page = await extContext.newPage();
+  await page.goto(popupUrl);
+  await waitPopupReady(page);
+
+  // showDirectoryPicker 的 OS 对话框无法自动化（合成键盘事件亦然），mock 到
+  // handle 层：返回含 1 个真实 File 的 fake 目录——目录路径被键盘激活的完整
+  // 链路（picker → handle 递归 → 闸门管线 → SW 提取 → 确认卡）由此打通
+  await page.evaluate(() => {
+    const picked = new File(
+      ["The amber librarian shelved a quiet atlas.\n"],
+      "dir-kb.txt",
+      { type: "text/plain" },
+    );
+    const fakeDir = {
+      kind: "directory" as const,
+      name: "kb-dir",
+      values: async function* () {
+        yield {
+          kind: "file" as const,
+          name: "dir-kb.txt",
+          getFile: async () => picked,
+        };
+      },
+    };
+    (window as unknown as { showDirectoryPicker?: unknown }).showDirectoryPicker =
+      async () => fakeDir;
+  });
+
+  // 键盘激活：focus 后按 Enter（Space 同机制，target 守卫一并覆盖）。缺陷
+  // 复现位：画布 keydown 监听器不查 event.target——preventDefault 掉按钮的
+  // 原生激活（click 永不触发）并劫持成多选【文件】选择器，确认卡永不出现
+  await page.getByTestId("upload-pick-dir").focus();
+  await page.keyboard.press("Enter");
+
+  // 目录路径端到端出卡：确认摘要 + 卡内收录摘要（单文件 M=0 形态）
+  await expect(page.getByTestId("confirm-summary")).toHaveText(
+    /本次共计上传采集 \d+ 个单词，其中新词 \d+ 个/,
+    { timeout: 10_000 },
+  );
+  await expect(page.getByTestId("confirm-meta")).toHaveText(/已收录 1 个文件/);
+
+  // 取消批次：不留待推，避免污染共享词库/推送循环
+  await page.getByTestId("cancel-collect").click();
+  await expect(page.getByTestId("confirm-section")).toBeHidden();
   await page.close();
 });
 
