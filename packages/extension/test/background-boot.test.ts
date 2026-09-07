@@ -81,24 +81,28 @@ describe("background 装配：菜单注册时机（issue #40 回归）", () => {
     const fake = installFakeChrome();
     await importBackground();
 
-    // 不 fire onInstalled——模块加载本身必须完成注册
-    expect(fake.contextMenus.removeAll).toHaveBeenCalledTimes(1);
+    // 不 fire onInstalled——模块加载本身必须完成注册（同步 create，无
+    // removeAll：action 菜单不能等异步链）
+    expect(fake.contextMenus.removeAll).not.toHaveBeenCalled();
     expect(fake.contextMenus.create).toHaveBeenCalledTimes(2);
     expect(fake.contextMenus.create).toHaveBeenCalledWith(
       expect.objectContaining({ id: "collect-page" }),
+      expect.anything(),
     );
     expect(fake.contextMenus.create).toHaveBeenCalledWith(
       expect.objectContaining({ id: "upload-files" }),
+      expect.anything(),
     );
   });
 
-  it("onInstalled 触发（首次安装/版本更新）时注册恰好一次、不重复叠加", async () => {
+  it("onInstalled 触发（首次安装/版本更新）时 removeAll 全量刷新一次（净注册仍两项）", async () => {
     const fake = installFakeChrome();
     await importBackground();
     fake.runtime.onInstalled.fire();
 
+    // 顶层同步 create×2 + onInstalled 刷新 removeAll×1 + create×2
     expect(fake.contextMenus.removeAll).toHaveBeenCalledTimes(1);
-    expect(fake.contextMenus.create).toHaveBeenCalledTimes(2);
+    expect(fake.contextMenus.create).toHaveBeenCalledTimes(4);
     expect(fake.storage.local.set).toHaveBeenCalledWith({ "word-radar-installed": true });
   });
 

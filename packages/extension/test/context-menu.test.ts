@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   createContextMenuListener,
+  refreshContextMenus,
   registerContextMenus,
   type ContextMenuCreateProperties,
   type ContextMenusRegistrar,
@@ -133,7 +134,7 @@ describe("createContextMenuListener", () => {
   });
 });
 
-describe("registerContextMenus", () => {
+describe("registerContextMenus / refreshContextMenus", () => {
   /** 记录调用顺序的 registrar fake：create 仅在 removeAll 回调里发生。 */
   function fakeRegistrar(): ContextMenusRegistrar & {
     created: ContextMenuCreateProperties[];
@@ -151,16 +152,24 @@ describe("registerContextMenus", () => {
     };
   }
 
-  it("先 removeAll 再 create 两项（onInstalled 更新再触发时幂等，不因 id 重复报错）", () => {
+  it("registerContextMenus 同步 create 两项、不 removeAll（action 菜单要求 SW 启动即注册，异步链留冷窗口）", () => {
     const registrar = fakeRegistrar();
     registerContextMenus(registrar);
 
-    expect(registrar.removeAll).toHaveBeenCalledTimes(1);
+    expect(registrar.removeAll).not.toHaveBeenCalled();
     expect(registrar.create).toHaveBeenCalledTimes(2);
     expect(registrar.created.map((p) => p.id)).toEqual(["collect-page", "upload-files"]);
   });
 
-  it("title 经 getMessage 显式解析（chrome.i18n 无文档保证 create 占位符替换，127 门槛下更不可依赖）；contexts 均为 page", () => {
+  it("refreshContextMenus 先 removeAll 再 create（onInstalled 安装/更新时替换旧参数注册）", () => {
+    const registrar = fakeRegistrar();
+    refreshContextMenus(registrar);
+
+    expect(registrar.removeAll).toHaveBeenCalledTimes(1);
+    expect(registrar.created.map((p) => p.id)).toEqual(["collect-page", "upload-files"]);
+  });
+
+  it("title 经 getMessage 显式解析（chrome.i18n 无文档保证 create 占位符替换，127 门槛下更不可依赖）", () => {
     const registrar = fakeRegistrar();
     const messages: Record<string, string> = {
       menuCollectPage: "采集当前页",
@@ -170,7 +179,6 @@ describe("registerContextMenus", () => {
 
     for (const properties of registrar.created) {
       expect(properties.title).not.toMatch(/^__MSG_/);
-      expect(properties.contexts).toEqual(["page"]);
     }
     expect(registrar.created[0]?.title).toBe("采集当前页");
     expect(registrar.created[1]?.title).toBe("上传文件采集生词");
@@ -184,7 +192,16 @@ describe("registerContextMenus", () => {
     expect(registrar.created[1]?.title).toBe("menuUploadFiles");
   });
 
-  it("documentUrlPatterns 只在 collect-page 上（http/https 限定）；upload-files 不限页面", () => {
+  it("contexts 三手势全覆盖：action（右键工具栏图标）+ page（网页裸右键）+ selection（选词后右键，issue #40 复盘）", () => {
+    const registrar = fakeRegistrar();
+    registerContextMenus(registrar);
+
+    for (const properties of registrar.created) {
+      expect(properties.contexts).toEqual(["page", "selection", "action"]);
+    }
+  });
+
+  it("documentUrlPatterns 只在 collect-page 上（http/https 限定，action 菜单同样按当前标签页 URL 匹配）；upload-files 不限页面", () => {
     const registrar = fakeRegistrar();
     registerContextMenus(registrar);
 

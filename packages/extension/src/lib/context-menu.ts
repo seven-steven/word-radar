@@ -5,7 +5,10 @@
  * 两个右键菜单项（title 经 chrome.i18n.getMessage 显式解析——
  * contextMenus.create 的 title 对 __MSG_*__ 占位符没有文档保证的替换
  * 行为，且该替换（若存在）在 Chrome 128+ 才可用，低于本项目
- * minimum_chrome_version 127（ADR 0001）的版本上会得到字面占位符）：
+ * minimum_chrome_version 127（ADR 0001）的版本上会得到字面占位符）。
+ * contexts 三手势全覆盖（右键工具栏图标 action / 网页裸右键 page /
+ * 选词后右键 selection——PAGE 是最弱 context，选区/链接/输入框上右键
+ * 不匹配，背单词主手势必须靠 selection 兜住）：
  * - 「采集当前页」（collect-page）：documentUrlPatterns 限 http/https，
  *   chrome:// 等特殊页不出现；点击 = 写 "collect" 标记 + openPopup，
  *   popup 内自动执行采集并呈现待确认批次。
@@ -13,12 +16,16 @@
  *   上传采集）；点击 = 写 "upload" 标记 + openPopup，popup 直达上传画布
  *   （焦点就位，issue #41）。
  *
- * 注册时序：background.ts 在 SW 顶层调用（每次 SW 启动重放，MV3 幂等）。
- * 先 removeAll 再 create，避免菜单 id 重复注册报错（removeAll 回调里
- * create）。不能只挂 runtime.onInstalled：它仅在 install/版本 update/
- * Chrome update 时触发，「文件更新但版本号不变」的迭代流程踩不中，
- * 注册表为空 → 菜单不可见（issue #40 实测症状，background-boot.test
- * 回归锁定）。
+ * 注册时序（issue #40 复盘两轮定型，两路并行）：
+ * - background.ts 在 SW 顶层**同步**调 registerContextMenus（每次启动
+ *   重放，duplicate id 由网关吞错——幂等）。同步是 action 菜单（右键
+ *   工具栏图标）的硬要求：菜单显示发生在 SW 空闲时，异步注册链会留
+ *   「菜单已显示而注册未落」的冷窗口。
+ * - onInstalled（install/版本 update）时 refreshContextMenus 全量刷新
+ *   （removeAll→create），替换旧参数注册。不能只挂 onInstalled：它对
+ *   「文件更新但版本号不变」的迭代流程（reload/重启）不触发，注册表
+ *   为空 → 菜单不可见（issue #40 实测症状，background-boot.test 回归
+ *   锁定）。
  *
  * 点击侧：openPopup 无「打开原因」参数，先写 storage.session 的 openReason
  * 标记再 openPopup；标记由 popup boot 一次性消费（lib/open-reason.ts）。
@@ -52,6 +59,7 @@ export interface ContextMenuCreateProperties {
 /** chrome.contextMenus 的最小可注入面（注册半边）。 */
 export interface ContextMenusRegistrar {
   removeAll(callback: () => void): void;
+  /** 同步 create，吞掉一切注册错误（duplicate id 等预期内）。 */
   create(properties: ContextMenuCreateProperties): unknown;
 }
 
@@ -61,9 +69,18 @@ export const chromeContextMenus: ContextMenusRegistrar = {
     chrome.contextMenus.removeAll(callback);
   },
   create(properties) {
-    return chrome.contextMenus.create(
-      properties as chrome.contextMenus.CreateProperties,
-    );
+    try {
+      // 带 callback 并读取 lastError：127（回调时代）到最新（promise 时代）
+      // 通用的错误消化方式——duplicate id 等 create 失败静默，注册表里
+      // 已有的同名项即正确状态
+      return chrome.contextMenus.create(
+        properties as chrome.contextMenus.CreateProperties,
+        () => void chrome.runtime.lastError,
+      );
+    } catch {
+      // 同步抛错同样吞：注册幂等优先，不因重复注册崩 SW
+      return undefined;
+    }
   },
 };
 
@@ -85,29 +102,67 @@ export const chromeI18nGetMessage: I18nGetMessage = (key) =>
   chrome.i18n.getMessage(key);
 
 /**
- * 注册两菜单项：removeAll 清旧（SW 顶层重放幂等）后 create 两项。
+ * 两菜单项的注册属性。contexts 三手势全覆盖（issue #40 复盘两轮）：
+ * - "action"：右键工具栏图标菜单（用户主诉入口）——action 菜单要求 SW
+ *   顶层同步注册（见 registerContextMenus）；
+ * - "page"：网页裸右键（PAGE 是最弱 context，右键目标带链接/选区/输入
+ *   框/媒体时不匹配——Chromium context_menu_helpers.cc）；
+ * - "selection"：选中文本后右键（背单词的主手势，只注册 page 时全程隐形）。
+ * 点击语义均不变：collect-page 整页采集（title 不带 %s，不随选区变），
+ * upload-files 直达上传画布。
+ * 网页右键下两项同时可见时 Chrome 自动折叠为「WordRadar ›」父项（API
+ * 固有行为，无法关闭）；action 菜单内则平铺在扩展名区块下。
  * getMessage 为空串时（locale key 缺失——verify-manifest 已校验兜底）
- * 降级为 key 本身：可见的开发期错误优于空 title（空 title 菜单项不可见）。
+ * 降级为 key 本身：可见的开发期错误优于空 title（空 title 项不可见）。
+ */
+function menuItems(getMessage: I18nGetMessage): ContextMenuCreateProperties[] {
+  const title = (key: string): string => getMessage(key) || key;
+  return [
+    // 「采集当前页」只在 http/https 页面出现（chrome:// 等特殊页无从采集；
+    // action 菜单场景同样按当前标签页 URL 匹配）
+    {
+      id: MENU_COLLECT_PAGE,
+      title: title("menuCollectPage"),
+      contexts: ["page", "selection", "action"],
+      documentUrlPatterns: ["http://*/*", "https://*/*"],
+    },
+    // 「上传文件采集生词」不限页面：上传采集不依赖当前页内容
+    {
+      id: MENU_UPLOAD_FILES,
+      title: title("menuUploadFiles"),
+      contexts: ["page", "selection", "action"],
+    },
+  ];
+}
+
+/**
+ * SW 启动重放注册：**同步** create 两项，吞掉 duplicate id 等错误。
+ * 同步是 action 菜单的硬要求——action 菜单显示发生在 SW 空闲时（从
+ * 持久化注册表渲染），注册链路里任何异步环节（如 removeAll 回调）都会
+ * 留下「菜单已显示而注册未落」的冷窗口；同步 create 已有同名项时报错
+ * 吞掉即幂等。
  */
 export function registerContextMenus(
   registrar: ContextMenusRegistrar = chromeContextMenus,
   getMessage: I18nGetMessage = chromeI18nGetMessage,
 ): void {
-  const title = (key: string): string => getMessage(key) || key;
+  for (const item of menuItems(getMessage)) {
+    registrar.create(item);
+  }
+}
+
+/**
+ * 全量刷新（onInstalled：安装/版本更新时）：removeAll 清旧后 create，
+ * 确保参数演进（如本轮加 selection/action）替换掉旧注册。removeAll→
+ * create 的异步链只允许出现在刷新路径——action 菜单的冷窗口风险由
+ * 启动时的同步 registerContextMenus 兜住。
+ */
+export function refreshContextMenus(
+  registrar: ContextMenusRegistrar = chromeContextMenus,
+  getMessage: I18nGetMessage = chromeI18nGetMessage,
+): void {
   registrar.removeAll(() => {
-    // 「采集当前页」只在 http/https 页面出现（chrome:// 等特殊页无从采集）
-    registrar.create({
-      id: MENU_COLLECT_PAGE,
-      title: title("menuCollectPage"),
-      contexts: ["page"],
-      documentUrlPatterns: ["http://*/*", "https://*/*"],
-    });
-    // 「上传文件采集生词」不限页面：上传采集不依赖当前页内容
-    registrar.create({
-      id: MENU_UPLOAD_FILES,
-      title: title("menuUploadFiles"),
-      contexts: ["page"],
-    });
+    registerContextMenus(registrar, getMessage);
   });
 }
 

@@ -14,6 +14,7 @@ import { createWordRepository } from "./lib/word-repository.js";
 import { cleanupLegacyAutoPush } from "./lib/settings.js";
 import {
   createContextMenuListener,
+  refreshContextMenus,
   registerContextMenus,
 } from "./lib/context-menu.js";
 
@@ -28,14 +29,18 @@ const bbdcClient = createBbdcClient({ fetch: globalThis.fetch.bind(globalThis) }
 
 chrome.runtime.onInstalled.addListener(() => {
   void chrome.storage.local.set({ [HEARTBEAT_KEY]: true });
+  // 安装/版本更新：removeAll 清旧注册后重建，让菜单参数演进（issue #40
+  // 复盘加 selection/action）替换掉旧注册
+  refreshContextMenus();
 });
 
-// 右键菜单注册（issue #40，v1.1-T3）：在 SW 顶层重放——MV3 SW 每次启动
-// 都会执行本模块。不能只挂在 onInstalled 里：onInstalled 仅在 install /
-// 版本 update / Chrome update 时触发，「rebuild dist 但 manifest 版本号
-// 不变」的迭代流程（reload 扩展/重启浏览器让 SW 跑新代码）永远踩不中，
-// 注册表为空 → 右键菜单不可见（issue #40 实测症状）。registerContextMenus
-// 内部先 removeAll 再 create（幂等），重放无副作用。
+// 右键菜单注册（issue #40，v1.1-T3 + 复盘）：在 SW 顶层**同步**重放——
+// MV3 SW 每次启动都会执行本模块。不能只挂在 onInstalled 里：onInstalled
+// 仅在 install / 版本 update / Chrome update 时触发，「rebuild dist 但
+// manifest 版本号不变」的迭代流程（reload 扩展/重启浏览器让 SW 跑新
+// 代码）永远踩不中，注册表为空 → 右键菜单不可见（issue #40 实测症状）。
+// 同步是 action 菜单（右键工具栏图标）的硬要求，异步链会留下冷窗口；
+// 重复注册（duplicate id）由网关吞错，幂等。
 registerContextMenus();
 
 // 菜单点击：写唤起标记（storage.session openReason）+ openPopup——popup boot
