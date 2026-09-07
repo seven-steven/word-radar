@@ -192,16 +192,16 @@ describe("registerContextMenus / refreshContextMenus", () => {
     expect(registrar.created[1]?.title).toBe("menuUploadFiles");
   });
 
-  it("contexts 三手势全覆盖：action（右键工具栏图标）+ page（网页裸右键）+ selection（选词后右键，issue #40 复盘）", () => {
+  it("contexts 仅 action（2026-09-07 产品决策：入口只走右键工具栏图标，不占网页右键菜单）", () => {
     const registrar = fakeRegistrar();
     registerContextMenus(registrar);
 
     for (const properties of registrar.created) {
-      expect(properties.contexts).toEqual(["page", "selection", "action"]);
+      expect(properties.contexts).toEqual(["action"]);
     }
   });
 
-  it("documentUrlPatterns 只在 collect-page 上（http/https 限定，action 菜单同样按当前标签页 URL 匹配）；upload-files 不限页面", () => {
+  it("documentUrlPatterns 只在 collect-page 上（http/https 限定，action 菜单按当前标签页 URL 匹配）；upload-files 不限页面", () => {
     const registrar = fakeRegistrar();
     registerContextMenus(registrar);
 

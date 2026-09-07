@@ -6,9 +6,8 @@
  * contextMenus.create 的 title 对 __MSG_*__ 占位符没有文档保证的替换
  * 行为，且该替换（若存在）在 Chrome 128+ 才可用，低于本项目
  * minimum_chrome_version 127（ADR 0001）的版本上会得到字面占位符）。
- * contexts 三手势全覆盖（右键工具栏图标 action / 网页裸右键 page /
- * 选词后右键 selection——PAGE 是最弱 context，选区/链接/输入框上右键
- * 不匹配，背单词主手势必须靠 selection 兜住）：
+ * 入口 = 右键工具栏图标的 action 菜单（两项平铺在扩展名区块下；
+ * 2026-09-07 产品决策：不占用网页右键菜单）：
  * - 「采集当前页」（collect-page）：documentUrlPatterns 限 http/https，
  *   chrome:// 等特殊页不出现；点击 = 写 "collect" 标记 + openPopup，
  *   popup 内自动执行采集并呈现待确认批次。
@@ -102,35 +101,31 @@ export const chromeI18nGetMessage: I18nGetMessage = (key) =>
   chrome.i18n.getMessage(key);
 
 /**
- * 两菜单项的注册属性。contexts 三手势全覆盖（issue #40 复盘两轮）：
- * - "action"：右键工具栏图标菜单（用户主诉入口）——action 菜单要求 SW
- *   顶层同步注册（见 registerContextMenus）；
- * - "page"：网页裸右键（PAGE 是最弱 context，右键目标带链接/选区/输入
- *   框/媒体时不匹配——Chromium context_menu_helpers.cc）；
- * - "selection"：选中文本后右键（背单词的主手势，只注册 page 时全程隐形）。
- * 点击语义均不变：collect-page 整页采集（title 不带 %s，不随选区变），
- * upload-files 直达上传画布。
- * 网页右键下两项同时可见时 Chrome 自动折叠为「WordRadar ›」父项（API
- * 固有行为，无法关闭）；action 菜单内则平铺在扩展名区块下。
+ * 两菜单项的注册属性。contexts 仅 ["action"]（2026-09-07 产品决策：
+ * 入口只走右键工具栏图标菜单，不占用网页右键菜单——page/selection
+ * 两轮试装后移除）。背景知识留档：PAGE 是最弱 context（选区/链接/
+ * 输入框/媒体上右键不匹配，Chromium context_menu_helpers.cc），若将来
+ * 恢复网页入口需同时带 "selection" 才能覆盖选词主手势。
+ * 点击语义：collect-page 整页采集、upload-files 直达上传画布。
  * getMessage 为空串时（locale key 缺失——verify-manifest 已校验兜底）
  * 降级为 key 本身：可见的开发期错误优于空 title（空 title 项不可见）。
  */
 function menuItems(getMessage: I18nGetMessage): ContextMenuCreateProperties[] {
   const title = (key: string): string => getMessage(key) || key;
   return [
-    // 「采集当前页」只在 http/https 页面出现（chrome:// 等特殊页无从采集；
-    // action 菜单场景同样按当前标签页 URL 匹配）
+    // 「采集当前页」只在 http/https 标签页出现（chrome:// 等特殊页无从
+    // 采集；action 菜单按当前标签页 URL 匹配 documentUrlPatterns）
     {
       id: MENU_COLLECT_PAGE,
       title: title("menuCollectPage"),
-      contexts: ["page", "selection", "action"],
+      contexts: ["action"],
       documentUrlPatterns: ["http://*/*", "https://*/*"],
     },
     // 「上传文件采集生词」不限页面：上传采集不依赖当前页内容
     {
       id: MENU_UPLOAD_FILES,
       title: title("menuUploadFiles"),
-      contexts: ["page", "selection", "action"],
+      contexts: ["action"],
     },
   ];
 }
