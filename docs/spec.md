@@ -1,6 +1,6 @@
 # Spec: 单词雷达 WordRadar
 
-> 由 `to-spec` 流程综合 4 轮领域建模(grilling)+ 不背单词 API 抓包实测(2026-08-03)+ 数据模型最终化产出;v1.1 增补(多模态上传画布 + 采集入口显式化)由 2026-09-06 grilling 定稿。
+> 由 `to-spec` 流程综合 4 轮领域建模(grilling)+ 不背单词 API 抓包实测(2026-08-03)+ 数据模型最终化产出;v1.1 增补(多模态上传画布 + 采集入口显式化)由 2026-09-06 grilling 定稿;收词过滤增补由 2026-09-07 grilling 定稿(ADR-0002)。
 > Triage: ready-for-agent
 
 ## Problem Statement
@@ -21,6 +21,7 @@
 
 1. 作为英语学习者,我想在阅读英文网页时一键提取全文生词,以便不用手动逐个查词录入。
 2. 作为英语学习者,我想只提取网页正文(排除导航/广告/代码),以便得到的词都是有学习价值的真实词汇。
+2a. 作为英语学习者,我想采集时自动拦掉缩略/截短词(md、doc、stat)与缩合形式(you've、aren't)——它们不是值得背的标准词形,被拦的只在摘要里计数;两类拦截我可以分别关闭,高频简单词(a、the)不受影响(入一次库、背一次即无害)。
 3. 作为英语学习者,我想选中网页上的一段文字后只提取这段的生词,以便针对特定段落精准收集。
 4. 作为英语学习者,我想提取出的词自动按词形还原去重(running/runs/ran 算作 run),以便同一词的不同变形不会重复出现。
 5. 作为不背单词用户,我想提取出的词自动添加到我的不背单词生词本,以便直接在不背单词 APP 里背诵。
@@ -78,11 +79,13 @@ run,1
 ### 提取管线(core)
 
 - Unicode NFKC 规范化(弯引号→`'`、Unicode 连字符→`-`)。
-- 分词:识别英文词(含内部 `'`/`-`,如 don't、well-known);同时保留 URL/email/路径/代码标识符候选,交给 filter 拒绝(避免把 https/example/com 当词)。
-- 过滤:排除 URL、email、路径、纯数字、`snake_case`、`camelCase`、`PascalCase`、含 `$`、含数字的标识符;用 compromise 的 `#ProperNoun` 默认排除专名(可开关)。
+- 分词:识别英文词(含内部 `'`/`-`,如 well-known;含撇号形式的去留由所有格剥离与收词过滤两步决定);同时保留 URL/email/路径/代码标识符候选,交给形态校验(`isEnglishWord`)拒绝(避免把 https/example/com 当词)。
+- 形态校验:排除 URL、email、路径、纯数字、`snake_case`、`camelCase`、`PascalCase`、含 `$`、含数字的标识符;用 compromise 的 `#ProperNoun` 默认排除专名(可开关)。
+- 所有格剥离:词尾 `'s` 剥除后按普通词条继续(dog's→dog、serendipity's→serendipity)。属归一化不属收词过滤,不受过滤开关控制,永远执行。
 - 词形还原:用 **compromise**(`verbs().toInfinitive()` / `nouns().toSingular()`),配不规则动词表 + 保守后缀 fallback。
 - 去重:按 lemma 聚合(小写),合并后只保留 lemma 一行。
-- 公开 API:`extractWordEntries(text, options) → {lemma, flags:0}[]`、`mergeWordEntries(...)`(lemma 合并、flags 按位 OR)、CSV `parse`/`stringify`。
+- 收词过滤(2026-09-07 grilling 定稿,详见 ADR-0002):词形还原后按小写 lemma 匹配内置**缩略词黑名单**(缩写/截短/initialism,命中即丢,如 md、doc、stat);剥离 `'s` 后仍含撇号的**缩合形式**(you've、aren't、o'clock)丢弃。被过滤词条不进待确认批次,采集摘要报「已过滤 N 个」,不展开明细、不提供捞回。**高频简单词(a、the)明确不过滤**——一次性入库、推送一次即永为非新词,不为它建词频机制。「过滤缩略词」「过滤缩合形式」两个开关默认全开、用户可各自关闭(popup 设置区,存 chrome.storage.local);黑名单内容内置、不可增删,避免误删内置条目导致过滤静默退化。网页采集、上传文件、CLI extract 全走同一条 core 提取管线,统一生效;CSV 导入不经提取管线,天然豁免;CLI 第一版不带开关参数,恒默认全开(CSV 可手动编辑是天然后门)。黑名单数据在构建期生成:Wiktionary clipping/abbreviation/initialism 标签词条提取 + 手工 initialism 种子表(md 的英文词条是埃及语转写,标签通道抓不到它);**不做**无元音短串盲启发式(会误杀 my/by/why 这类无元音简单词)。验收线:md/doc/stat/you've/aren't 命中,serendipity/serendipity's/dog's/monorepo 放行。
+- 公开 API:`extractWordEntries(text, options) → {lemma, flags:0}[]`(options 增补 `filterAbbreviations`/`filterContractions`,默认 true)、`mergeWordEntries(...)`(lemma 合并、flags 按位 OR)、CSV `parse`/`stringify`。
 
 ### 不背单词对接(API 全部实测通过)
 
@@ -113,7 +116,7 @@ run,1
 - 推送进度实时展示:popup 订阅推送状态实时刷新,只展示汇总计数(已推送/待推/词库总词数/成功/已存在/失败),不逐词标注;失败由后台重试 + 保留待推 +「重试待推词」按钮兜底。错误日志存 `chrome.storage.local` 环形缓冲(最近 ~200 条),popup 提供导出。
 - badge 状态字(2026-08-23 grilling 修订,覆盖旧规则):推送期间 `x/y` 数字进度(蓝);推送完成 `✓`(绿);待确认批次 `?`(灰);**`!`(红)= 推送 paused**(auth 失败或顶层异常,**任何让自动推送停下来等用户的 pause 都算异常**),由下一轮推送结果自然清除(登录恢复触发重推 / SW 冷启动自动恢复),无专门清除逻辑。**未登录本身不亮 badge**(checkLogin 失败不再独立置 `!`,`loggedOut` badge 规则删除)——未登录只在导致推送 pause 时才通过 `!` 表达。**单词级失败(3 次重试耗尽)不亮 badge**,失败词留待推、下轮(冷启动自动恢复)重试。零新权限。
 - 登录引导:popup 提示(2026-08-23 修订:action badge 不再承担登录引导——未登录不亮 badge,登录失效经推送 pause 的 `!` 间接表达),提供「打开不背单词」按钮(打开 `https://bbdc.cn/`,不固化深层 login URL)。第一版不申请 notifications 权限。
-- Popup:确认页(总计/新词)→ 原地过渡为推送进度面板;按钮:采集(当前页)、确认推送/取消、检查登录、打开不背单词、重试待推词、导入 CSV、导出 CSV、导出日志;多模态上传画布为唯一上传入口(原「上传文件」按钮删除)。配置存 `chrome.storage.local`(无自动推送开关);词库存 IndexedDB。
+- Popup:确认页(总计/新词)→ 原地过渡为推送进度面板;按钮:采集(当前页)、确认推送/取消、检查登录、打开不背单词、重试待推词、导入 CSV、导出 CSV、导出日志;多模态上传画布为唯一上传入口(原「上传文件」按钮删除)。配置存 `chrome.storage.local`(无自动推送开关;2026-09-07 增补「过滤缩略词」「过滤缩合形式」两个开关,默认全开,见「提取管线」收词过滤);词库存 IndexedDB。
 
 ### 技术栈
 
@@ -133,7 +136,7 @@ run,1
 
 **主接缝 = core 的纯函数**(最高接缝、最稳、最少):
 
-- `extractWordEntries(text)` —— 给文本,验提取出的 lemma 集合:含 `Running ran runs` → lemma `run` 一行;URL/email/代码标识符被排除;专名默认排除。
+- `extractWordEntries(text)` —— 给文本,验提取出的 lemma 集合:含 `Running ran runs` → lemma `run` 一行;URL/email/代码标识符被排除;专名默认排除;收词过滤:md/doc/stat/you've/aren't 被过滤且计数,serendipity/serendipity's(→serendipity)/dog's(→dog)/monorepo 放行,两开关关闭后全放行(黑名单以固定测试名单注入,不依赖真实数据文件)。
 - `mergeWordEntries(...)` —— 验 lemma 合并、flags 按位 OR(已推状态不丢)。
 - CSV `parse`/`stringify` —— 往返一致;坏行报行号而非静默接受;flags 十进制正确编解码。
 
@@ -158,6 +161,11 @@ run,1
 - manifest 变更(minimum_chrome_version 127、contextMenus 权限)并入现有 verify-manifest 测试断言。
 - core 零新接缝:白名单为常量扩展、提取管线不变;srt/lrc 等新格式样例回归并入现有 core 单测(先例 extract.test),不新建文件类型测试框架。
 
+**收词过滤增补(2026-09-07 grilling 定稿):**
+
+- 零新接缝:收词过滤与所有格剥离的语义并入现有 `extractWordEntries` 纯函数单测(黑名单命中/缩合形式/所有格剥离/两开关语义,黑名单以固定测试名单注入)。
+- popup 两个过滤开关并入现有 popup e2e:开关存在性、默认开态、关闭后采集放行的行为断言;「已过滤 N 个」计数摘要的呈现并入现有采集确认页断言。
+
 ## Out of Scope
 
 - 多端自动同步(WebDAV/Gist/后端):第一版仅手动 CSV 导入导出。
@@ -168,6 +176,9 @@ run,1
 - 不背单词「自制词书」批量上传子系统(lexis):第一版不用(用逐词加生词本接口)。
 - 把不背单词 cookie 读出/转发/上传:永不做(安全边界)。
 - **单词熟悉度/记忆状态获取**(0-100 连续指标,或生/模糊/熟悉离散态):技术不可行 —— 不背单词网页端 API 全集(7 个端点:`/api/{user-new-word, remove-user-new-word, check-login, check-new-word}` + `/lexis/book/{list,coolcode,file/submit,save,delete}`)无一返回熟悉度;官方查词插件源码也无任何熟悉度/记忆强度字段;生词列表响应只有 `word/ukpron/uspron/updatetime`。算法记忆状态(FSRS-like)只存 APP/服务端,网页端零暴露。能用 `check-new-word` 做的二值「在/不在生词本」过滤已在第一版计划内,等价于「还没开始学」的最粗糙近似,**不等于熟悉度**。
+- **简单高频词过滤**(a/the/she 级):明确不做(2026-09-07 grilling)——简单词入一次库、背一次即无害,词频机制不值得建。
+- **缩略词黑名单用户自定义增删**:第一版不做——用户误删内置条目会让过滤静默退化;用户侧配置只有两个整体开关。
+- **缩合形式展开**(you've→you+have):不做——展开出的恰是不在意的高频词,还得维护一张缩合映射表;直接丢弃(所有格 's 剥离仍执行,属归一化)。
 
 ## 后续路线(v1 后)
 
