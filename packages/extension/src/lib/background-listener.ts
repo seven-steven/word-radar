@@ -241,7 +241,7 @@ export function createBackgroundListener(deps: BackgroundListenerDeps) {
       return false;
     }
     if (isCheckLoginMessage(message)) {
-      handleCheckLogin(bbdcClient, pushCoordinator)
+      handleCheckLogin(bbdcClient, pushCoordinator, deps.repository)
         .then(({ loggedIn }) => {
           // badge 与登录状态解耦（issue #26）：未登录不亮 badge，登录失效经
           // 推送 paused 的 "!" 表达；CHECK_LOGIN 不再写 badge。
@@ -467,13 +467,18 @@ async function handleUploadText(
 async function handleCheckLogin(
   bbdcClient: BackgroundBbdcClient,
   pushCoordinator: PushCoordinator,
+  repository: Pick<BackgroundRepository, "listPending">,
 ): Promise<{ loggedIn: boolean }> {
   try {
     const result = await bbdcClient.checkLogin();
     if (result.loggedIn) {
       // 「确认即推送是唯一路径」指 采集/导入→推送 这条主路径（issue #22）；
       // 这里是登录恢复后对存量待推的重推，属于允许的恢复路径，不是自动推送开关。
-      void pushCoordinator.start();
+      // issue #36：待推池为空时跳过整轮——零词轮会空转出 phase=completed 的
+      // 「推送完成 0/0/0」噪音回执。查库失败同样跳过（与 resumePendingPush
+      // 同语义，下次 SW 唤醒再试）。
+      const pending = await repository.listPending().catch(() => undefined);
+      if (pending && pending.length > 0) void pushCoordinator.start();
       return { loggedIn: true };
     }
     return { loggedIn: false };

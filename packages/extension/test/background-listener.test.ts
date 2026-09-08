@@ -258,6 +258,51 @@ describe("createBackgroundListener CHECK_LOGIN（T09 + T10）", () => {
     expect(push.start).not.toHaveBeenCalled();
   });
 
+  it("已登录 + 待推池为空 → 不起推送（issue #36：零词恢复轮不空转出 completed 噪音回执）", async () => {
+    const repository = fakeRepository();
+    repository.listPending = vi.fn(async () => []);
+    const bbdcClient = fakeBbdcClient({
+      checkLogin: vi.fn(async () => ({ loggedIn: true, resultCode: 200 })),
+    });
+    const push = fakePushCoordinator();
+    const listener = createBackgroundListener({
+      repository,
+      bbdcClient,
+      pushCoordinator: push,
+    });
+    const sendResponse = vi.fn();
+
+    listener({ type: CHECK_LOGIN }, {}, sendResponse);
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+    // 登录态照常应答，但 SW 保持 idle——popup 不再收到「推送完成 0/0/0」
+    expect(sendResponse).toHaveBeenCalledWith({ loggedIn: true });
+    expect(push.start).not.toHaveBeenCalled();
+  });
+
+  it("已登录 + 查库失败 → 跳过推送、登录态照常应答（与 resumePendingPush 同语义）", async () => {
+    const repository = fakeRepository();
+    repository.listPending = vi.fn(async () => {
+      throw new Error("db-unavailable");
+    });
+    const bbdcClient = fakeBbdcClient({
+      checkLogin: vi.fn(async () => ({ loggedIn: true, resultCode: 200 })),
+    });
+    const push = fakePushCoordinator();
+    const listener = createBackgroundListener({
+      repository,
+      bbdcClient,
+      pushCoordinator: push,
+    });
+    const sendResponse = vi.fn();
+
+    listener({ type: CHECK_LOGIN }, {}, sendResponse);
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+    expect(sendResponse).toHaveBeenCalledWith({ loggedIn: true });
+    expect(push.start).not.toHaveBeenCalled();
+  });
+
   it("BbdcAuthError（HTTP 401/403）→ 保守视为未登录；badge 不亮", async () => {
     class FakeAuthError extends Error {}
     const repository = fakeRepository();

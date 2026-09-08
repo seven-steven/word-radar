@@ -185,7 +185,8 @@ test("push progress updates live in popup and badge shows x/y then ✓ (issue #2
   await popup.bringToFront();
   await popup.getByTestId("confirm-push").click();
 
-  // 等目标推送轮启动（跳过 boot checkLogin 触发的空待推恢复轮 0/0）
+  // 等目标推送轮启动（boot checkLogin 对非空待推池起的恢复轮即目标轮；
+  // 空池零词轮已由 issue #36 修复消除，不再产生 0/0 干扰）
   // i18n（issue #28）：zh-CN pushRunning 文案「推送中 已推送 $1/$2 · 待推 $3」
   await expect(async () => {
     const text = await popup.getByTestId("push-status").textContent();
@@ -294,13 +295,15 @@ test("completed EMPTY round collapses retry-push and keeps popup scroll-free", a
   // 工具抽屉默认收起（issue #35 重做）：导入按钮在抽屉内，先展开
   await page.getByTestId("tools-toggle").click();
 
-  // 第一段：2 新词入池 → 确认即推送（total=2 非空轮），等它走完
+  // 第一段：2 新词入池 → 确认即推送（total=2 非空轮），等它走完。
+  // 终态锚用「成功 2」而非 not-running：反向断言立即评估，confirm 后 popup
+  // 短暂仍显示旧 completed 态时会瞬间通过，第二段与第一轮并行发起，
+  // start() 去重（BUSY）会吞掉第二段的空轮，succeeded 永不重置（#36 e2e
+  // 取证实锤的竞态）。2 词 mock 全走 addWord → 成功 2 是确定锚。
   await importOnce();
-  await expect(page.getByTestId("push-status")).not.toHaveAttribute(
-    "data-phase",
-    "running",
-    { timeout: 120_000 },
-  );
+  await expect(page.getByTestId("push-succeeded")).toHaveText("2", {
+    timeout: 120_000,
+  });
 
   // 第二段：同批再确认（新词 0）→ 触发空轮；succeeded 从第一轮的 2 重置为 0
   // 是两轮的区分锚（data-phase 在两次确认前后同为 completed，不能单独作锚）

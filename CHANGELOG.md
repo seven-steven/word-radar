@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/
 
 ## [Unreleased]
 
+### 修复
+
+- 开 popup 的零词恢复轮噪音（issue #36）：`CHECK_LOGIN` 登录恢复路径对待推池为空时跳过整轮推送、保持 idle（对齐 `resumePendingPush` 守卫），popup 不再空转出「推送完成 + 成功 0 · 已存在 0 · 失败 0」回执，也省去零词轮的两发 `checkLogin` 网络请求
+
+### 测试与工程
+
+- e2e push.spec 空轮用例竞态修复（#36 复核取证发现，与 SW 修复正交、HEAD 下同样存在）：第一段终态锚由 not-running（反向断言立即评估，confirm 后 popup 短暂仍显示旧 completed 态时会瞬间通过）改为「成功 2」确定锚——第二段若与第一轮并行发起，`start()` 去重会吞掉空轮、succeeded 永不重置
+
 ## [1.0.0] - 2026-09-06
 
 首个 Chrome Web Store 上架版本。

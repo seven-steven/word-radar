@@ -84,8 +84,9 @@ test("logged-out state shows the open-bbdc button", async ({
 test("push status renders with numeric counters", async ({ extContext, popupUrl }) => {
   const page = await extContext.newPage();
   await page.goto(popupUrl);
-  // 持久 context 跨测试共享状态：phase 可能是 idle（首跑）或 completed（已推过），
-  // 只断言渲染形状，不断言具体 phase。
+  // 持久 context 跨测试共享状态：phase 可能是 idle（首跑）或 completed
+  // （此前确认轮在 SW 内存的驻留终态；boot checkLogin 已不再对空待推池
+  // 起零词轮，issue #36）。只断言渲染形状，不断言具体 phase。
   await expect(page.getByTestId("push-status")).toHaveAttribute(
     "data-phase",
     /^(idle|completed|paused)$/,
