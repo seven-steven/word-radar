@@ -48,8 +48,9 @@ async function dropOnCanvas(
 
 /**
  * 在上传画布上合成一次 paste（issue #42）：ClipboardEventInit 的
- * clipboardData 可直接携带 DataTransfer（Chromium 支持）。画布 tabindex=0，
- * 先 focus 再派发——真实 ⌘V 只会落在聚焦元素上。
+ * clipboardData 可直接携带 DataTransfer（Chromium 支持）。聚焦画布后从画布
+ * 派发，事件冒泡经画布到 document——popup 的 paste 监听挂 document 级，
+ * 「焦点无关」路径（body 直开直接 ⌘V）由下方 focus-on-body 用例覆盖。
  */
 async function pasteOnCanvas(
   page: Page,
@@ -416,6 +417,54 @@ test("paste plain text on the canvas goes straight into the extraction pipeline 
     { timeout: 10_000 },
   );
   // 确认前：不落库、零网络请求（check-login 豁免，同拖放用例）
+  await expect(page.getByTestId("total")).toHaveText(String(totalBefore));
+  expect(
+    mockBbdc.requests.filter((r) => !r.url.includes("check-login")),
+  ).toHaveLength(0);
+
+  // 取消批次：不留待推，避免污染共享词库/推送循环
+  await page.getByTestId("cancel-collect").click();
+  await expect(page.getByTestId("confirm-section")).toBeHidden();
+  await page.close();
+});
+
+test("paste with focus on body (canvas never focused) still triggers the pipeline (issue #42 popup-wide ⌘V)", async ({
+  extContext,
+  popupUrl,
+  mockBbdc,
+}) => {
+  const page = await extContext.newPage();
+  await page.goto(popupUrl);
+  await waitPopupReady(page);
+  await waitCountsLoaded(page);
+  const totalBefore = Number(await page.getByTestId("total").textContent());
+
+  // 工具栏图标直开的 popup：boot 不动焦点（仅 openReason=upload 右键菜单
+  // 路径聚焦画布），焦点停在 <body>。用户「打开 popup 直接按 ⌘V」的真实
+  // 事件形态：target=body、冒泡到 document——若监听只在画布元素上则永不
+  // 命中（缺陷位：监听器位置，非监听器内部逻辑）
+  const focused = await page.evaluate(
+    () => document.activeElement?.tagName ?? null,
+  );
+  expect(focused).toBe("BODY");
+
+  await page.evaluate(() => {
+    const dt = new DataTransfer();
+    dt.setData("text/plain", "The amber bellhop queued a silent ferry.\n");
+    document.body.dispatchEvent(
+      new ClipboardEvent("paste", {
+        clipboardData: dt,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+  });
+
+  // 与画布聚焦路径同语义：直进提取管线 → 「上传采集」待确认批次、不落库、零网络
+  await expect(page.getByTestId("confirm-summary")).toHaveText(
+    /本次共计上传采集 \d+ 个单词，其中新词 \d+ 个/,
+    { timeout: 10_000 },
+  );
   await expect(page.getByTestId("total")).toHaveText(String(totalBefore));
   expect(
     mockBbdc.requests.filter((r) => !r.url.includes("check-login")),

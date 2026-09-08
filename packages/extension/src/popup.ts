@@ -980,11 +980,19 @@ if (uploadCanvas) {
     void dispatchUpload((replacing) => performUploadFromDrop(filesPromise, replacing));
   });
 
-  // 粘贴（issue #42）：画布 tabindex=0 聚焦时收到 ⌘V。paste 的 clipboardData
-  // 在事件处理让出事件循环后进入保护态（getData 返回空串），文本与文件清单
-  // 必须在本监听器内同步摘下（同 drop 的 webkitGetAsEntry 必须同步调用的
-  // 先例），再交给覆盖闸门 / 确认条流程。
-  uploadCanvas.addEventListener("paste", (event) => {
+  // 粘贴（issue #42）：监听挂 document 级——工具栏图标直开的 popup 焦点停在
+  // <body>（boot 不动焦点，仅 openReason=upload 右键菜单路径聚焦画布），真实
+  // ⌘V 的 paste target 是当前焦点元素、冒泡到 document，画布元素不在 body 的
+  // 祖先链上，画布级监听对最常见的打开路径永不命中（先例：拖放的 document
+  // 级兜底，见下方 dragover/drop）。paste 的 clipboardData 在事件处理让出事件
+  // 循环后进入保护态（getData 返回空串），文本与文件清单必须在本监听器内
+  // 同步摘下（同 drop 的 webkitGetAsEntry 必须同步调用的先例），再交给覆盖
+  // 闸门 / 确认条流程。
+  document.addEventListener("paste", (event) => {
+    // popup 内可编辑元素聚焦时放行原生粘贴，不劫持成上传（同画布 keydown 的
+    // target 守卫先例；当前 popup 无输入框，守卫为未来加入时兜底）
+    const target = event.target instanceof Element ? event.target : null;
+    if (target?.closest("input, textarea, [contenteditable]")) return;
     event.preventDefault();
     const clipboard = event.clipboardData;
     const snapshot = {
