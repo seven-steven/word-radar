@@ -607,7 +607,11 @@ test("new collect implicitly cancels a pending overwrite ask (sweeper #24)", asy
   ]);
   await expect(page.getByTestId("overwrite-ask")).toBeVisible();
 
-  // 清理：dismiss 丢弃上传 + cancel 丢弃驻留批，不污染后续用例
+  // 清理：dismiss 丢弃上传 + cancel 丢弃驻留批，不污染后续用例。
+  // popup 回前台再收卡：confirm-section 的收起是 grid-rows 过渡（每帧需
+  // layout），后台标签渲染节流会冻结过渡 → visibility 延迟切换永不发生 →
+  // toBeHidden 卡死（真实用户收卡时 popup 恒在前台，后台收卡是 harness 产物）
+  await page.bringToFront();
   await page.getByTestId("overwrite-dismiss").click();
   await page.getByTestId("cancel-collect").click();
   await expect(page.getByTestId("confirm-section")).toBeHidden();
