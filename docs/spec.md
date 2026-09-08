@@ -108,8 +108,8 @@ run,1
 - 推送自动恢复(2026-08-23 grilling 定稿):**SW 冷启动时若待推池非空且无推送轮在跑,自动起一轮推送**(覆盖浏览器启动、扩展安装/更新、任何事件唤醒 SW 的场景;`start()` 已去重,无重复起轮风险)。这是与登录恢复并列的**恢复路径**,同样不算自动推送开关。新增代码位置 = SW 顶层初始化,零新权限(不用 alarms)。
 - CSV 导入同过确认闸门(review 定稿):解析 CSV → 驻留待确认批次(与采集批次同形态,覆盖旧批次)→ 确认页「本次共计导入 total 个单词,其中新词 x 个」(计数语义与采集一致)→ 确认 = 合并入库 + 一轮全量推送;取消丢弃。导入不再直接入库,也不在导入完成时自动推送。
 - 采集入口(2026-09-06 定稿,显式化):左键单击工具栏图标 = **只打开 popup、不采集**(现状 popup 启动即自动 collect() 的行为移除);popup 内「采集」按钮触发对当前页的采集,采集流程本身不变(COLLECT → 待确认批次 → 确认/取消)。右键菜单两项(i18n 中英):「采集当前页」以 `documentUrlPatterns` 限 http/https(chrome:// 等页面采集无意义),点击 = `chrome.action.openPopup()` + popup 内自动执行采集流程并呈现待确认批次;「上传文件采集生词」不限页面,点击 = `openPopup` + 直达上传画布(焦点在画布)。`openPopup` 无打开原因参数,两个入口靠 SW 侧唤起标记(如 `chrome.storage.session`)区分。`chrome.action.openPopup()` 需 Chrome 127+(118-126 仅 Canary/企业策略),`minimum_chrome_version` 由 114 提升至 127;manifest `permissions` 新增 `contextMenus`。既有远景「右键菜单 = 选择采集目标」保留:本迭代两项菜单已具雏形,未来剪贴板目标落地时再扩项。
-- 上传画布(2026-09-06 定稿,多模态):popup 内以画布为唯一上传入口,支持三种输入手势——点击唤起文件选择器、拖放文件/目录、粘贴文本/文件;原「上传文件」按钮删除,上传指引文案融入画布。粘贴是**输入手势,不叫「剪贴板采集」**(剪贴板作为独立采集入口维持后置,为未来留术语空间):粘贴文本无文件名概念、不过后缀白名单,直接进文本提取管线;粘贴目录技术不可行(OS 剪贴板不传目录内容),目录只走拖放,画布文案需引导。「拖文件到工具栏图标」不做(chrome.action 无 drop API,技术不可行)。
-- 上传后缀白名单 17 项:txt, md, markdown, csv, log, text, json, srt, vtt, lrc, org, rst, adoc, ass, ssa, html, xml。html/xml 经 DOMParser→innerText 预处理(与网页采集同质的文本获取层),其余 readAsText 直读;rtf 明确排除(控制字如 `\par` 是合法词形,会系统性混入、去重无法解决);MIME 兜底沿用现状机制。
+- 上传画布(2026-09-06 定稿,多模态):popup 内以画布为唯一上传入口,支持三种输入手势——点击唤起文件选择器、拖放文件/目录、粘贴文本/文件;原「上传文件」按钮删除,上传指引文案融入画布。粘贴是**输入手势,不叫「剪贴板采集」**(剪贴板作为独立采集入口维持后置,为未来留术语空间):粘贴文本无文件名概念、不过后缀白名单,直接进文本提取管线;粘贴目录技术不可行(OS 剪贴板不传目录内容),目录只走拖放,画布文案需引导(2026-09-07 修订:目录另增画布内「选择文件夹」按钮显式入口,不再拖放独占——`<input type=file>` 不能选目录,见 #41 bug A;粘贴通道的目录仍不可行)。「拖文件到工具栏图标」不做(chrome.action 无 drop API,技术不可行)。
+- 上传后缀白名单 17 项:txt, md, markdown, csv, log, text, json, srt, vtt, lrc, org, rst, adoc, ass, ssa, html, xml。html/xml 经 DOMParser→innerText 预处理(与网页采集同质的文本获取层),其余 readAsText 直读(实现修订:不取 innerText——detached 文档上它退化为 textContent 会漏进 script/style 源码;改与网页采集同源的 DOMParser→TreeWalker collectVisibleText,commit 72f7809);rtf 明确排除(控制字如 `\par` 是合法词形,会系统性混入、去重无法解决);MIME 兜底沿用现状机制。
 - 整批 = 一次采集(2026-09-06 定稿):一次上传操作的全部文件(含文件夹递归展开)= 一个「上传采集目标」= 单一待确认批次,全部走同一 core 提取管线、同过确认闸门;确认一次放行全部(确认即入库 + 触发一轮推送,模型不变)。拖入文件夹 = 递归全树收集白名单文件 + 双上限:文件数与总字节(量级 200 个 / 20MB,实现期可调);超限不静默截断,向用户反馈(拒绝整批或用户确认)。非白名单文件计数摘要反馈(如「已收录 N 个文件,忽略 M 个(.jpg .pdf)」),只报后缀类别、不展开文件名。
 - 覆盖语义(2026-09-06 定稿):待确认批次单驻留,网页批次与上传批次同为单驻留;未确认时再次拖放/粘贴 = 覆盖旧上传批次,画布提示替换文案;若当前驻留的是网页采集批次,覆盖前弹提示「上传将丢弃网页采集批次」。
 - 推送协调器:顺序 = checkLogin → listPending → 逐词串行(checkExists→lookup→addWord);并发 1、词间 ~400ms;单请求最多 3 次重试(0/800ms/2000ms),4xx 不重试;401/403/check-login 失败立即暂停并保留 pending;远端已存在也标记已推;同一时刻只跑一个推送循环。推送跑在 SW,**popup 关闭不中断**。
@@ -159,7 +159,7 @@ run,1
 - SW 集成覆盖:多文件上传协议(含目录展开后的文件批)、批次单驻留与覆盖、contextMenus.onClicked 两菜单项 → 唤起标记写入与 openPopup 调用(mock chrome.action.openPopup)。
 - 右键菜单链路不进 e2e:扩展右键项在浏览器原生菜单中,Playwright 无法点击,该链路由 SW 集成接缝覆盖。
 - manifest 变更(minimum_chrome_version 127、contextMenus 权限)并入现有 verify-manifest 测试断言。
-- core 零新接缝:白名单为常量扩展、提取管线不变;srt/lrc 等新格式样例回归并入现有 core 单测(先例 extract.test),不新建文件类型测试框架。
+- core 零新接缝:白名单为常量扩展、提取管线不变;srt/lrc 等新格式样例回归并入现有 core 单测(先例 extract.test),不新建文件类型测试框架(实现修订:白名单为纯文本常量、新格式对提取管线是普通文本,样例回归实际落在扩展层 csv-file.test.ts / e2e upload-canvas 用例,core 零改动)。
 
 **收词过滤增补(2026-09-07 grilling 定稿):**
 

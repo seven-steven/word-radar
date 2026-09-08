@@ -1078,7 +1078,6 @@ function startPushStatusPolling(): void {
 
 // 打开即：拉一次计数 + 拉一次登录态 + 拉一次推送状态。不自动采集——对当前页
 // 的采集只由「采集当前页」按钮显式触发（issue #39 v1.1-T2），点图标只开弹窗。
-// （上传入口是 popup 内的上传画布（issue #41），不做右键菜单目标。）
 void refreshCounts();
 void refreshLogin();
 void refreshPushStatus().then(startPushStatusPolling);
