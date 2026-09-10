@@ -4,7 +4,6 @@
 import {
   extractWordEntries,
   stringifyWordListCsv,
-  type ExtractOptions,
 } from "@word-radar/core";
 import {
   writeFile,
@@ -61,8 +60,8 @@ async function processFile(filePath: string, outPath?: string): Promise<void> {
   // 读取文件内容（自动 strip BOM）
   const content = await readTextWithoutBom(filePath);
 
-  // 提取词条
-  const entries = extractWordEntries(content);
+  // 提取词条（core v3 管线：收词过滤默认全开，CLI 不暴露开关）
+  const { entries } = extractWordEntries(content);
 
   // 序列化为 CSV
   const csv = stringifyWordListCsv(entries);

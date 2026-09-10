@@ -37,16 +37,32 @@ describe("extract command", () => {
       const inputFile = join(tempDir, "document.txt");
       const expectedOutput = join(tempDir, "document.words.csv");
 
-      await writeFile(inputFile, "The cats are running fast.");
+      // md/doc/stat 是验收线钉死的内置缩略词黑名单词条，you've/aren't 走
+      // 与数据无关的缩合判据——夹具同时承载正向提取与负向过滤断言
+      await writeFile(
+        inputFile,
+        "The cats are running fast. The md and doc stat, you've aren't.",
+      );
 
       await run(["node", "word-radar", "extract", inputFile]);
 
       expect(existsSync(expectedOutput)).toBe(true);
       const csv = await readFile(expectedOutput, "utf-8");
       expect(csv).toContain("lemma,flags");
+      // cat 本曾入缩略词黑名单（全大写 CAT 页按「任一来源页通过」担保），
+      // v2.1 起被「小写真词页一票否决」规则救出（小写真词页整页缩略占比
+      // 仅 0.090，否决其他变体页为其担保）——高频日常词不再被收词过滤。
+      // 此夹具即当年的回归哨兵：若该规则被回退，本用例会先行变红。
       expect(csv).toMatch(/cat,0/);
       expect(csv).toMatch(/run,0/);
       expect(csv).toMatch(/fast,0/);
+      // CLI 清洗同过收词过滤的负向哨兵（issue #43 复审）：被过滤词不得进
+      // CSV——防未来有人绕过 core 提取管线直读文件
+      expect(csv).not.toMatch(/^md,0$/m);
+      expect(csv).not.toMatch(/^doc,0$/m);
+      expect(csv).not.toMatch(/^stat,0$/m);
+      expect(csv).not.toMatch(/^you've,0$/m);
+      expect(csv).not.toMatch(/^aren't,0$/m);
     });
 
     it("respects -o/--out option to specify output path", async () => {
