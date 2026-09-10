@@ -1,15 +1,35 @@
 import type { WordEntry } from "./types.js";
 import { isProperNoun, lemmatizeWord } from "./lemma.js";
+import { ABBREVIATION_BLACKLIST } from "./blacklist.js";
 
 /**
  * extractWordEntries 的选项。
  *
  * - `excludeProperNouns`（默认 `true`）：用 compromise `#ProperNoun` 排除专名
  *   （人名、地名、品牌名等）；关闭后专名按普通词收录。
+ * - `filterAbbreviations`（默认 `true`）：收词过滤判据之一——词形还原后按
+ *   小写 lemma 精确命中缩略词黑名单的词条丢弃（docs → doc 命中）。
+ * - `filterContractions`（默认 `true`）：收词过滤判据之二——所有格剥离后
+ *   仍含撇号的缩合形式丢弃（don't、aren't、o'clock）；不展开成分词。
+ * - `abbreviationBlacklist`：注入替代内置黑名单（测试用；缺省用
+ *   `ABBREVIATION_BLACKLIST`）。黑名单内容用户不可增删。
  */
 export interface ExtractOptions {
   /** 排除专名，默认 true。 */
   excludeProperNouns?: boolean;
+  /** 过滤缩略词（黑名单精确命中），默认 true。 */
+  filterAbbreviations?: boolean;
+  /** 过滤缩合形式（剥离所有格后仍含撇号），默认 true。 */
+  filterContractions?: boolean;
+  /** 注入替代内置缩略词黑名单（测试用），缺省用 ABBREVIATION_BLACKLIST。 */
+  abbreviationBlacklist?: ReadonlySet<string>;
+}
+
+/** extractWordEntries 的返回：词条 + 收词过滤统计。 */
+export interface ExtractResult {
+  entries: WordEntry[];
+  /** 收词过滤拦截的词条数（按去重后 lemma/token 计，不重复计）。 */
+  filteredCount: number;
 }
 
 /**
@@ -17,7 +37,7 @@ export interface ExtractOptions {
  *
  * 一次性把「英文词（含内部 ' / -）」以及「URL / email / 路径 / 代码标识符」
  * 都抓成单个候选，避免把 https/example/com 拆成三个词；垃圾候选交给
- * filterToken 拒绝。
+ * isEnglishWord 拒绝。
  *
  * - 起始字符：字母/数字/`$`（`$scope`、`v2` 作为整体候选进过滤）
  * - 后续字符：字母/数字/`$`/`.`/`'`/`@`/`/`/`_`/`-`
@@ -49,6 +69,9 @@ const DOLLAR_RE = /\$/;
 const DIGIT_RE = /\d/;
 /** 合法英文词：纯字母，内部可含 `'` / `-`。 */
 const WORD_RE = /^[A-Za-z]+(?:['-][A-Za-z]+)*$/;
+
+/** 所有格后缀：词尾 `'s`（弯撇号已在 normalizeText 归一为直撇号）。 */
+const POSSESSIVE_RE = /'s$/;
 
 /**
  * 显式字符替换表：弯引号 / Unicode 连字符。
@@ -100,9 +123,11 @@ export function tokenize(text: string): string[] {
 }
 
 /**
- * 提取管线（v2，含词形还原与专名排除）：
- * NFKC 规范化 → 候选分词 → 过滤非英文词（+ 可选专名排除）
- * → 词形还原（lemma 聚合前）→ 按 lemma 去重 → `{lemma, flags:0}[]`。
+ * 提取管线（v3，含词形还原、专名排除与收词过滤）：
+ * NFKC 规范化 → 候选分词 → 所有格剥离（归一化，永不受开关控制）
+ * → 过滤非英文词 → 可选专名排除 → 可选缩合形式拦截
+ * → 词形还原（lemma 聚合前）→ 可选缩略词黑名单拦截
+ * → 按 lemma 去重 → `{ entries, filteredCount }`。
  *
  * 词形还原：compromise（不规则动词表优先 + 保守后缀 fallback），详见 lemma.ts。
  * 纯函数，仅依赖 compromise（纯 JS），扩展与 Node 共用。
@@ -110,18 +135,35 @@ export function tokenize(text: string): string[] {
 export function extractWordEntries(
   text: string,
   options?: ExtractOptions,
-): WordEntry[] {
+): ExtractResult {
   const excludeProperNouns = options?.excludeProperNouns ?? true;
+  const filterAbbreviations = options?.filterAbbreviations ?? true;
+  const filterContractions = options?.filterContractions ?? true;
+  const blacklist = options?.abbreviationBlacklist ?? ABBREVIATION_BLACKLIST;
   const normalized = normalizeText(text);
   const seen = new Set<string>();
+  const filtered = new Set<string>();
   const entries: WordEntry[] = [];
-  for (const token of tokenize(normalized)) {
+  for (const rawToken of tokenize(normalized)) {
+    // 所有格剥离属归一化：剥 's 后按普通词条继续（dog's → dog、it's → it）。
+    const token = rawToken.replace(POSSESSIVE_RE, "");
+    if (token.length === 0) continue; // 裸 's 不产生词条
     if (!isEnglishWord(token)) continue;
     if (excludeProperNouns && isProperNoun(token)) continue;
+    // 缩合形式拦截：剥离所有格后仍含撇号（don't、aren't、o'clock），不展开成分词。
+    if (filterContractions && token.includes("'")) {
+      filtered.add(token.toLowerCase());
+      continue;
+    }
     const lemma = lemmatizeWord(token);
+    // 缩略词黑名单：词形还原后按小写 lemma 精确命中（docs → doc 命中）。
+    if (filterAbbreviations && blacklist.has(lemma)) {
+      filtered.add(lemma);
+      continue;
+    }
     if (seen.has(lemma)) continue;
     seen.add(lemma);
     entries.push({ lemma, flags: 0 });
   }
-  return entries;
+  return { entries, filteredCount: filtered.size };
 }

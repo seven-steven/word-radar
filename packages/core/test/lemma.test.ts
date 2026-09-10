@@ -1,8 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { extractWordEntries, isProperNoun, lemmatizeWord } from "../src/index.js";
 
+/** 空黑名单：机制测试与真实黑名单数据隔离（spec：不依赖真实数据文件）。 */
+const EMPTY_BLACKLIST = new Set<string>();
+
+/** 便捷：只取 lemma 列表（注入空黑名单，本文件测的是还原/专名机制而非黑名单）。 */
 function lemmas(text: string): string[] {
-  return extractWordEntries(text).map((e) => e.lemma);
+  return extractWordEntries(text, {
+    abbreviationBlacklist: EMPTY_BLACKLIST,
+  }).entries.map((e) => e.lemma);
 }
 
 describe("lemmatizeWord", () => {
@@ -59,7 +65,8 @@ describe("proper noun exclusion", () => {
   it("keeps proper nouns when excludeProperNouns is false", () => {
     const out = extractWordEntries("Alice visited London", {
       excludeProperNouns: false,
-    }).map((e) => e.lemma);
+      abbreviationBlacklist: EMPTY_BLACKLIST,
+    }).entries.map((e) => e.lemma);
     expect(out).toContain("alice");
     expect(out).toContain("london");
     expect(out).toContain("visit");

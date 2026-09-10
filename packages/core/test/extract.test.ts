@@ -3,11 +3,28 @@ import {
   extractWordEntries,
   isEnglishWord,
   tokenize,
+  type ExtractOptions,
 } from "../src/index.js";
 
-/** 便捷：只取 lemma 列表。 */
+/** 空黑名单：机制测试与真实黑名单数据隔离（spec：不依赖真实数据文件）。 */
+const EMPTY_BLACKLIST = new Set<string>();
+
+/** 便捷：只取 lemma 列表（机制测试用，注入空黑名单保持数据无关）。 */
 function lemmas(text: string): string[] {
-  return extractWordEntries(text).map((e) => e.lemma);
+  return extractWordEntries(text, {
+    abbreviationBlacklist: EMPTY_BLACKLIST,
+  }).entries.map((e) => e.lemma);
+}
+
+/** 测试注入的固定黑名单（不依赖 blacklist.ts 真实内容）。 */
+const TEST_BLACKLIST = new Set(["md", "doc", "stat"]);
+
+/** 注入固定黑名单的提取（其余开关沿用默认）。 */
+function extractWithBlacklist(text: string, options?: ExtractOptions) {
+  return extractWordEntries(text, {
+    ...options,
+    abbreviationBlacklist: TEST_BLACKLIST,
+  });
 }
 
 describe("tokenize", () => {
@@ -59,17 +76,21 @@ describe("isEnglishWord", () => {
 });
 
 describe("extractWordEntries", () => {
-  it("recognizes don't and well-known as single words", () => {
-    expect(lemmas("He said don't panic; it's a well-known fact.")).toEqual([
+  it("filters contractions and strips possessives under default switches", () => {
+    const out = extractWordEntries(
+      "He said don't panic; it's a well-known fact.",
+      { abbreviationBlacklist: EMPTY_BLACKLIST },
+    );
+    expect(out.entries.map((e) => e.lemma)).toEqual([
       "he",
       "say",
-      "don't",
       "panic",
-      "it's",
+      "it",
       "a",
       "well-known",
       "fact",
     ]);
+    expect(out.filteredCount).toBe(1); // don't
   });
 
   it("rejects URL, email, path, snake/camel/Pascal, $scope, v2", () => {
@@ -101,15 +122,22 @@ describe("extractWordEntries", () => {
   });
 
   it("NFKC normalizes curly quotes and unicode hyphens", () => {
-    const curly = extractWordEntries("It’s a well–known “fact”.");
-    const straight = extractWordEntries("It's a well-known \"fact\".");
-    expect(curly).toEqual(straight);
-    expect(curly.map((e) => e.lemma)).toContain("it's");
-    expect(curly.map((e) => e.lemma)).toContain("well-known");
+    const curly = extractWordEntries("It’s a well–known “fact”.", {
+      abbreviationBlacklist: EMPTY_BLACKLIST,
+    });
+    const straight = extractWordEntries("It's a well-known \"fact\".", {
+      abbreviationBlacklist: EMPTY_BLACKLIST,
+    });
+    expect(curly.entries).toEqual(straight.entries);
+    const words = curly.entries.map((e) => e.lemma);
+    expect(words).toContain("it"); // it's → 所有格剥离归一化
+    expect(words).toContain("well-known");
   });
 
   it("returns {lemma, flags:0} entries deduplicated by lemma", () => {
-    const entries = extractWordEntries("Run run RUN Runs runs");
+    const entries = extractWordEntries("Run run RUN Runs runs", {
+      abbreviationBlacklist: EMPTY_BLACKLIST,
+    }).entries;
     expect(entries).toEqual([{ lemma: "run", flags: 0 }]);
   });
 
@@ -119,8 +147,9 @@ describe("extractWordEntries", () => {
   });
 
   it("handles empty input", () => {
-    expect(extractWordEntries("")).toEqual([]);
-    expect(extractWordEntries("12345 !!! ...")).toEqual([]);
+    expect(extractWordEntries("").entries).toEqual([]);
+    expect(extractWordEntries("").filteredCount).toBe(0);
+    expect(extractWordEntries("12345 !!! ...").entries).toEqual([]);
   });
 
   it("dirty mixed-text end-to-end case", () => {
@@ -128,10 +157,10 @@ describe("extractWordEntries", () => {
       "The React app (v2) renders <div/> via https://react.dev/learn — " +
       "contact jane.doe@corp.io or edit src/utils/parse.ts. " +
       "Watch out for NULL_PTR in fetchData($scope), " +
-      "but don't worry: it’s a well-known issue affecting 3000 users. " +
+      "but don't worry: it’s a well-known issue affecting 3000 seafarers. " +
       "Visit www.example.com for more.";
     const out = extractWordEntries(dirty);
-    const words = out.map((e) => e.lemma);
+    const words = out.entries.map((e) => e.lemma);
     for (const bad of [
       "v2",
       "https://react.dev/learn",
@@ -143,16 +172,136 @@ describe("extractWordEntries", () => {
       "$scope",
       "scope",
       "3000",
+      "don't",
     ]) {
       expect(words).not.toContain(bad);
     }
     expect(words).toContain("the");
-    expect(words).toContain("don't");
+    expect(words).toContain("it"); // it’s → 所有格剥离归一化
     expect(words).toContain("well-known");
-    expect(words).toContain("user");
+    expect(words).toContain("seafarer"); // seafarers → 复数还原
     // all flags zero
-    expect(out.every((e) => e.flags === 0)).toBe(true);
+    expect(out.entries.every((e) => e.flags === 0)).toBe(true);
     // deduplicated
     expect(new Set(words).size).toBe(words.length);
+    // 缩合过滤至少拦下 don't；真实黑名单还会拦其它内容词（数据演进不定，
+    // 精确计数由下方注入固定黑名单的专项用例覆盖），故只断下限。
+    expect(out.filteredCount).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe("extraction filtering (ADR-0002)", () => {
+  it("filters blacklisted lemmas after lemmatization (docs → doc)", () => {
+    const out = extractWithBlacklist("The md file and the docs describe each doc.");
+    const words = out.entries.map((e) => e.lemma);
+    expect(words).not.toContain("md");
+    expect(words).not.toContain("doc");
+    expect(words).not.toContain("docs");
+    expect(words).toContain("file");
+    expect(words).toContain("describe");
+    // md + docs(doc) + doc 去重后 = {md, doc}
+    expect(out.filteredCount).toBe(2);
+  });
+
+  it("does not filter derived words: exact match only", () => {
+    // statistical 词形还原后仍是 statistical，精确匹配不命中 stat。
+    const out = extractWithBlacklist("statistical stats stat");
+    const words = out.entries.map((e) => e.lemma);
+    expect(words).toEqual(["statistical"]);
+    // stats→stat 与 stat 同 lemma，去重后只计 1
+    expect(out.filteredCount).toBe(1);
+  });
+
+  it("filters contractions and counts them", () => {
+    const out = extractWithBlacklist("You've said don't panic; they aren't here.");
+    const words = out.entries.map((e) => e.lemma);
+    expect(words).toEqual(["say", "panic", "they", "here"]);
+    expect(out.filteredCount).toBe(3); // you've / don't / aren't
+  });
+
+  it("lets apostrophe-free and possessive words through", () => {
+    const out = extractWithBlacklist("serendipity's dog's bone and a well-known monorepo");
+    expect(out.entries.map((e) => e.lemma)).toEqual([
+      "serendipity",
+      "dog",
+      "bone",
+      "and",
+      "a",
+      "well-known",
+      "monorepo",
+    ]);
+    expect(out.filteredCount).toBe(0);
+  });
+
+  it("dedupes filteredCount by lemma and stacks across categories", () => {
+    const out = extractWithBlacklist("Docs docs DOC you've you've");
+    expect(out.entries).toEqual([]);
+    expect(out.filteredCount).toBe(2); // {doc} + {you've}
+  });
+
+  it("filterAbbreviations:false releases blacklist hits but still filters contractions", () => {
+    const out = extractWithBlacklist("The md and docs; you've gone.", {
+      filterAbbreviations: false,
+    });
+    const words = out.entries.map((e) => e.lemma);
+    expect(words).toContain("md");
+    expect(words).toContain("doc");
+    expect(words).toContain("go"); // gone → 不规则动词还原
+    expect(words).not.toContain("you've");
+    expect(out.filteredCount).toBe(1); // you've
+  });
+
+  it("filterContractions:false releases contractions but still filters abbreviations", () => {
+    const out = extractWithBlacklist("You've aren't md docs", {
+      filterContractions: false,
+    });
+    const words = out.entries.map((e) => e.lemma);
+    // 保留撇号原形：lemmatizeWord 对含撇号词直接小写
+    expect(words).toContain("you've");
+    expect(words).toContain("aren't");
+    expect(words).not.toContain("md");
+    expect(words).not.toContain("doc");
+    expect(out.filteredCount).toBe(2); // {md, doc}
+  });
+
+  it("both switches off releases everything, possessive stripping still applies", () => {
+    const out = extractWithBlacklist("md docs you've aren't the dog's bone", {
+      filterAbbreviations: false,
+      filterContractions: false,
+    });
+    expect(out.entries.map((e) => e.lemma)).toEqual([
+      "md",
+      "doc",
+      "you've",
+      "aren't",
+      "the",
+      "dog",
+      "bone",
+    ]);
+    expect(out.filteredCount).toBe(0);
+  });
+
+  it("bare possessive leaves no apostrophe residue", () => {
+    // 裸 's 在 tokenize 层即落成单字母残枝 "s"（撇号非候选起始字符，既有行为），
+    // 剥离空防御分支（token 恰为 's → 丢）在管线内保留，当前外部输入不可达。
+    // 注入空黑名单：意图是剥离守卫，与黑名单数据无关（"s" 恰为真实黑名单成员）。
+    const out = extractWordEntries("'s", {
+      abbreviationBlacklist: EMPTY_BLACKLIST,
+    });
+    expect(out.entries.map((e) => e.lemma)).toEqual(["s"]);
+    expect(out.filteredCount).toBe(0);
+  });
+
+  it("o'clock meets proper-noun exclusion first, contraction filter second", () => {
+    // 默认开关：compromise 把 o'clock 判为专名，先走专名排除，不计数。
+    const byProper = extractWithBlacklist("o'clock");
+    expect(byProper.entries).toEqual([]);
+    expect(byProper.filteredCount).toBe(0);
+    // 关闭专名排除后 o'clock 到达缩合判定，被拦并计数。
+    const byContraction = extractWithBlacklist("o'clock", {
+      excludeProperNouns: false,
+    });
+    expect(byContraction.entries).toEqual([]);
+    expect(byContraction.filteredCount).toBe(1);
   });
 });

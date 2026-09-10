@@ -10,7 +10,9 @@ export {
   isEnglishWord,
   normalizeText,
   type ExtractOptions,
+  type ExtractResult,
 } from "./extract.js";
+export { ABBREVIATION_BLACKLIST } from "./blacklist.js";
 export { lemmatizeWord, isProperNoun } from "./lemma.js";
 export { mergeWordEntries } from "./merge.js";
 export { parseWordListCsv, stringifyWordListCsv } from "./csv.js";
