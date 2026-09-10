@@ -23,6 +23,11 @@ mkdirSync(outputDir, { recursive: true });
 
 export default defineConfig({
   testDir: "./test/e2e",
+  // 防睡眠断言（macOS）：run 期间 harness 自持 caffeinate，防止本机
+  // pmset sleep 1 在跑一半时把整机送进睡眠、冻结出假性回归（详见
+  // global-setup.ts 头注的 2026-09-10 根因取证）。
+  globalSetup: "./test/e2e/global-setup.ts",
+  globalTeardown: "./test/e2e/global-teardown.ts",
   outputDir,
   fullyParallel: false,
   workers: 1,
