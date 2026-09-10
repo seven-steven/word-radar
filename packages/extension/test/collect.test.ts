@@ -223,7 +223,7 @@ describe("端到端：夹具页面 → collectPageText → extractWordEntries", 
     `);
 
     const { text, source } = collectPageText(document, window);
-    const entries = extractWordEntries(text);
+    const { entries } = extractWordEntries(text);
     const lemmas = entries.map((e) => e.lemma);
 
     expect(source).toBe("article");

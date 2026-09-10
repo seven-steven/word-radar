@@ -239,6 +239,10 @@
     "message": "Collected $2 words via $1 ($3 new)",
     "description": "Confirmation page summary, params: source (Collect/Import/Upload), total, new count"
   },
+  "confirmFiltered": {
+    "message": "$1 filtered",
+    "description": "Confirm-page intake-filter stat line; arg: number of filtered-out entries (issue #43)"
+  },
   "pendingConfirm": {
     "message": "Awaiting confirmation",
     "description": "Awaiting confirmation status"
@@ -294,6 +298,14 @@
   "toolsToggle": {
     "message": "Tools",
     "description": "Tools drawer toggle button"
+  },
+  "filterAbbreviationsLabel": {
+    "message": "Filter abbreviations",
+    "description": "Intake-filter toggle: filter abbreviations (blacklist exact match), issue #43"
+  },
+  "filterContractionsLabel": {
+    "message": "Filter contractions",
+    "description": "Intake-filter toggle: filter contractions (apostrophe kept after possessive strip), issue #43"
   },
   "emptyHint": {
     "message": "Your library is empty — collect this page or upload a file to get started.",

@@ -2,6 +2,8 @@ import {
   extractWordEntries,
   parseWordListCsv,
   stringifyWordListCsv,
+  type ExtractOptions,
+  type ExtractResult,
   type WordEntry,
 } from "@word-radar/core";
 import {
@@ -26,11 +28,13 @@ import {
   type ImportCsvResponse,
   type PushStatus,
   type UploadedFilePart,
+  type WordsCollectedMessage,
 } from "./messages.js";
 import { createBbdcClient, type BbdcClient } from "./bbdc-client.js";
 import { chromeActionBadge, composeBadge } from "./action-badge.js";
 import { PushCoordinator } from "./push-coordinator.js";
 import { createErrorLogger, type ErrorLogger } from "./error-log.js";
+import { getIntakeFilterSettings, type IntakeFilterSettings } from "./settings.js";
 import { t1, t2 } from "./i18n.js";
 
 /** background 写入的 IndexedDB 仓储边界（service worker 独占）。 */
@@ -81,7 +85,13 @@ export interface BackgroundListenerDeps {
    * 文本提取管线（issue #24）：默认 core 的 extractWordEntries（与网页采集
    * 同一管线）；注入仅用于单测。SW 只做纯提取，无网络请求。
    */
-  extract?: (text: string) => WordEntry[];
+  extract?: (text: string, options?: ExtractOptions) => ExtractResult;
+  /**
+   * 收词过滤开关读取（issue #43）：上传两通道提取前从 settings 读
+   * （缺省即全开）；注入仅用于单测。网页采集的开关在 content script 侧读，
+   * 不经此处。
+   */
+  getFilterSettings?: () => Promise<IntakeFilterSettings>;
 }
 
 /**
@@ -122,6 +132,7 @@ export function createBackgroundListener(deps: BackgroundListenerDeps) {
   const bbdcClient = deps.bbdcClient ?? defaultBbdcClient();
   const actionBadge = deps.actionBadge ?? defaultActionBadge();
   const errorLogger = deps.errorLogger ?? createErrorLogger();
+  const getFilterSettings = deps.getFilterSettings ?? getIntakeFilterSettings;
   const pushCoordinator = deps.pushCoordinator ?? new PushCoordinator({
     client: bbdcClient,
     repository: deps.repository,
@@ -177,8 +188,9 @@ export function createBackgroundListener(deps: BackgroundListenerDeps) {
     if (isWordsCollectedMessage(message)) {
       // 驻留待确认批次 + 算新词 diff（纯词库查询，零网络）；
       // 持有通道保证 content 侧应答在预览就绪后才返回（popup 确认页拿到
-      // 的 total/newCount 一定与本批次一致）。
-      void handleWordsCollected(message.entries, deps.repository)
+      // 的 total/newCount 一定与本批次一致）。filteredCount 在提取发生地
+      // （content script）产生，SW 不消费、只随预览原样回传（issue #43）。
+      void handleWordsCollected(message, deps.repository)
         .then((preview) => {
           pendingBatch = message.entries;
           renderBadge(); // 待确认批次 → badge "?" 提示（issue #23）
@@ -285,9 +297,11 @@ export function createBackgroundListener(deps: BackgroundListenerDeps) {
       // 驻留待确认批次（不写库、不推送，确认动作是唯一入库路径）。
       // html/xml 已由 popup 侧预处理为纯文本，这里收到的 text 一律当纯文本。
       // 与 IMPORT_CSV 的区别：这是自然语言文本，不是 lemma,flags 结构化词表。
+      // 提取前读收词过滤开关（issue #43），与网页采集同一判据。
       void handleUploadFile(message.files, {
         repository: deps.repository,
         extract: deps.extract ?? extractWordEntries,
+        getFilterSettings,
       })
         .then((result) => {
           if ("entries" in result) {
@@ -310,10 +324,12 @@ export function createBackgroundListener(deps: BackgroundListenerDeps) {
       // 上传粘贴文本（issue #42 决议 A3）：text 无文件名/后缀概念，直接进
       // 与网页采集同一 core 提取管线，提取结果只驻留待确认批次（不写库、
       // 不推送，确认动作是唯一入库路径）；驻留即覆盖旧批次。错误日志与
-      // UPLOAD_FILE 同 stage=upload（同属上传手势）。
+      // UPLOAD_FILE 同 stage=upload（同属上传手势）。提取前读收词过滤开关
+      // （issue #43），与网页采集同一判据。
       void handleUploadText(message.text, {
         repository: deps.repository,
         extract: deps.extract ?? extractWordEntries,
+        getFilterSettings,
       })
         .then((result) => {
           if ("entries" in result) {
@@ -340,13 +356,19 @@ export function createBackgroundListener(deps: BackgroundListenerDeps) {
 /**
  * 采集结果只算预览：新词 = 与本地词库的 lemma diff（零网络请求），
  * 不写库、不推送——入库仅由确认动作（CONFIRM_COLLECTED）触发。
+ * filteredCount（issue #43）是提取发生地的统计：SW 不消费、只原样透传进
+ * 回程 BatchPreview（保持 popup 侧单一形状）。
  */
 async function handleWordsCollected(
-  entries: WordEntry[],
+  message: WordsCollectedMessage,
   repository: BackgroundRepository,
 ): Promise<BatchPreview> {
-  const newCount = await repository.countNew(entries);
-  return { total: entries.length, newCount };
+  const newCount = await repository.countNew(message.entries);
+  return {
+    total: message.entries.length,
+    newCount,
+    filteredCount: message.filteredCount,
+  };
 }
 
 /** 确认：待确认批次合并入词库，返回最新计数（推送由调用方在应答后触发）。 */
@@ -408,7 +430,11 @@ async function handleImportCsv(
  */
 async function handleUploadFile(
   files: UploadedFilePart[],
-  deps: { repository: BackgroundRepository; extract: (text: string) => WordEntry[] },
+  deps: {
+    repository: BackgroundRepository;
+    extract: (text: string, options?: ExtractOptions) => ExtractResult;
+    getFilterSettings: () => Promise<IntakeFilterSettings>;
+  },
 ): Promise<
   | { entries: WordEntry[]; preview: BatchPreview }
   | { ok: false; error: string }
@@ -428,11 +454,12 @@ async function handleUploadFile(
       return { ok: false, error: t2("errorOnlyTextFiles", file.name, list) };
     }
   }
-  // 整批 = 一次采集：全部文件文本合并成单文本，只跑一次提取
+  // 整批 = 一次采集：全部文件文本合并成单文本，只跑一次提取；
+  // 提取前读收词过滤开关（issue #43），与网页采集同一判据
   const text = files.map((file) => file.text).join("\n\n");
-  const entries = deps.extract(text);
+  const { entries, filteredCount } = await extractWithFilters(text, deps);
   const newCount = await deps.repository.countNew(entries);
-  return { entries, preview: { total: entries.length, newCount } };
+  return { entries, preview: { total: entries.length, newCount, filteredCount } };
 }
 
 /**
@@ -447,7 +474,11 @@ async function handleUploadFile(
  */
 async function handleUploadText(
   text: string,
-  deps: { repository: BackgroundRepository; extract: (text: string) => WordEntry[] },
+  deps: {
+    repository: BackgroundRepository;
+    extract: (text: string, options?: ExtractOptions) => ExtractResult;
+    getFilterSettings: () => Promise<IntakeFilterSettings>;
+  },
 ): Promise<
   | { entries: WordEntry[]; preview: BatchPreview }
   | { ok: false; error: string }
@@ -455,9 +486,28 @@ async function handleUploadText(
   if (text.trim() === "") {
     return { ok: false, error: "empty-upload-text" };
   }
-  const entries = deps.extract(text);
+  const { entries, filteredCount } = await extractWithFilters(text, deps);
   const newCount = await deps.repository.countNew(entries);
-  return { entries, preview: { total: entries.length, newCount } };
+  return { entries, preview: { total: entries.length, newCount, filteredCount } };
+}
+
+/**
+ * 上传两通道共用的提取段（issue #43）：读收词过滤开关 → 两开关传进
+ * extractWordEntries 的 options。开关读取失败按提取失败走 upload-failed
+ * 路径（与 countNew 故障同级，不静默降级——过滤语义错比采集失败更糟）。
+ */
+async function extractWithFilters(
+  text: string,
+  deps: {
+    extract: (text: string, options?: ExtractOptions) => ExtractResult;
+    getFilterSettings: () => Promise<IntakeFilterSettings>;
+  },
+): Promise<ExtractResult> {
+  const filterSettings = await deps.getFilterSettings();
+  return deps.extract(text, {
+    filterAbbreviations: filterSettings.filterAbbreviations,
+    filterContractions: filterSettings.filterContractions,
+  });
 }
 
 /**

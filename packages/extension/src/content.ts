@@ -8,6 +8,7 @@
 import { collectPageText } from "./lib/collect.js";
 import { createContentListener } from "./lib/content-listener.js";
 import { runCollection } from "./lib/run-collection.js";
+import { getIntakeFilterSettings } from "./lib/settings.js";
 import type { WordsCollectedMessage } from "./lib/messages.js";
 
 function broadcast(message: WordsCollectedMessage): Promise<unknown> {
@@ -20,6 +21,8 @@ const listener = createContentListener(() =>
   runCollection({
     collectText: () => collectPageText(document, window).text,
     broadcast,
+    // 收词过滤开关（issue #43）：提取前从 settings 读，缺省即全开
+    getFilterSettings: getIntakeFilterSettings,
   }),
 );
 

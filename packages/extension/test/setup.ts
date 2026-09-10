@@ -94,7 +94,9 @@ global.chrome = {
 
 (global.chrome as any).storage = {
   local: {
-    get: vi.fn(),
-    set: vi.fn(),
+    // 真实 chrome.storage.local.get 恒回 Promise<Record>；键缺失返回 {}
+    // （settings 读取兜底 true 的路径依赖此形状）
+    get: vi.fn(async () => ({})),
+    set: vi.fn(async () => undefined),
   },
 };

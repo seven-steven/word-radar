@@ -112,6 +112,7 @@ describe("createBackgroundListener", () => {
           { lemma: "run", flags: 0 },
           { lemma: "serendipity", flags: 0 },
         ],
+        filteredCount: 0,
       },
       {},
       sendResponse,
@@ -126,7 +127,8 @@ describe("createBackgroundListener", () => {
     // 确认闸门：采集消息不再直接触发入库，也不触发推送
     expect(repository.mergeCollected).not.toHaveBeenCalled();
     expect(push.start).not.toHaveBeenCalled();
-    expect(sendResponse).toHaveBeenCalledWith({ total: 2, newCount: 1 });
+    // filteredCount 原样透传（SW 不消费，回程单一形状，issue #43）
+    expect(sendResponse).toHaveBeenCalledWith({ total: 2, newCount: 1, filteredCount: 0 });
   });
 
   it("GET_COUNTS 异步应答当前计数；返回 true 持有通道", async () => {
@@ -381,7 +383,7 @@ describe("createBackgroundListener T10 push 消息", () => {
     const listener = createBackgroundListener({ repository, pushCoordinator: push });
 
     listener(
-      { type: WORDS_COLLECTED, entries: [{ lemma: "run", flags: 0 }] },
+      { type: WORDS_COLLECTED, entries: [{ lemma: "run", flags: 0 }], filteredCount: 0 },
       {},
       vi.fn(),
     );
@@ -579,6 +581,7 @@ describe("createBackgroundListener 确认闸门（issue #22）", () => {
           { lemma: "run", flags: 0 },
           { lemma: "serendipity", flags: 0 },
         ],
+        filteredCount: 0,
       },
       {},
       vi.fn(),
@@ -627,7 +630,7 @@ describe("createBackgroundListener 确认闸门（issue #22）", () => {
     });
 
     listener(
-      { type: WORDS_COLLECTED, entries: [{ lemma: "run", flags: 0 }] },
+      { type: WORDS_COLLECTED, entries: [{ lemma: "run", flags: 0 }], filteredCount: 0 },
       {},
       vi.fn(),
     );
@@ -653,13 +656,13 @@ describe("createBackgroundListener 确认闸门（issue #22）", () => {
     });
 
     listener(
-      { type: WORDS_COLLECTED, entries: [{ lemma: "first", flags: 0 }] },
+      { type: WORDS_COLLECTED, entries: [{ lemma: "first", flags: 0 }], filteredCount: 0 },
       {},
       vi.fn(),
     );
     await flush();
     listener(
-      { type: WORDS_COLLECTED, entries: [{ lemma: "second", flags: 0 }] },
+      { type: WORDS_COLLECTED, entries: [{ lemma: "second", flags: 0 }], filteredCount: 0 },
       {},
       vi.fn(),
     );
@@ -683,7 +686,7 @@ describe("createBackgroundListener 确认闸门（issue #22）", () => {
     });
 
     listener(
-      { type: WORDS_COLLECTED, entries: [{ lemma: "run", flags: 0 }] },
+      { type: WORDS_COLLECTED, entries: [{ lemma: "run", flags: 0 }], filteredCount: 0 },
       {},
       vi.fn(),
     );
@@ -711,7 +714,7 @@ describe("createBackgroundListener 确认闸门（issue #22）", () => {
     });
 
     listener(
-      { type: WORDS_COLLECTED, entries: [{ lemma: "run", flags: 0 }] },
+      { type: WORDS_COLLECTED, entries: [{ lemma: "run", flags: 0 }], filteredCount: 0 },
       {},
       vi.fn(),
     );
@@ -815,7 +818,7 @@ describe("createBackgroundListener 错误日志（issue #25）", () => {
     const coordinator = fakePushCoordinator();
     const listener = createBackgroundListener({ repository, pushCoordinator: coordinator, errorLogger });
 
-    listener({ type: WORDS_COLLECTED, entries: [{ lemma: "run", flags: 0 }] }, {}, vi.fn());
+    listener({ type: WORDS_COLLECTED, entries: [{ lemma: "run", flags: 0 }], filteredCount: 0 }, {}, vi.fn());
     await flush();
 
     const sendResponse = vi.fn();
@@ -918,7 +921,7 @@ describe("createBackgroundListener 推送进度 + badge 回执（issue #23）", 
     listener: ReturnType<typeof createBackgroundListener>,
     entries: WordEntry[],
   ): Promise<void> {
-    listener({ type: WORDS_COLLECTED, entries }, {}, vi.fn());
+    listener({ type: WORDS_COLLECTED, entries, filteredCount: 0 }, {}, vi.fn());
     await flush(); // WORDS_COLLECTED 异步驻留批次，确认前必须等它落位
     listener({ type: CONFIRM_COLLECTED }, {}, vi.fn());
     await flush(); // 确认异步链（合并 → 触发推送轮）完成，phase 离开 idle
@@ -996,7 +999,7 @@ describe("createBackgroundListener 推送进度 + badge 回执（issue #23）", 
     const listener = listenerWithRealCoordinator(repository, slowBbdcClient(10), badge);
 
     // 采集驻留 → badge "?"
-    listener({ type: WORDS_COLLECTED, entries: [{ lemma: "a", flags: 0 }] }, {}, vi.fn());
+    listener({ type: WORDS_COLLECTED, entries: [{ lemma: "a", flags: 0 }], filteredCount: 0 }, {}, vi.fn());
     await flush();
     expect(badge.set).toHaveBeenLastCalledWith("?", "#888888");
 
@@ -1037,7 +1040,7 @@ describe("createBackgroundListener 推送进度 + badge 回执（issue #23）", 
     const badge = fakeActionBadge();
     const listener = listenerWithRealCoordinator(repository, slowBbdcClient(5), badge);
 
-    listener({ type: WORDS_COLLECTED, entries: [{ lemma: "a", flags: 0 }] }, {}, vi.fn());
+    listener({ type: WORDS_COLLECTED, entries: [{ lemma: "a", flags: 0 }], filteredCount: 0 }, {}, vi.fn());
     await flush();
     expect(badge.set).toHaveBeenLastCalledWith("?", "#888888");
 
@@ -1058,7 +1061,7 @@ describe("createBackgroundListener 推送进度 + badge 回执（issue #23）", 
     expect(badge.set).toHaveBeenLastCalledWith("✓", "#0a7d2c");
 
     // 第二轮：再次采集驻留批次（如 popup 重开自动采集）→ ? 必须可见
-    listener({ type: WORDS_COLLECTED, entries: [{ lemma: "b", flags: 0 }] }, {}, vi.fn());
+    listener({ type: WORDS_COLLECTED, entries: [{ lemma: "b", flags: 0 }], filteredCount: 0 }, {}, vi.fn());
     await flush();
     expect(badge.set).toHaveBeenLastCalledWith("?", "#888888");
   });

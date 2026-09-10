@@ -60,6 +60,11 @@ import {
 import { browserCsvFileGateway } from "./lib/csv-file.js";
 import { defaultErrorLogStorage, formatErrorLog, readErrorLog } from "./lib/error-log.js";
 import {
+  getIntakeFilterSettings,
+  setIntakeFilterSetting,
+  type IntakeFilterSettings,
+} from "./lib/settings.js";
+import {
   collectDroppedFiles,
   collectFilesFromHandles,
   filterUploadFiles,
@@ -118,6 +123,8 @@ const confirmSummaryEl = document.querySelector<HTMLElement>('[data-testid="conf
 // 上传 meta（替换提示/收录摘要，code-review P1）：确认卡展开期间状态行 info
 // 态被 D 互斥隐藏，meta 移入卡内呈现
 const confirmMetaEl = document.querySelector<HTMLElement>('[data-testid="confirm-meta"]');
+// 已过滤 N 个（issue #43）：>0 时随确认卡呈现，=0/缺省隐藏
+const confirmFilteredEl = document.querySelector<HTMLElement>('[data-testid="confirm-filtered"]');
 const confirmPushButton = document.querySelector<HTMLButtonElement>('[data-testid="confirm-push"]');
 const cancelCollectButton = document.querySelector<HTMLButtonElement>('[data-testid="cancel-collect"]');
 const toolsToggleButton = document.querySelector<HTMLButtonElement>('[data-testid="tools-toggle"]');
@@ -128,6 +135,10 @@ const toolsChevron = document.querySelector<HTMLElement>('[data-testid="tools-ch
 const overwriteAskEl = document.querySelector<HTMLElement>('[data-testid="overwrite-ask"]');
 const overwriteAcceptButton = document.querySelector<HTMLButtonElement>('[data-testid="overwrite-accept"]');
 const overwriteDismissButton = document.querySelector<HTMLButtonElement>('[data-testid="overwrite-dismiss"]');
+// 收词过滤开关（issue #43）：工具抽屉「设置」组的两个 checkbox，boot 回填、
+// change 写回（storage 键即 data-testid 语义）
+const filterAbbreviationsInput = document.querySelector<HTMLInputElement>('[data-testid="filter-abbreviations"]');
+const filterContractionsInput = document.querySelector<HTMLInputElement>('[data-testid="filter-contractions"]');
 
 if (versionEl) {
   versionEl.textContent = `core ${CORE_VERSION}`;
@@ -460,6 +471,8 @@ interface ConfirmCardSnapshot {
   total: number;
   newCount: number;
   meta?: string;
+  /** 已过滤 N 个（issue #43）：提取通道有值，CSV 导入缺省。 */
+  filteredCount?: number;
 }
 
 // 最近一次确认卡快照：renderConfirmPage 时记录，批次确认 / 取消后清空
@@ -605,7 +618,13 @@ async function runUploadBatch(
     const notes = [meta.replaced ? t("uploadReplacedBatch") : null, meta.summary]
       .filter(Boolean)
       .join(" · ");
-    renderConfirmPage("sourceUpload", outcome.total, outcome.newCount, notes || undefined);
+    renderConfirmPage(
+      "sourceUpload",
+      outcome.total,
+      outcome.newCount,
+      notes || undefined,
+      outcome.filteredCount,
+    );
   } else {
     // 失败恢复确认卡（code-review #22）：开头 hideConfirmPage 已把卡片撤下，
     // 而 SW 整批拒绝时旧 pendingBatch 仍驻留内存——不恢复就成孤儿（无法确认/
@@ -619,6 +638,7 @@ async function runUploadBatch(
         snapshot.total,
         snapshot.newCount,
         snapshot.meta,
+        snapshot.filteredCount,
       );
     }
     renderStatusLine(statusEl, t1("uploadFailed", outcome.error), "error");
@@ -782,6 +802,8 @@ async function checkLogin(): Promise<void> {
  * sourceKey 仅影响措辞（采集 / 导入 / 上传采集），计数语义与按钮行为完全一致（review S-3）。
  * meta（可选，code-review P1）：上传批的替换提示 / 收录摘要，挂卡内
  * confirm-meta——状态行在卡片展开期间被 D 互斥隐藏，meta 必须随卡呈现。
+ * filteredCount（可选，issue #43）：>0 时加显「已过滤 N 个」行（confirm-filtered），
+ * =0 或缺省（CSV 导入）不渲染；随快照记录，上传失败恢复分支同形重渲。
  * 同时记录驻留批次来源（issue #41 覆盖语义的判定依据）；确认 / 取消后由各自路径清空。
  */
 function renderConfirmPage(
@@ -789,6 +811,7 @@ function renderConfirmPage(
   total: number,
   newCount: number,
   meta?: string,
+  filteredCount?: number,
 ): void {
   lastBatchSource =
     sourceKey === "sourceCollect"
@@ -796,10 +819,16 @@ function renderConfirmPage(
       : sourceKey === "sourceImport"
         ? "import"
         : "upload";
-  lastConfirmCard = { sourceKey, total, newCount, meta }; // #22 失败恢复用快照
+  lastConfirmCard = { sourceKey, total, newCount, meta, filteredCount }; // #22 失败恢复用快照
   if (confirmSummaryEl) {
     const source = t(sourceKey);
     confirmSummaryEl.textContent = t3("confirmSummary", source, total, newCount);
+  }
+  if (confirmFilteredEl) {
+    // >0 才渲染：过滤数为 0 时这行是纯噪音
+    const filtered = filteredCount ?? 0;
+    confirmFilteredEl.textContent = filtered > 0 ? t1("confirmFiltered", filtered) : "";
+    confirmFilteredEl.hidden = filtered <= 0;
   }
   if (confirmMetaEl) {
     confirmMetaEl.textContent = meta ?? "";
@@ -840,7 +869,7 @@ async function collect(): Promise<void> {
     const outcome = await requestCollection(chromeTabsGateway);
     if (outcome.ok) {
       // 确认闸门：采集结果只在 SW 内存（待确认批次），此处仅展示预览
-      renderConfirmPage("sourceCollect", outcome.total, outcome.newCount);
+      renderConfirmPage("sourceCollect", outcome.total, outcome.newCount, undefined, outcome.filteredCount);
       renderStatusLine(statusEl, t("pendingConfirm"));
     } else {
       renderStatusLine(statusEl, outcome.error, "error");
@@ -1057,6 +1086,35 @@ toolsToggleButton?.addEventListener("click", () => {
   toolsToggleButton.setAttribute("aria-expanded", String(open));
   if (toolsChevron) toolsChevron.textContent = open ? "[-]" : "[+]";
 });
+
+// ── 收词过滤开关（issue #43）：工具抽屉「设置」组 ───────────────────────
+// boot 读 storage 回填勾选态（HTML 侧 checked 缺省即开；键从未写过时读值
+// 兜底 true，与展示一致）；change 逐键写回。读/写失败静默保持现状——开关
+// 故障不反噬采集主流程。
+
+function renderIntakeFilterSettings(settings: IntakeFilterSettings): void {
+  if (filterAbbreviationsInput) {
+    filterAbbreviationsInput.checked = settings.filterAbbreviations;
+  }
+  if (filterContractionsInput) {
+    filterContractionsInput.checked = settings.filterContractions;
+  }
+}
+
+function bindIntakeFilterInput(
+  input: HTMLInputElement | null,
+  key: "filterAbbreviations" | "filterContractions",
+): void {
+  input?.addEventListener("change", () => {
+    void setIntakeFilterSetting(key, input.checked).catch(() => undefined);
+  });
+}
+
+bindIntakeFilterInput(filterAbbreviationsInput, "filterAbbreviations");
+bindIntakeFilterInput(filterContractionsInput, "filterContractions");
+void getIntakeFilterSettings()
+  .then(renderIntakeFilterSettings)
+  .catch(() => undefined);
 
 // 推送进行中每 ~500ms 拉一次状态，结束即停。
 let pushStatusTimer: number | undefined;

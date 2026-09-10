@@ -22,6 +22,7 @@ import {
   isMarkPushedMessage,
   isUploadFileMessage,
   isUploadTextMessage,
+  isBatchPreview,
   UPLOAD_FILE,
   UPLOAD_TEXT,
   NO_SUFFIX,
@@ -62,14 +63,35 @@ describe("isWordsCollectedMessage", () => {
       isWordsCollectedMessage({
         type: "WORDS_COLLECTED",
         entries: [{ lemma: "run", flags: 0 }],
+        filteredCount: 2,
       }),
     ).toBe(true);
-    expect(isWordsCollectedMessage({ type: "WORDS_COLLECTED", entries: [] })).toBe(
-      true,
-    );
+    expect(
+      isWordsCollectedMessage({
+        type: "WORDS_COLLECTED",
+        entries: [],
+        filteredCount: 0,
+      }),
+    ).toBe(true);
   });
 
-  it("拒绝缺 entries、非数组 entries 与畸形词条", () => {
+  it("拒绝缺 entries、非数组 entries、畸形词条与畸形 filteredCount", () => {
+    // 缺 filteredCount：必填字段（提取发生地恒产生，issue #43）
+    expect(isWordsCollectedMessage({ type: "WORDS_COLLECTED", entries: [] })).toBe(false);
+    expect(
+      isWordsCollectedMessage({
+        type: "WORDS_COLLECTED",
+        entries: [{ lemma: "run", flags: 0 }],
+        filteredCount: -1,
+      }),
+    ).toBe(false);
+    expect(
+      isWordsCollectedMessage({
+        type: "WORDS_COLLECTED",
+        entries: [{ lemma: "run", flags: 0 }],
+        filteredCount: "2",
+      }),
+    ).toBe(false);
     expect(isWordsCollectedMessage({ type: "WORDS_COLLECTED" })).toBe(false);
     expect(
       isWordsCollectedMessage({ type: "WORDS_COLLECTED", entries: "run" }),
@@ -87,6 +109,22 @@ describe("isWordsCollectedMessage", () => {
       }),
     ).toBe(false);
     expect(isWordsCollectedMessage(null)).toBe(false);
+  });
+});
+
+describe("isBatchPreview（含可选 filteredCount）", () => {
+  it("接受缺省与合法 filteredCount", () => {
+    expect(isBatchPreview({ total: 3, newCount: 2 })).toBe(true); // CSV 导入豁免
+    expect(isBatchPreview({ total: 3, newCount: 2, filteredCount: 1 })).toBe(true);
+    expect(isBatchPreview({ total: 0, newCount: 0, filteredCount: 0 })).toBe(true);
+  });
+
+  it("拒绝畸形形状：缺 total/newCount 与非法 filteredCount", () => {
+    expect(isBatchPreview({ total: "3", newCount: 2 })).toBe(false);
+    expect(isBatchPreview({ total: 3, newCount: null })).toBe(false);
+    expect(isBatchPreview({ total: 3, newCount: 2, filteredCount: -1 })).toBe(false);
+    expect(isBatchPreview({ total: 3, newCount: 2, filteredCount: "1" })).toBe(false);
+    expect(isBatchPreview(null)).toBe(false);
   });
 });
 

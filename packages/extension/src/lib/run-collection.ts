@@ -1,16 +1,22 @@
-import { extractWordEntries, type WordEntry } from "@word-radar/core";
+import {
+  extractWordEntries,
+  type ExtractOptions,
+  type ExtractResult,
+} from "@word-radar/core";
 import {
   WORDS_COLLECTED,
   isBatchPreview,
   type CollectResponse,
   type WordsCollectedMessage,
 } from "./messages.js";
+import { getIntakeFilterSettings, type IntakeFilterSettings } from "./settings.js";
 import { t } from "./i18n.js";
 
 /**
  * 采集编排（content script 的核心动作，可注入依赖便于单测）：
- *   收集文本 → core 提取词条 → 广播 WORDS_COLLECTED 给 background →
- *   等 SW 驻留待确认批次并回预览（总数 + 新词 diff）→ 应答确认页预览
+ *   读收词过滤开关 → 收集文本 → core 提取词条（带开关）→ 广播
+ *   WORDS_COLLECTED 给 background → 等 SW 驻留待确认批次并回预览
+ *   （总数 + 新词 diff + 过滤数）→ 应答确认页预览
  *
  * 架构约束：这里只做提取与发消息，不写 DB、不发 HTTP（spec §扩展行为）；
  * 采集结果不落库——SW 只把批次驻留内存，等用户「确认」才合并入库（issue #22）。
@@ -20,19 +26,32 @@ export interface RunCollectionDeps {
   /** 广播采集结果给 SW；resolve 在 SW 应答预览后（新词 diff 由词库查询得出）。 */
   broadcast: (message: WordsCollectedMessage) => Promise<unknown>;
   /** 默认 core 的 extractWordEntries。 */
-  extract?: (text: string) => WordEntry[];
+  extract?: (text: string, options?: ExtractOptions) => ExtractResult;
+  /**
+   * 收词过滤开关读取（issue #43）：默认从 settings 模块读
+   * （getIntakeFilterSettings，缺省即全开）；注入仅用于单测。
+   */
+  getFilterSettings?: () => Promise<IntakeFilterSettings>;
 }
 
 export async function runCollection(deps: RunCollectionDeps): Promise<CollectResponse> {
   const extract = deps.extract ?? extractWordEntries;
+  const getFilterSettings = deps.getFilterSettings ?? getIntakeFilterSettings;
+  const filterSettings = await getFilterSettings();
   const text = deps.collectText();
-  const entries = extract(text);
-  const ack = await deps.broadcast({ type: WORDS_COLLECTED, entries });
+  // 两开关透传给 core：所有格剥离在 core 内部归一化，不受开关控制
+  const { entries, filteredCount } = extract(text, {
+    filterAbbreviations: filterSettings.filterAbbreviations,
+    filterContractions: filterSettings.filterContractions,
+  });
+  const ack = await deps.broadcast({ type: WORDS_COLLECTED, entries, filteredCount });
   // SW 应答必须是有放回驻留批次的合法 BatchPreview；ack 异常（SW 重启竞态等）
   // 意味着 SW 内存中没有待确认批次，确认页语义已失效——不能谎报
   // newCount=total（review S-4），显式要求用户重新采集。
   if (!isBatchPreview(ack)) {
     return { ok: false, error: t("errorRecollectNeeded") };
   }
-  return { ok: true, total: entries.length, newCount: ack.newCount };
+  // filteredCount 是提取发生地的统计：SW 只透传（BatchPreview 回程原样带回），
+  // 缺省（undefined）时保持缺省，popup 对缺省与 0 都不渲染过滤行
+  return { ok: true, total: entries.length, newCount: ack.newCount, filteredCount: ack.filteredCount };
 }

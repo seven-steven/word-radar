@@ -278,7 +278,14 @@ async function narrowUploadOutcome(
   try {
     const raw = await send();
     if (isBatchPreview(raw)) {
-      return { ok: true, total: raw.total, newCount: raw.newCount };
+      // filteredCount（issue #43）：可选透传——SW 带则带、缺省不带
+      // （CSV 导入不经本收窄器，importCsv 自身不带该字段）
+      return {
+        ok: true,
+        total: raw.total,
+        newCount: raw.newCount,
+        filteredCount: raw.filteredCount,
+      };
     }
     if (
       typeof raw === "object" &&

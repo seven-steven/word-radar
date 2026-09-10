@@ -90,6 +90,9 @@
               <!-- aria-describedby：展开即聚焦 confirm-push，摘要作为可访问描述随按钮读出
                    （「本次共计采集 N 个单词…」是合同规定的全页最重一行，不能被跳过） -->
               <p class="confirm-summary" id="confirm-summary" data-testid="confirm-summary"></p>
+              <!-- 已过滤 N 个（issue #43）：提取通道 filteredCount>0 时呈现，
+                   =0/缺省（CSV 导入）隐藏（popup.ts 按值切换 hidden） -->
+              <p class="confirm-filtered" data-testid="confirm-filtered" hidden></p>
               <!-- 上传 meta（替换提示/收录摘要，code-review P1）：确认卡展开期间
                    状态行 info 态被 D 互斥隐藏，meta 随卡呈现（popup.ts 按有无切换 hidden） -->
               <p class="confirm-meta" data-testid="confirm-meta" hidden></p>
@@ -132,6 +135,19 @@
                   <button type="button" class="btn btn-secondary btn-small" data-testid="export-csv" data-i18n="btnExportCsv">导出 CSV</button>
                   <!-- 导出日志（issue #25）：storage.local 环形缓冲错误日志 → 可读文本 -->
                   <button type="button" class="btn btn-secondary btn-small" data-testid="export-log" data-i18n="btnExportLog">导出日志</button>
+                </div>
+                <!-- 收词过滤开关（issue #43）：缺省全开（HTML checked 缺省即开，
+                     storage 从未写过时读值兜底 true）；boot 回填 + change 写回。
+                     只影响提取管线的过滤判据，CSV 导入不受影响 -->
+                <div class="tools-settings">
+                  <label class="tools-setting">
+                    <input type="checkbox" data-testid="filter-abbreviations" checked />
+                    <span data-i18n="filterAbbreviationsLabel">过滤缩略词</span>
+                  </label>
+                  <label class="tools-setting">
+                    <input type="checkbox" data-testid="filter-contractions" checked />
+                    <span data-i18n="filterContractionsLabel">过滤缩合形式</span>
+                  </label>
                 </div>
                 <!-- role="status"：导入/导出/日志结果对读屏器播报（与主状态行同权） -->
                 <p class="sync-status" data-testid="sync-status" role="status"></p>

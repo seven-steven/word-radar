@@ -503,6 +503,16 @@ body {
   word-break: break-all;
 }
 
+/* 已过滤 N 个（issue #43）：确认卡内次级统计行，视觉与 confirm-meta 同级
+   （14px mute），位于摘要与上传 meta 之间 */
+.confirm-filtered {
+  margin: 8px 0 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--wr-mute);
+  word-break: keep-all;
+}
+
 .confirm-actions {
   display: flex;
   align-items: center;
@@ -630,6 +640,31 @@ body {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+/* 收词过滤开关（issue #43）：工具抽屉「设置」组——label 包裹 checkbox 的
+   原生联动，两行纵排（低频设置组，hairline 上边线与操作按钮区分） */
+.tools-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--wr-hairline);
+}
+
+.tools-setting {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--wr-body);
+}
+
+.tools-setting input[type="checkbox"] {
+  margin: 0;
+  accent-color: var(--wr-ink);
 }
 
 .sync-status {

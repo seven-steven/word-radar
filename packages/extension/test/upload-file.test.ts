@@ -23,7 +23,8 @@ import {
   type PushStatus,
 } from "../src/lib/messages.js";
 import type { PushCoordinator } from "../src/lib/push-coordinator.js";
-import type { WordEntry } from "@word-radar/core";
+import type { ExtractResult, WordEntry } from "@word-radar/core";
+import type { IntakeFilterSettings } from "../src/lib/settings.js";
 import { uploadFile } from "../src/lib/sw-channel.js";
 
 function fakeRepository(): BackgroundRepository & {
@@ -86,8 +87,15 @@ const flush = async (): Promise<void> => {
 describe("createBackgroundListener UPLOAD_FILE（issue #24；#38 文件批）", () => {
   /** 与网页采集同源的提取管线：注入确定性 extract 验证被调用与传参。 */
   const freshExtract = () =>
-    vi.fn((text: string): WordEntry[] =>
-      text.split(/\s+/).filter(Boolean).map((lemma) => ({ lemma, flags: 0 })));
+    vi.fn(
+      (text: string): ExtractResult => ({
+        entries: text
+          .split(/\s+/)
+          .filter(Boolean)
+          .map((lemma) => ({ lemma, flags: 0 })),
+        filteredCount: 0,
+      }),
+    );
 
   it("走同一提取管线只驻留待确认批次：countNew 算 diff、不合并、不推送，应答 {total,newCount}；持有通道", async () => {
     const extract = freshExtract();
@@ -113,12 +121,15 @@ describe("createBackgroundListener UPLOAD_FILE（issue #24；#38 文件批）", 
 
     expect(keep).toBe(true);
     await flush();
-    expect(extract).toHaveBeenCalledWith("run and jump");
+    expect(extract).toHaveBeenCalledWith("run and jump", {
+      filterAbbreviations: true,
+      filterContractions: true,
+    });
     expect(repository.countNew).toHaveBeenCalledTimes(1);
     // 确认闸门：上传不直接入库、不触发推送
     expect(repository.mergeCollected).not.toHaveBeenCalled();
     expect(coordinator.start).not.toHaveBeenCalled();
-    expect(sendResponse).toHaveBeenCalledWith({ total: 3, newCount: 1 });
+    expect(sendResponse).toHaveBeenCalledWith({ total: 3, newCount: 1, filteredCount: 0 });
     expect(errorLogger.log).not.toHaveBeenCalled();
   });
 
@@ -176,9 +187,12 @@ describe("createBackgroundListener UPLOAD_FILE（issue #24；#38 文件批）", 
 
     // 整批合并：extract 只收到一次合并文本（\n\n 连接），预览是合并后词数
     expect(extract).toHaveBeenCalledTimes(1);
-    expect(extract).toHaveBeenCalledWith("run and\n\njump");
+    expect(extract).toHaveBeenCalledWith("run and\n\njump", {
+      filterAbbreviations: true,
+      filterContractions: true,
+    });
     expect(repository.countNew).toHaveBeenCalledTimes(1);
-    expect(sendResponse).toHaveBeenCalledWith({ total: 3, newCount: 3 });
+    expect(sendResponse).toHaveBeenCalledWith({ total: 3, newCount: 3, filteredCount: 0 });
   });
 
   it("新批次覆盖旧批次：先 WORDS_COLLECTED 再 UPLOAD_FILE，CONFIRM 合并的是上传批次（issue #38）", async () => {
@@ -200,6 +214,7 @@ describe("createBackgroundListener UPLOAD_FILE（issue #24；#38 文件批）", 
           { lemma: "alphaword", flags: 0 },
           { lemma: "betaword", flags: 0 },
         ],
+        filteredCount: 0,
       },
       {},
       vi.fn(),
@@ -272,10 +287,13 @@ describe("createBackgroundListener UPLOAD_FILE（issue #24；#38 文件批）", 
       const sendResponse = vi.fn();
       listener({ type: UPLOAD_FILE, files: [{ name: fileName, text: "run and jump" }] }, {}, sendResponse);
       await flush();
-      expect(sendResponse).toHaveBeenCalledWith({ total: 3, newCount: 3 });
+      expect(sendResponse).toHaveBeenCalledWith({ total: 3, newCount: 3, filteredCount: 0 });
     }
     // .csv 也只是被当纯文本提词：extract 收到原始文本
-    expect(extract).toHaveBeenCalledWith("run and jump");
+    expect(extract).toHaveBeenCalledWith("run and jump", {
+      filterAbbreviations: true,
+      filterContractions: true,
+    });
   });
 
   it("非法后缀（如 .png）：零写入、零提取，应答错误并写错误日志 stage=upload", async () => {
@@ -377,6 +395,37 @@ describe("createBackgroundListener UPLOAD_FILE（issue #24；#38 文件批）", 
     expect(event.stage).toBe("upload");
     expect(event.summary).toContain("idb read failed");
   });
+  it("提取前读收词过滤开关并传给 extract：关闭后 options 透传 false（issue #43）", async () => {
+    const extract = freshExtract();
+    const repository = fakeRepository();
+    const filterSettings: IntakeFilterSettings = {
+      filterAbbreviations: false,
+      filterContractions: false,
+    };
+    const listener = createBackgroundListener({
+      repository,
+      bbdcClient: fakeBbdcClient(),
+      actionBadge: fakeActionBadge(),
+      pushCoordinator: fakePushCoordinator(),
+      errorLogger: { log: vi.fn() },
+      extract,
+      getFilterSettings: async () => filterSettings,
+    });
+    const sendResponse = vi.fn();
+
+    listener(
+      { type: UPLOAD_FILE, files: [{ name: "notes.txt", text: "run" }] },
+      {},
+      sendResponse,
+    );
+    await flush();
+
+    expect(extract).toHaveBeenCalledWith("run", {
+      filterAbbreviations: false,
+      filterContractions: false,
+    });
+    expect(sendResponse).toHaveBeenCalledWith({ total: 1, newCount: 1, filteredCount: 0 });
+  });
 });
 
 describe("sw-channel uploadFile 收窄（issue #24；#38 文件批）", () => {
@@ -417,8 +466,15 @@ describe("sw-channel uploadFile 收窄（issue #24；#38 文件批）", () => {
 describe("createBackgroundListener UPLOAD_TEXT（issue #42 v1.1-T5 粘贴文本）", () => {
   /** 与网页采集同源的提取管线：注入确定性 extract 验证被调用与传参。 */
   const freshExtract = () =>
-    vi.fn((text: string): WordEntry[] =>
-      text.split(/\s+/).filter(Boolean).map((lemma) => ({ lemma, flags: 0 })));
+    vi.fn(
+      (text: string): ExtractResult => ({
+        entries: text
+          .split(/\s+/)
+          .filter(Boolean)
+          .map((lemma) => ({ lemma, flags: 0 })),
+        filteredCount: 0,
+      }),
+    );
 
   it("text 直进同一提取管线：无后缀校验、countNew 算 diff、只驻留（不合并不推送）、应答 {total,newCount}；持有通道", async () => {
     const extract = freshExtract();
@@ -447,12 +503,15 @@ describe("createBackgroundListener UPLOAD_TEXT（issue #42 v1.1-T5 粘贴文本�
 
     expect(keep).toBe(true);
     await flush();
-    expect(extract).toHaveBeenCalledWith("sketch.exe photo.png run and jump");
+    expect(extract).toHaveBeenCalledWith("sketch.exe photo.png run and jump", {
+      filterAbbreviations: true,
+      filterContractions: true,
+    });
     expect(repository.countNew).toHaveBeenCalledTimes(1);
     // 确认闸门：粘贴文本同样不直接入库、不触发推送
     expect(repository.mergeCollected).not.toHaveBeenCalled();
     expect(coordinator.start).not.toHaveBeenCalled();
-    expect(sendResponse).toHaveBeenCalledWith({ total: 5, newCount: 1 });
+    expect(sendResponse).toHaveBeenCalledWith({ total: 5, newCount: 1, filteredCount: 0 });
     expect(errorLogger.log).not.toHaveBeenCalled();
   });
 
@@ -500,6 +559,7 @@ describe("createBackgroundListener UPLOAD_TEXT（issue #42 v1.1-T5 粘贴文本�
           { lemma: "alphaword", flags: 0 },
           { lemma: "betaword", flags: 0 },
         ],
+        filteredCount: 0,
       },
       {},
       vi.fn(),

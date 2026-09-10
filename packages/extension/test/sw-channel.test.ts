@@ -169,6 +169,16 @@ describe("importCsv（popup 侧）", () => {
     expect(outcome).toEqual({ ok: true, total: 8, newCount: 5 });
   });
 
+  it("CSV 豁免（issue #43）：即使 SW 应答带 filteredCount 也不透传（导入不经提取管线）", async () => {
+    const channel = fakeChannel({
+      importCsv: vi.fn(async () => ({ total: 8, newCount: 5, filteredCount: 9 })),
+    });
+
+    const outcome = await importCsv(channel, "lemma,flags\nrun,0\n", "words.csv");
+
+    expect(outcome).toEqual({ ok: true, total: 8, newCount: 5 });
+  });
+
   it("SW 报 {ok:false,error}（坏 CSV）时原样透传错误", async () => {
     const channel = fakeChannel({
       importCsv: vi.fn(async () => ({
@@ -206,14 +216,24 @@ describe("importCsv（popup 侧）", () => {
 });
 
 describe("uploadPastedText（popup 侧，issue #42 粘贴文本）", () => {
-  it("向 SW 发 UPLOAD_TEXT 并把 BatchPreview 包成 {ok:true,total,newCount}", async () => {
+  it("向 SW 发 UPLOAD_TEXT 并把 BatchPreview 包成 {ok:true,total,newCount}，filteredCount 原样透传", async () => {
+    const channel = fakeChannel({
+      uploadText: vi.fn(async () => ({ total: 5, newCount: 3, filteredCount: 2 })),
+    });
+
+    const outcome = await uploadPastedText(channel, "run and jump");
+
+    expect(channel.uploadText).toHaveBeenCalledWith("run and jump");
+    expect(outcome).toEqual({ ok: true, total: 5, newCount: 3, filteredCount: 2 });
+  });
+
+  it("SW 应答缺 filteredCount 时 outcome 保持缺省（提取通道恒带，此处兜底）", async () => {
     const channel = fakeChannel({
       uploadText: vi.fn(async () => ({ total: 5, newCount: 3 })),
     });
 
     const outcome = await uploadPastedText(channel, "run and jump");
 
-    expect(channel.uploadText).toHaveBeenCalledWith("run and jump");
     expect(outcome).toEqual({ ok: true, total: 5, newCount: 3 });
   });
 

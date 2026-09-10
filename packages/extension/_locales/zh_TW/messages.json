@@ -239,6 +239,10 @@
     "message": "本次共计$1 $2 个单词，其中新词 $3 个",
     "description": "确认页摘要，参数：来源（采集/导入/上传采集）、总数、新词数"
   },
+  "confirmFiltered": {
+    "message": "已过滤 $1 个",
+    "description": "确认页收词过滤统计行，参数：被过滤的词条数（issue #43）"
+  },
   "pendingConfirm": {
     "message": "待确认",
     "description": "待确认状态"
@@ -294,6 +298,14 @@
   "toolsToggle": {
     "message": "工具",
     "description": "工具抽屉开关按钮"
+  },
+  "filterAbbreviationsLabel": {
+    "message": "过滤缩略词",
+    "description": "收词过滤开关：过滤缩略词（黑名单精确命中），issue #43"
+  },
+  "filterContractionsLabel": {
+    "message": "过滤缩合形式",
+    "description": "收词过滤开关：过滤缩合形式（剥离所有格后仍含撇号），issue #43"
   },
   "emptyHint": {
     "message": "词库还是空的，采集当前页或上传文件开始",

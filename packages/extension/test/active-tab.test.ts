@@ -33,6 +33,21 @@ describe("requestCollection（popup 侧）", () => {
     expect(outcome).toEqual({ ok: true, total: 5, newCount: 2 });
   });
 
+  it("content 应答带 filteredCount 时原样透传（issue #43）", async () => {
+    const gateway = fakeGateway({
+      sendToTab: vi.fn(async () => ({
+        ok: true,
+        total: 5,
+        newCount: 2,
+        filteredCount: 3,
+      })),
+    });
+
+    const outcome = await requestCollection(gateway);
+
+    expect(outcome).toEqual({ ok: true, total: 5, newCount: 2, filteredCount: 3 });
+  });
+
   it("无活动标签页时不注入不发消息，返回错误", async () => {
     const gateway = fakeGateway({
       queryActiveTabId: vi.fn(async () => undefined),

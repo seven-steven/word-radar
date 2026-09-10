@@ -123,21 +123,31 @@ export interface CollectWordsMessage {
   type: typeof COLLECT_WORDS;
 }
 
-/** content → background：一次采集的词条结果（SW 只驻留内存，不入库）。 */
+/**
+ * content → background：一次采集的词条结果（SW 只驻留内存，不入库）。
+ * filteredCount 是收词过滤拦截数（issue #43）：在提取发生地（content script）
+ * 产生，SW 不消费、只随 BatchPreview 原样透传回 popup。
+ */
 export interface WordsCollectedMessage {
   type: typeof WORDS_COLLECTED;
   entries: WordEntry[];
+  /** 本次提取被收词过滤拦截的词条数（≥0）。 */
+  filteredCount: number;
 }
 
 /**
  * 确认页预览：新词 = 与本地词库的 lemma diff（零网络请求）。
  * SW 收到 WORDS_COLLECTED 后应答此结构；content 透传给 popup。
+ * filteredCount（issue #43，可选）：提取管线拦截数——网页/上传采集有值，
+ * IMPORT_CSV 不经提取管线、天然缺省（popup 侧缺省或 0 都不渲染过滤行）。
  */
 export interface BatchPreview {
   /** 本次采集词条总数。 */
   total: number;
   /** 新词数（本地词库没有的 lemma）。 */
   newCount: number;
+  /** 收词过滤拦截数（提取通道携带；CSV 导入缺省）。 */
+  filteredCount?: number;
 }
 
 /** popup → background：确认待确认批次（合并入词库 + 触发一轮推送全部待推）。 */
@@ -296,7 +306,9 @@ export function isWordsCollectedMessage(
     isObject(value) &&
     value.type === WORDS_COLLECTED &&
     Array.isArray(value.entries) &&
-    value.entries.every(isWordEntry)
+    value.entries.every(isWordEntry) &&
+    typeof value.filteredCount === "number" &&
+    value.filteredCount >= 0
   );
 }
 
@@ -304,7 +316,10 @@ export function isBatchPreview(value: unknown): value is BatchPreview {
   return (
     isObject(value) &&
     typeof value.total === "number" &&
-    typeof value.newCount === "number"
+    typeof value.newCount === "number" &&
+    // 可选字段：缺省合法；存在时必须是非负 number（畸形值按整体拒绝）
+    (value.filteredCount === undefined ||
+      (typeof value.filteredCount === "number" && value.filteredCount >= 0))
   );
 }
 
