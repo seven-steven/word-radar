@@ -7,12 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/
 
 ## [Unreleased]
 
+### 新增
+
+- 收词过滤（issue #43，ADR-0002）：采集与 CLI 清洗共用双判据——内置**缩略词黑名单**（词形还原后按小写 lemma 精确命中，docs→doc）+ **缩合形式拦截**（剥离所有格 `'s` 后仍含撇号即丢，you've/aren't/o'clock）；所有格剥离（dog's→dog）属归一化、永不受开关控制。被过滤词条不进待确认批次，确认卡报「已过滤 N 个」（网页采集与上传采集同语义，CSV 导入天然豁免）；「过滤缩略词」「过滤缩合形式」两开关默认全开，popup 工具抽屉设置组读写 `chrome.storage.local`；`extractWordEntries` 返回 `{entries, filteredCount}`，测试可注入固定黑名单
+- 缩略词黑名单构建管线 `scripts/build-blacklist.mjs`：Wiktionary clipping/abbreviation/initialism 三类目 → 定义行纯度过滤（整页缩略族释义占比 ≥1/5 + **小写真词页一票否决**：大写变体页不得为未过纯度的真词担保）→ 双守卫（手工闭类词表 + Norvig 现代语料 top-1400 及其词形还原形）+ md 种子（API 核验埃及语转写通道漏网）→ 16514 词静态资源随 core 分发；验收线（md/doc/stat 命中，serendipity/monorepo 放行）与管线级 top-1000 高频词零误杀均由数据测试钉死，重生成自检失败即非零退出
+
 ### 修复
 
 - 开 popup 的零词恢复轮噪音（issue #36）：`CHECK_LOGIN` 登录恢复路径对待推池为空时跳过整轮推送、保持 idle（对齐 `resumePendingPush` 守卫），popup 不再空转出「推送完成 + 成功 0 · 已存在 0 · 失败 0」回执，也省去零词轮的两发 `checkLogin` 网络请求
 
 ### 测试与工程
 
+- e2e harness 防睡眠加固:Playwright globalSetup 挂 `caffeinate -is -t 3600` 断言、globalTeardown 收割(darwin 专属,非 darwin 静默跳过)——本机 `pmset sleep 1` 曾让无人值守长跑 e2e 中途整机睡眠,墙钟超时在下次唤醒才被收割,伪装成「推送循环冻结在词间」的假回归(pmset 日志取证定案)
 - e2e push.spec 空轮用例竞态修复（#36 复核取证发现，与 SW 修复正交、HEAD 下同样存在）：第一段终态锚由 not-running（反向断言立即评估，confirm 后 popup 短暂仍显示旧 completed 态时会瞬间通过）改为「成功 2」确定锚——第二段若与第一轮并行发起，`start()` 去重会吞掉空轮、succeeded 永不重置
 
 ## [1.0.0] - 2026-09-06

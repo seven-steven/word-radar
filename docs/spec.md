@@ -85,7 +85,7 @@ run,1
 - 词形还原:用 **compromise**(`verbs().toInfinitive()` / `nouns().toSingular()`),配不规则动词表 + 保守后缀 fallback。
 - 去重:按 lemma 聚合(小写),合并后只保留 lemma 一行。
 - 收词过滤(2026-09-07 grilling 定稿,详见 ADR-0002):词形还原后按小写 lemma 匹配内置**缩略词黑名单**(缩写/截短/initialism,命中即丢,如 md、doc、stat);剥离 `'s` 后仍含撇号的**缩合形式**(you've、aren't、o'clock)丢弃。被过滤词条不进待确认批次,采集摘要报「已过滤 N 个」,不展开明细、不提供捞回。**高频简单词(a、the)明确不过滤**——一次性入库、推送一次即永为非新词,不为它建词频机制。「过滤缩略词」「过滤缩合形式」两个开关默认全开、用户可各自关闭(popup 设置区,存 chrome.storage.local);黑名单内容内置、不可增删,避免误删内置条目导致过滤静默退化。网页采集、上传文件、CLI extract 全走同一条 core 提取管线,统一生效;CSV 导入不经提取管线,天然豁免;CLI 第一版不带开关参数,恒默认全开(CSV 可手动编辑是天然后门)。黑名单数据在构建期生成:Wiktionary clipping/abbreviation/initialism 标签词条提取 + 手工 initialism 种子表(md 的英文词条是埃及语转写,标签通道抓不到它);**不做**无元音短串盲启发式(会误杀 my/by/why 这类无元音简单词)。验收线:md/doc/stat/you've/aren't 命中,serendipity/serendipity's/dog's/monorepo 放行。
-- 公开 API:`extractWordEntries(text, options) → {lemma, flags:0}[]`(options 增补 `filterAbbreviations`/`filterContractions`,默认 true)、`mergeWordEntries(...)`(lemma 合并、flags 按位 OR)、CSV `parse`/`stringify`。
+- 公开 API:`extractWordEntries(text, options) → { entries: {lemma, flags:0}[], filteredCount: number }`(返回对象:词条数组 + filteredCount 为收词过滤拦截数;options 增补 `filterAbbreviations`/`filterContractions`,默认 true)、`mergeWordEntries(...)`(lemma 合并、flags 按位 OR)、CSV `parse`/`stringify`。
 
 ### 不背单词对接(API 全部实测通过)
 
