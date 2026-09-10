@@ -7,6 +7,7 @@
  * 断言按中文渲染（也持续验证「中文环境显示中文」这一 issue #28 的主诉）。
  */
 import { writeFileSync } from "node:fs";
+import type { BrowserContext, Page } from "@playwright/test";
 import { test, expect, drainPendingPool, waitCountsLoaded } from "./fixtures.js";
 
 test.beforeEach(({ mockBbdc }) => {
@@ -128,6 +129,9 @@ test("CSV import goes through the confirmation gate (issue #22 review S-3)", asy
     /本次共计导入 \d+ 个单词，其中新词 \d+ 个/,
     { timeout: 10_000 },
   );
+  // CSV 导入无收词过滤语义（issue #43）：结构化解析不带 filteredCount，
+  // 确认卡不出「已过滤 N 个」行
+  await expect(page.getByTestId("confirm-filtered")).toBeHidden();
   // 确认前不落库
   await expect(page.getByTestId("total")).toHaveText(String(totalBefore));
 
@@ -428,5 +432,261 @@ test("export-log exports storage.local error ring buffer as text (issue #25)", a
   await page.getByTestId("export-log").click();
   // i18n（issue #28）：zh-CN「暂无错误日志」
   await expect(page.getByTestId("sync-status")).toHaveText(/暂无错误日志/);
+  await page.close();
+});
+
+/**
+ * 收词过滤用例的采集底座（issue #43）：开 fixture 文章页 + popup 标签页，
+ * 等内容脚本注入余量后返回两页；采集动作由用例自行驱动——各用例采集前
+ * 有不同的开关操作（check/uncheck）。
+ */
+async function openFilterFixturePair(
+  extContext: BrowserContext,
+  popupUrl: string,
+  fixtureServer: { url: string },
+): Promise<{ popup: Page; article: Page }> {
+  const article = await extContext.newPage();
+  await article.goto(`${fixtureServer.url}/filter-gate.html`);
+  // content script 按 document_idle 注入；给一点余量（collect.spec 同款）
+  await article.waitForTimeout(500);
+  const popup = await extContext.newPage();
+  await popup.goto(popupUrl);
+  return { popup, article };
+}
+
+/**
+ * 把文章页带回前台后点「采集当前页」并等确认卡摘要成形（issue #39：
+ * popup 以标签页模拟时按钮显式触发，采集目标 = 触发时的活动标签；
+ * collect.spec 同款驱动方式）。
+ */
+async function collectFilterFixture(popup: Page, article: Page): Promise<void> {
+  await article.bringToFront();
+  await popup.getByTestId("collect").click();
+  await expect(popup.getByTestId("confirm-summary")).toHaveText(
+    /本次共计采集 \d+ 个单词，其中新词 \d+ 个/,
+    { timeout: 15_000 },
+  );
+}
+
+// ── 收词过滤（issue #43）：开关 UI + 确认卡「已过滤 N 个」行 ─────────────
+//
+// fixture 文本（pages/filter-gate.html）：
+//   The doc and the md, you've aren't serendipity monorepo the
+// 用词纪律：the/and 是跨黑名单版本恒安全的功能词；doc/md 是跨版本恒过滤的
+// 缩略词锚点；you've/aren't 走与数据无关的缩合判据；serendipity/monorepo
+// 恒放行。期望值已用真实提取管线（core dist extractWordEntries）实证：
+//
+// | 开关组合     | total | filtered | 批次 lemma（按 lemma 去重）|
+// |--------------|-------|----------|----------------------------|
+// | 双开（默认） | 4     | 4        | the, and, serendipity, monorepo |
+// | 缩略词关     | 6     | 2        | the, doc, and, md, serendipity, monorepo |
+// | 缩合关       | 6     | 2        | the, and, you've, aren't, serendipity, monorepo |
+// | 双关         | 8     | 0        | the, doc, and, md, you've, aren't, serendipity, monorepo |
+//
+// 断言只锚 total / filteredCount（由文本唯一决定，与词库状态无关）；
+// newCount 依赖持久 context 的词库现状，一律放宽为 \d+。
+
+test("intake filter toggles exist, default checked, persist across reload (issue #43)", async ({
+  extContext,
+  popupUrl,
+}) => {
+  const page = await extContext.newPage();
+  await page.goto(popupUrl);
+
+  // 工具抽屉默认收起（issue #35 重做）：先展开抽屉再读面板内开关
+  await page.getByTestId("tools-toggle").click();
+  // 缺省全开：HTML checked 缺省 + storage 从未写过时读值兜底 true
+  await expect(page.getByTestId("filter-abbreviations")).toBeVisible();
+  await expect(page.getByTestId("filter-abbreviations")).toBeChecked();
+  await expect(page.getByTestId("filter-contractions")).toBeChecked();
+
+  // 重开 popup（reload 模拟）：持久化语义来自「缺省 true」，storage 仍未写过，
+  // boot 异步回填后依旧全勾
+  await page.reload();
+  await page.getByTestId("tools-toggle").click();
+  await expect(page.getByTestId("filter-abbreviations")).toBeChecked();
+  await expect(page.getByTestId("filter-contractions")).toBeChecked();
+
+  // 回填哨兵：上面的 reload 勾选仍可能只是 HTML checked 缺省属性——只有先经
+  // UI uncheck 让 change 写入 storage，reload 后的未勾选才唯一来自 boot 的
+  // storage 回填（popup.ts renderIntakeFilterSettings），钉住「用户关掉能记住」
+  await page.getByTestId("filter-contractions").uncheck();
+  // change 的 storage 写是异步无反馈的：等落盘再 reload，否则可能读到旧值误判
+  await expect
+    .poll(() =>
+      page.evaluate(
+        async () =>
+          (await chrome.storage.local.get("filterContractions"))
+            .filterContractions,
+      ),
+    )
+    .toBe(false);
+  await page.reload();
+  await page.getByTestId("tools-toggle").click();
+  await expect(page.getByTestId("filter-contractions")).not.toBeChecked();
+  await expect(page.getByTestId("filter-abbreviations")).toBeChecked();
+
+  // 收尾恢复：重新勾选写回 storage true 并等落盘，别把关态泄漏给后续用例
+  await page.getByTestId("filter-contractions").check();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        async () =>
+          (await chrome.storage.local.get("filterContractions"))
+            .filterContractions,
+      ),
+    )
+    .toBe(true);
+  await page.close();
+});
+
+test("default-on filters collect the fixture page: filtered line shows 4 (issue #43)", async ({
+  extContext,
+  popupUrl,
+  fixtureServer,
+}) => {
+  const { popup, article } = await openFilterFixturePair(extContext, popupUrl, fixtureServer);
+  await collectFilterFixture(popup, article);
+
+  // 双开：doc/md（黑名单）+ you've/aren't（缩合判据）被拦，过滤 4；
+  // the/and/serendipity/monorepo 按 lemma 去重后入批 → total 4（保护词计入 total）
+  await expect(popup.getByTestId("confirm-summary")).toHaveText(
+    /^本次共计采集 4 个单词，其中新词 \d+ 个$/,
+  );
+  await expect(popup.getByTestId("confirm-filtered")).toBeVisible();
+  await expect(popup.getByTestId("confirm-filtered")).toHaveText("已过滤 4 个");
+
+  // 过滤行位置契约：confirm-summary 与 confirm-meta 之间（popup.html 结构）
+  const betweenSummaryAndMeta = await popup.evaluate(() => {
+    const byTestId = (id: string): Element =>
+      document.querySelector(`[data-testid="${id}"]`) as Element;
+    return Boolean(
+      byTestId("confirm-summary").compareDocumentPosition(byTestId("confirm-filtered")) &
+        Node.DOCUMENT_POSITION_FOLLOWING &&
+        byTestId("confirm-filtered").compareDocumentPosition(byTestId("confirm-meta")) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+  });
+  expect(betweenSummaryAndMeta).toBe(true);
+
+  // 取消弃批：不改词库、不起推送，后续开关用例的计数精算不受影响
+  await popup.getByTestId("cancel-collect").click();
+  await expect(popup.getByTestId("confirm-section")).toBeHidden();
+  await popup.close();
+  await article.close();
+});
+
+test("disabling filter-abbreviations lets doc/md enter the batch (issue #43)", async ({
+  extContext,
+  popupUrl,
+  fixtureServer,
+}) => {
+  const { popup, article } = await openFilterFixturePair(extContext, popupUrl, fixtureServer);
+
+  // 经 UI 关开关：change 即写 chrome.storage.local，下一次采集在提取地读新鲜值
+  await popup.getByTestId("tools-toggle").click();
+  await popup.getByTestId("filter-abbreviations").uncheck();
+
+  await collectFilterFixture(popup, article);
+  // 黑名单关：doc/md 进批次（total 4→6），过滤只剩缩合判据的 you've/aren't
+  await expect(popup.getByTestId("confirm-summary")).toHaveText(
+    /^本次共计采集 6 个单词，其中新词 \d+ 个$/,
+  );
+  await expect(popup.getByTestId("confirm-filtered")).toHaveText("已过滤 2 个");
+
+  // 取消弃批 + 恢复开关（写回 true，别把关态泄漏给后续用例）
+  await popup.getByTestId("filter-abbreviations").check();
+  await popup.getByTestId("cancel-collect").click();
+  await expect(popup.getByTestId("confirm-section")).toBeHidden();
+  await popup.close();
+  await article.close();
+});
+
+test("disabling filter-contractions lets you've/aren't enter as apostrophe lemmas (issue #43)", async ({
+  extContext,
+  popupUrl,
+  fixtureServer,
+  mockBbdc,
+}) => {
+  const { popup, article } = await openFilterFixturePair(extContext, popupUrl, fixtureServer);
+
+  await popup.getByTestId("tools-toggle").click();
+  await popup.getByTestId("filter-contractions").uncheck();
+
+  await collectFilterFixture(popup, article);
+  // 缩合关：you've/aren't 以带撇号 lemma 入批（total 4→6），过滤只剩黑名单 doc/md
+  await expect(popup.getByTestId("confirm-summary")).toHaveText(
+    /^本次共计采集 6 个单词，其中新词 \d+ 个$/,
+  );
+  await expect(popup.getByTestId("confirm-filtered")).toHaveText("已过滤 2 个");
+
+  // 确认 → 推送词面实证：带撇号 lemma 原样入批（未被拆成 you+ve、未被剥撇号；
+  // addWord 逐词一请求，见 bbdc-client.addWord）
+  await popup.getByTestId("confirm-push").click();
+  const pushedWords = (): string[] => mockBbdc.addWordRequests().map((r) => r.word);
+  await expect
+    .poll(pushedWords, { timeout: 20_000 })
+    .toEqual(expect.arrayContaining(["you've", "aren't"]));
+
+  // 恢复开关 + 排空待推池（持久 context 共享推送循环，别把推送泄漏给后续用例）
+  await popup.getByTestId("filter-contractions").check();
+  await drainPendingPool(popup);
+  await popup.close();
+  await article.close();
+});
+
+test("both filters off: nothing filtered, filtered line hidden (issue #43)", async ({
+  extContext,
+  popupUrl,
+  fixtureServer,
+}) => {
+  const { popup, article } = await openFilterFixturePair(extContext, popupUrl, fixtureServer);
+
+  await popup.getByTestId("tools-toggle").click();
+  await popup.getByTestId("filter-abbreviations").uncheck();
+  await popup.getByTestId("filter-contractions").uncheck();
+
+  await collectFilterFixture(popup, article);
+  // 双关：8 个 lemma 全部入批，filteredCount=0 → 过滤行隐藏（不渲染「已过滤 0 个」噪音行）
+  await expect(popup.getByTestId("confirm-summary")).toHaveText(
+    /^本次共计采集 8 个单词，其中新词 \d+ 个$/,
+  );
+  await expect(popup.getByTestId("confirm-filtered")).toBeHidden();
+  await expect(popup.getByTestId("confirm-filtered")).toHaveAttribute("hidden", "");
+
+  // 取消弃批 + 恢复开关（双开，别把关态泄漏给上传用例）
+  await popup.getByTestId("filter-abbreviations").check();
+  await popup.getByTestId("filter-contractions").check();
+  await popup.getByTestId("cancel-collect").click();
+  await expect(popup.getByTestId("confirm-section")).toBeHidden();
+  await popup.close();
+  await article.close();
+});
+
+test("upload path reports the same filtered-count semantics as page collect (issue #43)", async ({
+  extContext,
+  popupUrl,
+}) => {
+  const page = await extContext.newPage();
+  await page.goto(popupUrl);
+
+  // 与网页路径同一份文本（两路共用 core 提取管线，filteredCount 进同一张确认卡）
+  const txtPath = "/tmp/word-radar-e2e-filter-upload.txt";
+  writeFileSync(txtPath, "The doc and the md, you've aren't serendipity monorepo the\n");
+
+  const [chooser] = await Promise.all([
+    page.waitForEvent("filechooser"),
+    page.getByTestId("upload-canvas").click(),
+  ]);
+  await chooser.setFiles(txtPath);
+  // 双开（前序用例已恢复缺省）：上传路径同样过滤 4、入批 4
+  await expect(page.getByTestId("confirm-summary")).toHaveText(
+    /^本次共计上传采集 4 个单词，其中新词 \d+ 个$/,
+    { timeout: 10_000 },
+  );
+  await expect(page.getByTestId("confirm-filtered")).toBeVisible();
+  await expect(page.getByTestId("confirm-filtered")).toHaveText("已过滤 4 个");
+  await page.getByTestId("cancel-collect").click();
+  await expect(page.getByTestId("confirm-section")).toBeHidden();
   await page.close();
 });
