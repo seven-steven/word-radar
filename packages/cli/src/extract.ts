@@ -61,7 +61,7 @@ async function processFile(filePath: string, outPath?: string): Promise<void> {
   const content = await readTextWithoutBom(filePath);
 
   // 提取词条（core v3 管线：收词过滤默认全开，CLI 不暴露开关）
-  const { entries } = extractWordEntries(content);
+  const { entries, filteredCount } = extractWordEntries(content);
 
   // 序列化为 CSV
   const csv = stringifyWordListCsv(entries);
@@ -80,9 +80,10 @@ async function processFile(filePath: string, outPath?: string): Promise<void> {
   // 写入文件
   await writeFile(outputPath, csv, "utf-8");
 
-  // 进度输出到 stderr
+  // 进度输出到 stderr（issue #44：清洗摘要报过滤数；0 时不报，与扩展
+  // 确认卡「已过滤 N 个」=0 隐藏的噪音语义一致）
   process.stderr.write(
-    `${relative(process.cwd(), filePath)} → ${relative(process.cwd(), outputPath)} (${entries.length} words)\n`,
+    `${relative(process.cwd(), filePath)} → ${relative(process.cwd(), outputPath)} (${entries.length} words${filteredCount > 0 ? `, ${filteredCount} filtered` : ""})\n`,
   );
 }
 

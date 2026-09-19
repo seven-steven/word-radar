@@ -235,6 +235,50 @@ describe("extract command", () => {
       expect(output).toContain("test.md");
       expect(output).toContain("test.words.csv");
     });
+
+    it("reports the filtered count in the summary when words were dropped (issue #44)", async () => {
+      const inputFile = join(tempDir, "filtered.md");
+      // md（黑名单命中）+ you've（缩合判据）被拦，the/serendipity 入表
+      await writeFile(inputFile, "The md you've serendipity");
+
+      const writes: string[] = [];
+      const originalStderr = process.stderr.write.bind(process.stderr);
+      process.stderr.write = ((chunk: string | Uint8Array) => {
+        writes.push(typeof chunk === "string" ? chunk : chunk.toString("utf8"));
+        return true;
+      }) as typeof process.stderr.write;
+
+      try {
+        await run(["node", "word-radar", "extract", inputFile]);
+      } finally {
+        process.stderr.write = originalStderr;
+      }
+
+      // 期望值由真实提取管线（core extractWordEntries）实证：2 词入表、过滤 2
+      expect(writes.join("")).toContain("(2 words, 2 filtered)");
+    });
+
+    it("omits the filtered suffix when nothing was filtered (issue #44)", async () => {
+      const inputFile = join(tempDir, "clean.md");
+      await writeFile(inputFile, "serendipity monorepo");
+
+      const writes: string[] = [];
+      const originalStderr = process.stderr.write.bind(process.stderr);
+      process.stderr.write = ((chunk: string | Uint8Array) => {
+        writes.push(typeof chunk === "string" ? chunk : chunk.toString("utf8"));
+        return true;
+      }) as typeof process.stderr.write;
+
+      try {
+        await run(["node", "word-radar", "extract", inputFile]);
+      } finally {
+        process.stderr.write = originalStderr;
+      }
+
+      // 零过滤时摘要不带 filtered 后缀（与扩展 =0 隐藏行同语义）
+      expect(writes.join("")).toContain("(2 words)\n");
+      expect(writes.join("")).not.toContain("filtered");
+    });
   });
 
   describe("error handling", () => {
