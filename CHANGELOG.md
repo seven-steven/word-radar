@@ -15,9 +15,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/
 ### 修复
 
 - 开 popup 的零词恢复轮噪音（issue #36）：`CHECK_LOGIN` 登录恢复路径对待推池为空时跳过整轮推送、保持 idle（对齐 `resumePendingPush` 守卫），popup 不再空转出「推送完成 + 成功 0 · 已存在 0 · 失败 0」回执，也省去零词轮的两发 `checkLogin` 网络请求
+- lemma 还原畸变（issue #48）：`fixF` 对一切 -ve/-ves 结尾盲试 -f/-fe 拼接、且还原链路无词典守门，-ve 常见词被改写成非词 lemma（active→actife、give→gife、have→hafe、this→thi）直接进词库与待推池，畸形 lemma 还会让黑名单按 lemma 的精确匹配失效；修复 = 删 `fixF`、新增 `finalize` 词典级守门（Norvig top-20000）：输出在典直用 → -f/-fe 拼接形态须本身过典（knives→knife 保留）→ 畸形而原词形在典回退原词形（thi→this）→ 双双不在典（截选外冷僻词）保持还原输出零行为变化；compromise 动词/名词两出口与后缀 fallback 统一接入
+- 推送运行中确认的批次被滞留（issue #47，e2e「completed EMPTY round」全量跑偶发挂的根因）：`start()` BUSY 去重静默吞掉新请求 + 轮开始时快照待推池——运行中确认的新词不在快照内，轮结束后滞留待推池直到下次触发，用户无感知；修复 = BUSY 拒入转为补轮标记（对外仍返回同一 promise，去重契约不变），轮以 completed 收尾后自动补一轮推走期间新入池的词，空轮排空自然停止不自旋；paused/异常收尾不补轮（pause 语义优先，滞留词由登录恢复/冷启动恢复兜底）
 
 ### 测试与工程
 
+- 词典构建管线 `scripts/build-lexicon.mjs`（issue #48）：Norvig `count_1w.txt` top-20000 静态词典生成 `packages/core/src/lexicon.ts`（gzip 84KB）；N=20000 由实测排名夹逼（覆盖线 thrive@18549 < 20000 < 排杂线 thi@20241——N 过大会让 thi 这类伪词当词典词骗过守门）；构建期自检硬断言：issue 11 词全在典、thi/actife 必不在，任一不过拒绝生成产物
 - e2e harness 防睡眠加固:Playwright globalSetup 挂 `caffeinate -is -t 3600` 断言、globalTeardown 收割(darwin 专属,非 darwin 静默跳过)——本机 `pmset sleep 1` 曾让无人值守长跑 e2e 中途整机睡眠,墙钟超时在下次唤醒才被收割,伪装成「推送循环冻结在词间」的假回归(pmset 日志取证定案)
 - e2e push.spec 空轮用例竞态修复（#36 复核取证发现，与 SW 修复正交、HEAD 下同样存在）：第一段终态锚由 not-running（反向断言立即评估，confirm 后 popup 短暂仍显示旧 completed 态时会瞬间通过）改为「成功 2」确定锚——第二段若与第一轮并行发起，`start()` 去重会吞掉空轮、succeeded 永不重置
 
