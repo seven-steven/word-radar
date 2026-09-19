@@ -46,6 +46,21 @@ function makeRepository(entries: FakeEntry[] = []): FakeRepository {
   };
 }
 
+/** 可变待推池仓储：markPushed 真实减池、add 可在轮中途入池（补轮用例专用）。 */
+function makeDrainingRepository(initial: FakeEntry[]) {
+  let pool = [...initial];
+  return {
+    listPending: vi.fn(async () => pool.map((e) => ({ ...e }))),
+    markPushed: vi.fn(async (lemmas: string[]) => {
+      pool = pool.filter((e) => !lemmas.includes(e.lemma));
+      return { total: 0, pending: pool.length };
+    }),
+    add: (entry: FakeEntry): void => {
+      pool.push(entry);
+    },
+  };
+}
+
 function makeSleep(): { sleep: ReturnType<typeof vi.fn>; calls: number[] } {
   const calls: number[] = [];
   const sleep = vi.fn(async (milliseconds: number) => {
@@ -225,9 +240,9 @@ describe("PushCoordinator 暂停与续推", () => {
 });
 
 describe("PushCoordinator 单例守卫", () => {
-  it("start 并发调用只起一个 run；返回同一 promise", async () => {
+  it("start 并发调用只起一个 run；返回同一 promise；被拒请求转化为轮后排空补轮（issue #47）", async () => {
     const client = makeClient();
-    const repository = makeRepository([makeEntry("run")]);
+    const repository = makeDrainingRepository([makeEntry("run")]);
     const { sleep } = makeSleep();
     const coordinator = new PushCoordinator({ client, repository, sleep });
 
@@ -235,10 +250,16 @@ describe("PushCoordinator 单例守卫", () => {
     const second = coordinator.start();
 
     expect(second).toBe(first);
+    // 并发期只有一条循环
+    expect(client.checkLogin).toHaveBeenCalledTimes(1);
     await first;
 
-    expect(client.checkLogin).toHaveBeenCalledTimes(1);
+    // 被拒的并发 start 不再被吞：轮 A 收尾后自动补一轮并排空（此时池已空，
+    // 补轮是空轮 drain）。run 已在轮 A 推走，不产生重复推送。
+    await vi.waitFor(() => expect(coordinator.getStatus().phase).toBe("completed"));
+    await new Promise((resolve) => setTimeout(resolve, 10)); // drain 后无新 start 则停
     expect(client.checkExisting).toHaveBeenCalledTimes(1);
+    expect(client.checkLogin).toHaveBeenCalledTimes(2); // 补轮完整走一轮（含 checkLogin）
   });
 
   it("前一次完成后再次 start 才会开新循环", async () => {
@@ -253,6 +274,74 @@ describe("PushCoordinator 单例守卫", () => {
     repository.listPending = vi.fn(async () => [makeEntry("garden")]);
     await coordinator.start();
     expect(client.checkExisting).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("PushCoordinator 补轮（issue #47）", () => {
+  it("轮运行中的 start 被拒入：返回同一 promise；轮正常完成后自动补轮，推走期间新入池的词", async () => {
+    const repository = makeDrainingRepository([makeEntry("a")]);
+    // 闸门：轮 A 处理 "a" 时挂起，测试在挂起期（BUSY）并发 start 并让新词入池
+    let releaseA!: () => void;
+    const gateA = new Promise<void>((resolve) => {
+      releaseA = resolve;
+    });
+    const client = makeClient({
+      checkExisting: vi.fn(async (word: string) => {
+        if (word === "a") await gateA;
+        return { exists: false };
+      }),
+    });
+    const { sleep } = makeSleep();
+    const coordinator = new PushCoordinator({ client, repository, sleep });
+
+    const first = coordinator.start();
+    await vi.waitFor(() => expect(client.checkExisting).toHaveBeenCalledWith("a"));
+
+    // BUSY 并发 start：去重契约不变（同一 promise、不起第二条循环），
+    // 但请求转化为补轮标记而非被吞
+    const second = coordinator.start();
+    expect(second).toBe(first);
+    expect(client.checkLogin).toHaveBeenCalledTimes(1);
+
+    // 轮 A 运行期间新批次确认入池（「确认即推送」本应推走的词）
+    repository.add(makeEntry("b"));
+    releaseA();
+
+    // 轮 A 推走 a（completed）后自动补轮 B：B 重读快照、重置计数、推走 b
+    const roundA = await first;
+    expect(roundA.phase).toBe("completed");
+    await vi.waitFor(() => expect(repository.markPushed).toHaveBeenCalledWith(["b"]));
+    await vi.waitFor(() => expect(coordinator.getStatus().phase).toBe("completed"));
+    expect(client.checkLogin).toHaveBeenCalledTimes(2); // 补轮完整走一轮
+    expect(coordinator.getStatus().succeeded).toBe(1); // 补轮只推走 b
+
+    // 排空后无新 start 调用则不再补轮（不自旋）
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(repository.listPending).toHaveBeenCalledTimes(2);
+  });
+
+  it("轮以 paused（登录失效）收尾：BUSY 期间被拒的 start 不触发补轮（pause 语义优先）", async () => {
+    const client = makeClient({
+      checkExisting: vi.fn(async () => {
+        throw new BbdcAuthError("bbdc HTTP 401", { kind: "http", status: 401 });
+      }),
+    });
+    const repository = makeRepository([makeEntry("run")]);
+    const { sleep } = makeSleep();
+    const coordinator = new PushCoordinator({ client, repository, sleep });
+
+    const first = coordinator.start();
+    const second = coordinator.start(); // BUSY 拒入 → 置补轮标记
+    expect(second).toBe(first);
+
+    const result = await first;
+    expect(result.phase).toBe("paused");
+
+    // 补轮不发生：排队请求随 paused 收尾被丢弃，用户应先处理登录
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(repository.listPending).toHaveBeenCalledTimes(1);
+    expect(client.checkLogin).toHaveBeenCalledTimes(1);
+    expect(coordinator.getStatus().phase).toBe("paused");
   });
 });
 

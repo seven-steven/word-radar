@@ -3,7 +3,8 @@
  *
  * 该模块不依赖 chrome.*，所有外部动作均由构造参数注入，便于测试和在
  * service worker 中复用。一次运行只读取一次 pending 快照；失败词保持 pending，
- * 下一次运行会重新读取。
+ * 下一次运行会重新读取。运行中的轮若收到新的 start 请求，轮正常完成（completed）
+ * 后自动补一轮（issue #47），保证「确认即推送」的词不因 BUSY 去重被滞留。
  */
 import { BbdcAuthError, type BbdcClient } from "./bbdc-client.js";
 import type { ErrorLogEvent } from "./error-log.js";
@@ -50,6 +51,12 @@ export class PushCoordinator {
   private readonly onProgress?: (progress: PushProgress) => void;
   private readonly onError?: (event: ErrorLogEvent) => void;
   private running: Promise<PushProgress> | null = null;
+  /**
+   * BUSY 期间被拒的 start 请求标记（issue #47）：运行中的轮正常完成（completed）
+   * 后自动再起一轮补推，使轮运行期间新入池的词不被滞留到下次触发。
+   * paused/异常收尾不补轮（登录失效时用户应先处理登录，pause 语义优先）。
+   */
+  private needsAnotherRound = false;
   private progress: PushProgress = emptyProgress();
 
   constructor(options: PushCoordinatorOptions) {
@@ -64,13 +71,45 @@ export class PushCoordinator {
     return { ...this.progress };
   }
 
-  /** 已运行时返回同一个 promise，保证不会启动第二条循环。 */
+  /**
+   * 已运行时返回同一个 promise，保证同一时刻只有一条循环；BUSY 期间的请求
+   * 不被吞（issue #47）——置补轮标记，当前轮正常完成后自动再起一轮，把
+   * 运行期间新入池的词推走（空轮 drain 亦自然停止，无新请求即无补轮）。
+   */
   start(): Promise<PushProgress> {
-    if (this.running) return this.running;
-    this.running = this.run().finally(() => {
-      this.running = null;
-    });
+    if (this.running) {
+      this.needsAnotherRound = true;
+      return this.running;
+    }
+    this.running = this.runLoop();
     return this.running;
+  }
+
+  /** 单轮生命周期 + 收尾分派（补轮或清理）。running 字段只在此收尾处变更。 */
+  private async runLoop(): Promise<PushProgress> {
+    try {
+      const finished = await this.run();
+      if (finished.phase === "completed" && this.needsAnotherRound) {
+        // 补轮从 run() 开头完整重跑：emptyProgress 重置计数（空轮的
+        // 「推送完成 0」回执正是确认闸门两段式期望的语义）。补轮是
+        // fire-and-forget：防御分支（run() 外异常）不得悬空成 unhandled
+        // rejection，此 catch 正常不可达。
+        this.needsAnotherRound = false;
+        const next = this.runLoop();
+        next.catch(() => undefined);
+        this.running = next;
+        return finished;
+      }
+      this.needsAnotherRound = false;
+      this.running = null;
+      return finished;
+    } catch (error) {
+      // 防御性兜底（run() 内部已全捕获，正常不达）：必须清 running，
+      // 否则后续 start 永远返回一个已挂死的 promise。
+      this.needsAnotherRound = false;
+      this.running = null;
+      throw error;
+    }
   }
 
   private async run(): Promise<PushProgress> {
