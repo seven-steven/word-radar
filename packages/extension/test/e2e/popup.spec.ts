@@ -471,17 +471,19 @@ async function collectFilterFixture(popup: Page, article: Page): Promise<void> {
 // ── 收词过滤（issue #43）：开关 UI + 确认卡「已过滤 N 个」行 ─────────────
 //
 // fixture 文本（pages/filter-gate.html）：
-//   The doc and the md, you've aren't serendipity monorepo the
+//   The doc and the md, you've aren't serendipity monorepo the dog's
 // 用词纪律：the/and 是跨黑名单版本恒安全的功能词；doc/md 是跨版本恒过滤的
 // 缩略词锚点；you've/aren't 走与数据无关的缩合判据；serendipity/monorepo
-// 恒放行。期望值已用真实提取管线（core dist extractWordEntries）实证：
+// 恒放行；dog's 是所有格剥离锚点（→dog，跨四种开关组合恒在批次——剥离属
+// 归一化、不受开关控制）。期望值已用真实提取管线（core dist
+// extractWordEntries）实证：
 //
 // | 开关组合     | total | filtered | 批次 lemma（按 lemma 去重）|
 // |--------------|-------|----------|----------------------------|
-// | 双开（默认） | 4     | 4        | the, and, serendipity, monorepo |
-// | 缩略词关     | 6     | 2        | the, doc, and, md, serendipity, monorepo |
-// | 缩合关       | 6     | 2        | the, and, you've, aren't, serendipity, monorepo |
-// | 双关         | 8     | 0        | the, doc, and, md, you've, aren't, serendipity, monorepo |
+// | 双开（默认） | 5     | 4        | the, and, serendipity, monorepo, dog |
+// | 缩略词关     | 7     | 2        | the, doc, and, md, serendipity, monorepo, dog |
+// | 缩合关       | 7     | 2        | the, and, you've, aren't, serendipity, monorepo, dog |
+// | 双关         | 9     | 0        | the, doc, and, md, you've, aren't, serendipity, monorepo, dog |
 //
 // 断言只锚 total / filteredCount（由文本唯一决定，与词库状态无关）；
 // newCount 依赖持久 context 的词库现状，一律放宽为 \d+。
@@ -549,9 +551,10 @@ test("default-on filters collect the fixture page: filtered line shows 4 (issue 
   await collectFilterFixture(popup, article);
 
   // 双开：doc/md（黑名单）+ you've/aren't（缩合判据）被拦，过滤 4；
-  // the/and/serendipity/monorepo 按 lemma 去重后入批 → total 4（保护词计入 total）
+  // the/and/serendipity/monorepo 按 lemma 去重后入批 + dog's 剥离成 dog
+  // → total 5（保护词计入 total）
   await expect(popup.getByTestId("confirm-summary")).toHaveText(
-    /^本次共计采集 4 个单词，其中新词 \d+ 个$/,
+    /^本次共计采集 5 个单词，其中新词 \d+ 个$/,
   );
   await expect(popup.getByTestId("confirm-filtered")).toBeVisible();
   await expect(popup.getByTestId("confirm-filtered")).toHaveText("已过滤 4 个");
@@ -588,9 +591,9 @@ test("disabling filter-abbreviations lets doc/md enter the batch (issue #43)", a
   await popup.getByTestId("filter-abbreviations").uncheck();
 
   await collectFilterFixture(popup, article);
-  // 黑名单关：doc/md 进批次（total 4→6），过滤只剩缩合判据的 you've/aren't
+  // 黑名单关：doc/md 进批次（total 5→7），过滤只剩缩合判据的 you've/aren't
   await expect(popup.getByTestId("confirm-summary")).toHaveText(
-    /^本次共计采集 6 个单词，其中新词 \d+ 个$/,
+    /^本次共计采集 7 个单词，其中新词 \d+ 个$/,
   );
   await expect(popup.getByTestId("confirm-filtered")).toHaveText("已过滤 2 个");
 
@@ -614,9 +617,9 @@ test("disabling filter-contractions lets you've/aren't enter as apostrophe lemma
   await popup.getByTestId("filter-contractions").uncheck();
 
   await collectFilterFixture(popup, article);
-  // 缩合关：you've/aren't 以带撇号 lemma 入批（total 4→6），过滤只剩黑名单 doc/md
+  // 缩合关：you've/aren't 以带撇号 lemma 入批（total 5→7），过滤只剩黑名单 doc/md
   await expect(popup.getByTestId("confirm-summary")).toHaveText(
-    /^本次共计采集 6 个单词，其中新词 \d+ 个$/,
+    /^本次共计采集 7 个单词，其中新词 \d+ 个$/,
   );
   await expect(popup.getByTestId("confirm-filtered")).toHaveText("已过滤 2 个");
 
@@ -647,9 +650,9 @@ test("both filters off: nothing filtered, filtered line hidden (issue #43)", asy
   await popup.getByTestId("filter-contractions").uncheck();
 
   await collectFilterFixture(popup, article);
-  // 双关：8 个 lemma 全部入批，filteredCount=0 → 过滤行隐藏（不渲染「已过滤 0 个」噪音行）
+  // 双关：9 个 lemma 全部入批，filteredCount=0 → 过滤行隐藏（不渲染「已过滤 0 个」噪音行）
   await expect(popup.getByTestId("confirm-summary")).toHaveText(
-    /^本次共计采集 8 个单词，其中新词 \d+ 个$/,
+    /^本次共计采集 9 个单词，其中新词 \d+ 个$/,
   );
   await expect(popup.getByTestId("confirm-filtered")).toBeHidden();
   await expect(popup.getByTestId("confirm-filtered")).toHaveAttribute("hidden", "");
@@ -663,6 +666,32 @@ test("both filters off: nothing filtered, filtered line hidden (issue #43)", asy
   await article.close();
 });
 
+test("possessive dog's enters the batch as stripped lemma dog (issue #43)", async ({
+  extContext,
+  popupUrl,
+  fixtureServer,
+  mockBbdc,
+}) => {
+  const { popup, article } = await openFilterFixturePair(extContext, popupUrl, fixtureServer);
+
+  // 双开缺省采集后确认推送：所有格剥离属归一化、不受过滤开关控制——
+  // 扩展采集路径下批次词面必须是 dog，不能是带撇号的 dog's
+  await collectFilterFixture(popup, article);
+  await popup.getByTestId("confirm-push").click();
+
+  // 推送词面实证（addWord 逐词一请求，见 bbdc-client.addWord）
+  const pushedWords = (): string[] => mockBbdc.addWordRequests().map((r) => r.word);
+  await expect
+    .poll(pushedWords, { timeout: 20_000 })
+    .toEqual(expect.arrayContaining(["dog"]));
+
+  // 排空待推池后全量复核：整批推送词表里无 dog's 原样词条
+  await drainPendingPool(popup);
+  expect(mockBbdc.addWordRequests().map((r) => r.word)).not.toContain("dog's");
+  await popup.close();
+  await article.close();
+});
+
 test("upload path reports the same filtered-count semantics as page collect (issue #43)", async ({
   extContext,
   popupUrl,
@@ -672,16 +701,16 @@ test("upload path reports the same filtered-count semantics as page collect (iss
 
   // 与网页路径同一份文本（两路共用 core 提取管线，filteredCount 进同一张确认卡）
   const txtPath = "/tmp/word-radar-e2e-filter-upload.txt";
-  writeFileSync(txtPath, "The doc and the md, you've aren't serendipity monorepo the\n");
+  writeFileSync(txtPath, "The doc and the md, you've aren't serendipity monorepo the dog's\n");
 
   const [chooser] = await Promise.all([
     page.waitForEvent("filechooser"),
     page.getByTestId("upload-canvas").click(),
   ]);
   await chooser.setFiles(txtPath);
-  // 双开（前序用例已恢复缺省）：上传路径同样过滤 4、入批 4
+  // 双开（前序用例已恢复缺省）：上传路径同样过滤 4、入批 5（dog's→dog）
   await expect(page.getByTestId("confirm-summary")).toHaveText(
-    /^本次共计上传采集 4 个单词，其中新词 \d+ 个$/,
+    /^本次共计上传采集 5 个单词，其中新词 \d+ 个$/,
     { timeout: 10_000 },
   );
   await expect(page.getByTestId("confirm-filtered")).toBeVisible();
