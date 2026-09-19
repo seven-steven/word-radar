@@ -444,9 +444,10 @@ async function openFilterFixturePair(
   extContext: BrowserContext,
   popupUrl: string,
   fixtureServer: { url: string },
+  page = "filter-gate.html",
 ): Promise<{ popup: Page; article: Page }> {
   const article = await extContext.newPage();
-  await article.goto(`${fixtureServer.url}/filter-gate.html`);
+  await article.goto(`${fixtureServer.url}/${page}`);
   // content script 按 document_idle 注入；给一点余量（collect.spec 同款）
   await article.waitForTimeout(500);
   const popup = await extContext.newPage();
@@ -666,16 +667,28 @@ test("both filters off: nothing filtered, filtered line hidden (issue #43)", asy
   await article.close();
 });
 
-test("possessive dog's enters the batch as stripped lemma dog (issue #43)", async ({
+// 独立 fixture 页（possessive-gate.html：`The wolf's monorepo`）+ 全局独有
+// 所有格锚点 wolf's→wolf：推送断言（addWord 词面）要求锚点词真实待推，而
+// workers=1 共享持久词库——前序 `disabling filter-contractions` 用例已把
+// 共享页的 dog 推走（flags=1 永不再进待推池），复用 dog's 会稳定空轮挂
+// （2026-09-19 全量首证；独有词纪律与 confirm-summary 的 total/filtered
+// 断言同理）。wolf：Norvig@5073 不在缩略词黑名单、未被其他用例消费、在
+// 守门词典 top-20000 内走 finalize 主路径。
+test("possessive wolf's enters the batch as stripped lemma wolf (issue #43)", async ({
   extContext,
   popupUrl,
   fixtureServer,
   mockBbdc,
 }) => {
-  const { popup, article } = await openFilterFixturePair(extContext, popupUrl, fixtureServer);
+  const { popup, article } = await openFilterFixturePair(
+    extContext,
+    popupUrl,
+    fixtureServer,
+    "possessive-gate.html",
+  );
 
   // 双开缺省采集后确认推送：所有格剥离属归一化、不受过滤开关控制——
-  // 扩展采集路径下批次词面必须是 dog，不能是带撇号的 dog's
+  // 扩展采集路径下批次词面必须是 wolf，不能是带撇号的 wolf's
   await collectFilterFixture(popup, article);
   await popup.getByTestId("confirm-push").click();
 
@@ -683,11 +696,11 @@ test("possessive dog's enters the batch as stripped lemma dog (issue #43)", asyn
   const pushedWords = (): string[] => mockBbdc.addWordRequests().map((r) => r.word);
   await expect
     .poll(pushedWords, { timeout: 20_000 })
-    .toEqual(expect.arrayContaining(["dog"]));
+    .toEqual(expect.arrayContaining(["wolf"]));
 
-  // 排空待推池后全量复核：整批推送词表里无 dog's 原样词条
+  // 排空待推池后全量复核：整批推送词表里无 wolf's 原样词条
   await drainPendingPool(popup);
-  expect(mockBbdc.addWordRequests().map((r) => r.word)).not.toContain("dog's");
+  expect(mockBbdc.addWordRequests().map((r) => r.word)).not.toContain("wolf's");
   await popup.close();
   await article.close();
 });
