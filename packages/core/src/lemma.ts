@@ -1,5 +1,6 @@
 import nlp from "compromise";
 import { isEnglishWord } from "./extract.js";
+import { LEXICON } from "./lexicon.js";
 
 /**
  * T03 词形还原选项（由 extract.ts 的 ExtractOptions 组合）。
@@ -101,24 +102,41 @@ function clean(out: string): string {
     .replace(/[.'-]+$/g, "");
 }
 
-/** 修正 compromise 偶发的 -ves/-ve 误归（knives → knive）：尝试 -f/-fe 形态。 */
-function fixF(lemma: string): string {
-  if (lemma.endsWith("ves") || lemma.endsWith("ve")) {
-    const candidates = [
+/** 词典级守门：还原输出是否为真实英文词（Norvig top-20000 截选，见 lexicon.ts）。 */
+function inLexicon(word: string): boolean {
+  return LEXICON.has(word);
+}
+
+/**
+ * 词典级守门 + -f/-fe 拼接修正（issue #48，fixF 并入此单点）：
+ * 1. 输出是词典词 → 直接采用；
+ * 2. 输出非词典词且以 -ve/-ves 结尾 → 尝试 -f/-fe 拼接形态，仅当拼接形态
+ *    本身是词典词才采用（knives→knife 保留；actife 类伪造形态被拒）；
+ * 3. 输出非词典词而原词形是词典词 → 回退原词形（thi→this）；
+ * 4. 两者都不在词典（截选外冷僻词）→ 保持还原输出（零误杀：不丢弃、
+ *    行为与无守门时一致）。
+ */
+function finalize(lemma: string, original: string): string {
+  if (inLexicon(lemma)) return lemma;
+  if (/ves?$/.test(lemma)) {
+    const rescued = [
       lemma.replace(/ves$/, "f"),
       lemma.replace(/ves$/, "fe"),
       lemma.replace(/ve$/, "fe"),
       lemma.replace(/ve$/, "f"),
-    ].filter((c) => c !== lemma && isEnglishWord(c) && isValidStem(c));
-    if (candidates.length > 0) return candidates[0] ?? lemma;
+    ].find((c) => c !== lemma && inLexicon(c));
+    if (rescued) return rescued;
   }
+  if (inLexicon(original)) return original;
   return lemma;
 }
 
 /**
  * 单词词形还原（输入为已通过过滤的合法英文词，保留原大小写仅用于诊断）。
  *
- * 顺序：不规则动词表 → compromise（极简句子上下文）→ 保守后缀 fallback → 原词。
+ * 顺序：不规则动词表 → compromise（极简句子上下文）→ 保守后缀 fallback → 原词；
+ * compromise/fallback 的产出统一过词典级守门 finalize（畸形 lemma 回退原词形，
+ * 见 issue #48）。
  */
 export function lemmatizeWord(word: string): string {
   const lower = word.toLowerCase();
@@ -131,18 +149,18 @@ export function lemmatizeWord(word: string): string {
   if (irregular) return irregular;
 
   // 2. compromise：放进极简句子上下文提升 POS 判断稳定性。
-  //    动词上下文 "he X."，名词上下文 "the X."。
+  //    动词上下文 "he X."，名词上下文 "the X."。输出过词典级守门 finalize。
   const vDoc = nlp(`he ${lower}`).verbs();
   if (vDoc.found) {
     const out = vDoc.toInfinitive().out("array")[0];
-    const lemma = out ? fixF(clean(out)) : "";
-    if (lemma && isEnglishWord(lemma)) return lemma;
+    const lemma = out ? clean(out) : "";
+    if (lemma && isEnglishWord(lemma)) return finalize(lemma, lower);
   }
   const nDoc = nlp(`the ${lower}`).nouns();
   if (nDoc.found) {
     const out = nDoc.toSingular().out("array")[0];
-    const lemma = out ? fixF(clean(out)) : "";
-    if (lemma && isEnglishWord(lemma)) return lemma;
+    const lemma = out ? clean(out) : "";
+    if (lemma && isEnglishWord(lemma)) return finalize(lemma, lower);
   }
 
   // 3. 保守后缀 fallback。
@@ -154,7 +172,7 @@ export function lemmatizeWord(word: string): string {
     if (rule.suffix === "ing" || rule.suffix === "ed") {
       stem = dedupConsonant(stem);
     }
-    if (isValidStem(stem)) return stem;
+    if (isValidStem(stem)) return finalize(stem, lower);
   }
 
   // 4. 找不到可靠词元，保守返回小写原词。

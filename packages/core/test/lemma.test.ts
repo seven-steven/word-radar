@@ -50,6 +50,63 @@ describe("lemmatizeWord", () => {
   });
 });
 
+describe("issue #48 lemma distortion regression (dictionary-gated lemmatization)", () => {
+  it("keeps common -ve words as themselves (fixF no longer fabricates -fe)", () => {
+    expect(lemmatizeWord("active")).toBe("active");
+    expect(lemmatizeWord("give")).toBe("give");
+    expect(lemmatizeWord("love")).toBe("love");
+    expect(lemmatizeWord("have")).toBe("have");
+    expect(lemmatizeWord("solve")).toBe("solve");
+    expect(lemmatizeWord("serve")).toBe("serve");
+    expect(lemmatizeWord("negative")).toBe("negative");
+    expect(lemmatizeWord("thrive")).toBe("thrive");
+  });
+
+  it("reduces inflected -ve words to their correct lemma", () => {
+    expect(lemmatizeWord("survived")).toBe("survive");
+  });
+
+  it("does not strip a trailing s into a non-word (this → this)", () => {
+    expect(lemmatizeWord("this")).toBe("this");
+  });
+
+  it("keeps the knives → knife rescue as a positive control", () => {
+    expect(lemmatizeWord("knives")).toBe("knife");
+  });
+
+  it("pipeline level: issue reproduction sentence yields real-word lemmas", () => {
+    expect(
+      lemmas("this active survived negative thrive give love have solve serve"),
+    ).toEqual([
+      "this",
+      "active",
+      "survive",
+      "negative",
+      "thrive",
+      "give",
+      "love",
+      "have",
+      "solve",
+      "serve",
+    ]);
+  });
+
+  it("zero behavior change for words outside the dictionary excerpt (anti over-blocking)", () => {
+    // serendipity 不在 Norvig top-20000 截选（count_1w 排名 29310 > 20000）：
+    // 还原输出与原词形都不在词典 → 必须保持既有还原输出，不许丢弃或改写。
+    expect(lemmatizeWord("serendipity")).toBe("serendipity");
+  });
+
+  it("blacklist matching keeps exact-lemma semantics (docs → doc still filtered)", () => {
+    // 若守门把 docs 回退成原词形 docs，精确匹配会漏掉 {doc}——此用例锁死该回归。
+    const out = extractWordEntries("docs", {
+      abbreviationBlacklist: new Set(["doc"]),
+    });
+    expect(out.entries).toEqual([]);
+    expect(out.filteredCount).toBe(1);
+  });
+});
+
 describe("proper noun exclusion", () => {
   it("excludes proper nouns by default", () => {
     expect(isProperNoun("Alice")).toBe(true);
