@@ -107,6 +107,31 @@ describe("issue #48 lemma distortion regression (dictionary-gated lemmatization)
   });
 });
 
+describe("issue #50 pyjamas→pyjamave regression (Latin -as→-ave negative heuristic)", () => {
+  it("keeps -as words as themselves instead of fabricated -ave infinitives", () => {
+    // compromise 把 -as 结尾词误判为动词三单后套拉丁式 -as→-ave 规则
+    // （pyjamave 类伪词）。真实英语变位只有 -ave→-aves 与 has→have
+    // （后者由不规则表前置拦截，不进 finalize），故此负启发零误伤。
+    expect(lemmatizeWord("pyjamas")).toBe("pyjamas");
+    expect(lemmatizeWord("pajamas")).toBe("pajamas");
+  });
+
+  it("rescues plural -as nouns misread as verbs (scan-verified wider blast radius)", () => {
+    // 2026-09-26 Norvig -as 词全量扫描：top-20000 复数排名外的 -as 复数
+    // 同样中招（动词出口先于名词出口短路 + 双冷僻放行）。
+    expect(lemmatizeWord("arenas")).toBe("arenas");
+    expect(lemmatizeWord("umbrellas")).toBe("umbrellas");
+    expect(lemmatizeWord("pizzas")).toBe("pizzas");
+    expect(lemmatizeWord("orchestras")).toBe("orchestras");
+  });
+
+  it("keeps legitimate -as words and the has→have path intact", () => {
+    expect(lemmatizeWord("canvas")).toBe("canvas");
+    expect(lemmatizeWord("alias")).toBe("alias");
+    expect(lemmatizeWord("has")).toBe("have");
+  });
+});
+
 describe("proper noun exclusion", () => {
   it("excludes proper nouns by default", () => {
     expect(isProperNoun("Alice")).toBe(true);

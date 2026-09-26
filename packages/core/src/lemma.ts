@@ -113,8 +113,13 @@ function inLexicon(word: string): boolean {
  * 2. 输出非词典词且以 -ve/-ves 结尾 → 尝试 -f/-fe 拼接形态，仅当拼接形态
  *    本身是词典词才采用（knives→knife 保留；actife 类伪造形态被拒）；
  * 3. 输出非词典词而原词形是词典词 → 回退原词形（thi→this）；
- * 4. 两者都不在词典（截选外冷僻词）→ 保持还原输出（零误杀：不丢弃、
+ * 4. 两者都不在词典（截选外冷僻词）→ 负启发审查后放行（零误杀：不丢弃、
  *    行为与无守门时一致）。
+ *    负启发（issue #50）：原词以 -as 结尾而输出以 -ave 结尾 → 回退原词形。
+ *    compromise 会把 -as 词误判为动词三单并套拉丁式 -as→-ave 规则制造伪词
+ *    （pyjamas→pyjamave；扫描证实 arenas/umbrellas 类 -as 复数同中招）。
+ *    真实英语变位只有 -ave→-aves 与 has→have，后者由 IRREGULAR_VERBS 前置
+ *    拦截不进本函数，故该规则零误伤。
  */
 function finalize(lemma: string, original: string): string {
   if (inLexicon(lemma)) return lemma;
@@ -128,6 +133,7 @@ function finalize(lemma: string, original: string): string {
     if (rescued) return rescued;
   }
   if (inLexicon(original)) return original;
+  if (/as$/.test(original) && /ave$/.test(lemma)) return original;
   return lemma;
 }
 
