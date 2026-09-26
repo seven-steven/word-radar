@@ -130,6 +130,14 @@ describe("issue #50 pyjamas→pyjamave regression (Latin -as→-ave negative heu
     expect(lemmatizeWord("alias")).toBe("alias");
     expect(lemmatizeWord("has")).toBe("have");
   });
+
+  it("keeps correct rare-word inflection reduction on the dual-rare path (guards against widening the heuristic)", () => {
+    // seafarers/seafarer、backpackers/backpacker 双双或部分在典外且非 -as→-ave，
+    // 走 finalize 第 4 步「保持还原输出」——正确还原必须保留。若未来有人把
+    // 负启发扩大成「双冷僻一律回退原词形」（issue #50 否决的方向 A），此用例先红。
+    expect(lemmatizeWord("seafarers")).toBe("seafarer");
+    expect(lemmatizeWord("backpackers")).toBe("backpacker");
+  });
 });
 
 describe("proper noun exclusion", () => {
