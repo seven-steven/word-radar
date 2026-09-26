@@ -18,8 +18,11 @@
  *   层2 双守卫（最高优先级）：
  *      - 闭类功能词表（GUARD_WORDS，手工维护 ~185 词）；
  *      - 现代语料高频守卫：Norvig count_1w.txt（Google 万亿词料）top-N，默认
- *        N=1400——必须 ≥1000（覆盖 fixture top-1000，构造性保证零碰撞），
- *        且 ≤1463（md 的 Norvig 排名 1464，N 再大就吞掉验收词 md）。
+ *        N=5000（issue #49 前为 1400；fox@3222 误杀证明上界过低）——必须 ≥1000
+ *        （覆盖 fixture top-1000，构造性保证零碰撞），且 ≤5000（GUARD_TOP_MAX；
+ *        再大会误保 app@5355 类高频真缩略词，漏收面扩大）。
+ *        验收正向词（md@1464/doc@2660）豁免守卫（ACCEPTANCE_POSITIVE，
+ *        人工裁决优先于自动启发）。
  *        用 --guard-top=N 覆盖；守卫命中即剔除，即使词通过了纯度过滤。
  *        守卫同时并入 top-N 词的词形还原形（用 packages/core 真实 lemmatizer）：
  *        管线按还原后 lemma 查黑名单，只守表层会漏 kids→kid、yes→ye 这类缺口。
@@ -69,7 +72,7 @@ const PAGE_NS = 0;
 const CATEGORY_NS = 14;
 
 const NORVIG_URL = "https://www.norvig.com/ngrams/count_1w.txt"; // word<TAB>count，33 万行
-const GUARD_TOP_DEFAULT = 1400; // ≥1000 覆盖 fixture；≤1463 保住 md（其 Norvig 排名 1464）
+const GUARD_TOP_DEFAULT = 5000; // ≥1000 覆盖 fixture；5000 构造性覆盖 fox@3222（issue #49）及 cat/pass 类常用真词
 const GUARD_TOP_MAX = 5000;
 const FIXTURE_TOP = 1000;
 const WIKITEXT_BATCH = 50; // MediaWiki 非机器人 titles 上限
@@ -149,6 +152,14 @@ const MASK_TEMPLATES = new Set([
  *   「类目已收录」），以类目数据为准。
  */
 const SEED_WORDS = ["md"];
+
+/**
+ * 验收线正向词（ADR-0002：md/doc/stat 必须命中黑名单，测试同步断言）。
+ * 豁免守卫剔除：md@1464、doc@2660 在 Norvig top-5000 守卫圈内（issue #49
+ * 提界前上限 1400 恰好绕开它们），无豁免则守卫吞掉验收词。种子 md 天然
+ * 在此表——人工裁决的必收词优先级高于自动守卫启发。
+ */
+const ACCEPTANCE_POSITIVE = ["md", "doc", "stat"];
 
 /** 候选种子：疑似漏网词。构建时对照类目成员检查并在 stderr 报告是否真漏网，据此决定是否转正。 */
 const SEED_CANDIDATES = ["hrs", "ft"];
@@ -507,7 +518,7 @@ function buildBlacklistTs(words, stats) {
  *   → 层1 定义行纯度过滤（整页定义行缩略族模板占比 ≥1/5，
  *     小写真词页一票否决大小写变体页担保）
  *   → 层2 守卫（手工闭类功能词表 + Norvig count_1w.txt top-${GUARD_TOP} 高频词
- *     及其词形还原形）
+ *     及其词形还原形；验收正向词 md/doc/stat 豁免守卫）
  *   + 手工种子表（md）；
  * 再生成命令：NODE_USE_ENV_PROXY=1 node scripts/build-blacklist.mjs；
  * 断点续跑加 --resume。v2 算法详见脚本头注与 docs/adr/0002。
@@ -554,7 +565,7 @@ async function main() {
   const norvigTop = parseNorvigTopWords(norvigText);
   assert(norvigTop.length >= GUARD_TOP, `Norvig 词料解析不足 ${GUARD_TOP} 词（只得 ${norvigTop.length}）`);
   const rankOf = new Map(norvigTop.map((w, i) => [w, i + 1]));
-  for (const w of ["md", "doc", "stat"]) {
+  for (const w of ACCEPTANCE_POSITIVE) {
     const r = rankOf.get(w);
     console.error(`build-blacklist: Norvig 排名 — ${w}: ${r ?? ">10000"}`);
   }
@@ -671,23 +682,32 @@ async function main() {
     `build-blacklist: 守卫表 — 闭类手工 ${GUARD_WORDS.length} + Norvig top-${GUARD_TOP} ` +
       `${norvigGuard.size - stemAdded} + 还原形补丁 ${stemAdded} = ${guardSet.size}`,
   );
-  const guardFiltered = [...pure].filter((w) => guardSet.has(w));
+  // 守卫豁免：验收正向词人工裁决必收，优先于自动守卫启发（见 ACCEPTANCE_POSITIVE 注释）
+  const guardExempt = new Set(ACCEPTANCE_POSITIVE);
+  const guardFiltered = [...pure].filter((w) => guardSet.has(w) && !guardExempt.has(w));
   for (const w of guardFiltered) pure.delete(w);
 
-  // 种子合并（守卫优先级最高：种子同样先过守卫）
-  const seededIn = SEED_WORDS.filter((w) => !guardSet.has(w));
+  // 种子合并（豁免集 ⊇ SEED_WORDS，无条件并入）
+  const seededIn = SEED_WORDS;
   for (const w of seededIn) pure.add(w);
   const final = pure;
 
   // ---------- 自检断言 ----------
-  for (const w of ["md", "doc", "stat"]) {
-    assert(final.has(w), `验收线正向词 "${w}" 不在结果中（若被守卫吞掉，下调 --guard-top，md 上限 1463）`);
-    assert(!guardSet.has(w), `守卫表吞掉验收词 "${w}"（Norvig 排名 ${rankOf.get(w) ?? ">10000"}）——下调 --guard-top`);
+  // 种子表必须全在豁免表内：种子无条件并入（不先过守卫），将来往 SEED_WORDS
+  // 加词若漏同步 ACCEPTANCE_POSITIVE，会静默绕过守卫剔除。
+  assert(
+    SEED_WORDS.every((w) => ACCEPTANCE_POSITIVE.includes(w)),
+    "SEED_WORDS 存在未进 ACCEPTANCE_POSITIVE 的种子——种子绕守卫须显式豁免",
+  );
+  for (const w of ACCEPTANCE_POSITIVE) {
+    assert(final.has(w), `验收线正向词 "${w}" 不在结果中（纯度通道失效或豁免缺失）`);
   }
   for (const w of ["serendipity", "monorepo"]) {
     assert(!final.has(w), `验收线负向词 "${w}" 混入结果`);
   }
   for (const w of guardSet) {
+    // 豁免词（md/doc 类）允许同时是守卫词与在榜词——人工裁决优先于自动启发
+    if (guardExempt.has(w)) continue;
     assert(!final.has(w), `守卫词 "${w}" 混入结果`);
   }
   assert(final.size >= 1000, `结果规模 ${final.size} < 1000`);

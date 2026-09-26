@@ -31,6 +31,18 @@ describe("ABBREVIATION_BLACKLIST data", () => {
     }
   });
 
+  it("keeps everyday content words out of the blacklist (issue #49 fox false-kill, guard raised to top-5000)", () => {
+    // fox@Norvig3222：v2.2 提界前守卫上限 top-1400 圈外，Wiktionary 缩略族
+    // 定义行（"fox." 处方拉丁缩写义等）带入榜误杀；pass@1493/cat@1760 为
+    // 提界后构造性覆盖的同批样本；dog@1047 一直在守卫圈内。
+    // wolf@5073/hound@16452 在 top-5000 界外（GUARD_TOP_MAX 钉死，再大会误保
+    // app@5355 类高频真缩略词）——守卫不覆盖，本断言兜底监测：再生成后若
+    // Wiktionary 数据漂移带入榜，这里先红。
+    for (const word of ["fox", "cat", "pass", "dog", "wolf", "hound"]) {
+      expect(ABBREVIATION_BLACKLIST.has(word), `everyday word leaked: "${word}"`).toBe(false);
+    }
+  });
+
   it("excludes closed-class function words (guard-table sample, anti high-frequency false kill)", () => {
     const guardSample = [
       "is", "am", "no", "why", "by", "the", "she", "may", "will", "can",
