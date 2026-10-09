@@ -88,11 +88,11 @@ export function createWordRepository(options: RepositoryOptions = {}): WordRepos
     async countNew(entries) {
       if (entries.length === 0) return 0;
       const existing = new Set(
-        (await readAll(openDb)).map((entry) => entry.lemma.toLowerCase()),
+        (await readAll(openDb)).map((entry) => normalizeLemma(entry.lemma)),
       );
       let newCount = 0;
       for (const entry of entries) {
-        if (!existing.has(entry.lemma.toLowerCase())) newCount += 1;
+        if (!existing.has(normalizeLemma(entry.lemma))) newCount += 1;
       }
       return newCount;
     },
@@ -105,10 +105,12 @@ export function createWordRepository(options: RepositoryOptions = {}): WordRepos
     async markPushed(lemmas) {
       const all = await readAll(openDb);
       if (all.length === 0) return { total: 0, pending: 0 };
-      const target = new Set(lemmas.map((lemma) => lemma.toLowerCase()));
+      const target = new Set(lemmas.map((lemma) => normalizeLemma(lemma)));
       let changed = false;
       const next = all.map<WordEntry>((entry) => {
-        if (!target.has(entry.lemma)) return entry;
+        // 比较两侧同口径归一（issue #54）：此前 target 是小写集合而比较用
+        // 原文，库中 lemma 非小写时永不命中（潜在 bug，实测修复）
+        if (!target.has(normalizeLemma(entry.lemma))) return entry;
         if ((entry.flags & BBDC_PUSHED_FLAG) !== 0) return entry;
         changed = true;
         return { lemma: entry.lemma, flags: entry.flags | BBDC_PUSHED_FLAG };
@@ -145,6 +147,15 @@ export function createWordRepository(options: RepositoryOptions = {}): WordRepos
 // ---------------------------------------------------------------------------
 // Internals
 // ---------------------------------------------------------------------------
+
+/**
+ * lemma 归一化单一出口（issue #54）：repository 内一切 lemma 比较统一走这里，
+ * 「大小写不敏感」承诺不再散落各方法各自实现。只做小写化、不 trim——
+ * 与 core mergeWordEntries 的 key 语义对齐（接受未规范化输入，不重写词条）。
+ */
+function normalizeLemma(lemma: string): string {
+  return lemma.toLowerCase();
+}
 
 function openDefaultDb(name: string): Promise<IDBPDatabase<WordRadarSchema>> {
   return openDB<WordRadarSchema>(name, DB_VERSION, {

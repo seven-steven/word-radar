@@ -5,12 +5,16 @@
  * 每个用例前 deleteDatabase 清空全局 fake 工厂的状态，确保隔离。
  */
 import "fake-indexeddb/auto";
+import { openDB } from "idb";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   DB_NAME,
+  DB_VERSION,
+  WORDS_STORE,
   createWordRepository,
   type Counts,
   type WordRepository,
+  type WordRadarSchema,
 } from "../src/lib/word-repository.js";
 
 /** 新建一个用全局 fake-indexeddb 工厂的 repository（生产代码也走这条路）。 */
@@ -196,6 +200,26 @@ describe("WordRepository.markPushed", () => {
 
     const all = await repo.getAll();
     expect(all[0]).toEqual({ lemma: "run", flags: 1 });
+  });
+
+  it("库中 lemma 非小写时同样命中（比较两侧同口径归一，issue #54）", async () => {
+    // 经 core 管线与 mergeCollected 的 lemma 恒小写，但 repository 的
+    // 「大小写不敏感」承诺须对库内任意形态成立——直写绕过 merge 验证
+    const db = await openDB<WordRadarSchema>(DB_NAME, DB_VERSION, {
+      upgrade(d) {
+        if (!d.objectStoreNames.contains(WORDS_STORE)) {
+          d.createObjectStore(WORDS_STORE, { keyPath: "lemma" });
+        }
+      },
+    });
+    await db.put(WORDS_STORE, { lemma: "Pyjamas", flags: 0 });
+    db.close();
+
+    const repo = makeRepository();
+    const counts = await repo.markPushed(["pyjamas"]);
+
+    expect(counts).toEqual({ total: 1, pending: 0 });
+    expect((await repo.getAll())[0]).toEqual({ lemma: "Pyjamas", flags: 1 });
   });
 
   it("对不存在的 lemma 是 no-op，不抛错", async () => {
