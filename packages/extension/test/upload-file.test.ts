@@ -5,8 +5,9 @@
  *   任一文件非法后缀 → 整批拒绝、零写入 + 错误日志 stage=upload；
  *   新批次覆盖旧批次（单驻留语义）；确认后与采集批次同语义合并。
  * - sw-channel 的 uploadFile 收窄（files 批形状）。
- * - background-listener 的 UPLOAD_TEXT 分支 + sw-channel 的 uploadPastedText
- *   收窄（issue #42 v1.1-T5 粘贴文本通道：无后缀校验，直进提取管线）。
+ * - background-listener 的 UPLOAD_TEXT 分支 + sw-channel 的 uploadText
+ *   收窄（issue #42 v1.1-T5 粘贴文本通道：无后缀校验，直进提取管线）；
+ *   sw-channel 收窄语义的直测在 sw-channel.test.ts（issue #54 Wave B 合层后）。
  */
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -25,7 +26,6 @@ import {
 import type { PushCoordinator } from "../src/lib/push-coordinator.js";
 import type { ExtractResult, WordEntry } from "@word-radar/core";
 import type { IntakeFilterSettings } from "../src/lib/settings.js";
-import { uploadFile } from "../src/lib/sw-channel.js";
 
 function fakeRepository(): BackgroundRepository & {
   mergeCollected: ReturnType<typeof vi.fn>;
@@ -425,41 +425,6 @@ describe("createBackgroundListener UPLOAD_FILE（issue #24；#38 文件批）", 
       filterContractions: false,
     });
     expect(sendResponse).toHaveBeenCalledWith({ total: 1, newCount: 1, filteredCount: 0 });
-  });
-});
-
-describe("sw-channel uploadFile 收窄（issue #24；#38 文件批）", () => {
-  it("BatchPreview → {ok:true,total,newCount}", async () => {
-    const channel = {
-      uploadFile: vi.fn(async () => ({ total: 4, newCount: 2 })),
-    };
-    const files = [{ name: "a.txt", text: "some text" }];
-    await expect(
-      uploadFile(channel, files),
-    ).resolves.toEqual({ ok: true, total: 4, newCount: 2 });
-    expect(channel.uploadFile).toHaveBeenCalledWith(files);
-  });
-
-  it("错误应答原样透传；异常应答/抛错归一为 upload-unavailable", async () => {
-    await expect(
-      uploadFile(
-        { uploadFile: vi.fn(async () => ({ ok: false, error: "a.exe: 仅支持" })) },
-        [{ name: "a.exe", text: "x" }],
-      ),
-    ).resolves.toEqual({ ok: false, error: "a.exe: 仅支持" });
-    await expect(
-      uploadFile({ uploadFile: vi.fn(async () => "garbage") }, [{ name: "a.txt", text: "x" }]),
-    ).resolves.toEqual({ ok: false, error: "upload-unavailable" });
-    await expect(
-      uploadFile(
-        {
-          uploadFile: vi.fn(async () => {
-            throw new Error("sw gone");
-          }),
-        },
-        [{ name: "a.txt", text: "x" }],
-      ),
-    ).resolves.toEqual({ ok: false, error: "upload-unavailable" });
   });
 });
 

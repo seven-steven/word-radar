@@ -1,6 +1,5 @@
 import {
   GET_COUNTS,
-  MARK_PUSHED,
   CHECK_LOGIN,
   CONFIRM_COLLECTED,
   DISCARD_COLLECTED,
@@ -11,7 +10,9 @@ import {
   UPLOAD_FILE,
   UPLOAD_TEXT,
   isBatchPreview,
+  isCounts,
   isExportCsvResponse,
+  isPushStatus,
   type BatchPreview,
   type CheckLoginResponse,
   type ConfirmCollectedMessage,
@@ -21,7 +22,6 @@ import {
   type ExportCsvMessage,
   type GetCountsMessage,
   type ImportCsvMessage,
-  type MarkPushedMessage,
   type CheckLoginMessage,
   type UploadFileMessage,
   type UploadTextMessage,
@@ -34,235 +34,193 @@ import {
  * 把 `chrome.runtime.sendMessage` 收在这一个小模块，便于单测与未来切到
  * `chrome.runtime.connect` 长连接时不影响上层。
  *
- * GET_COUNTS / MARK_PUSHED / CHECK_LOGIN / EXPORT_CSV / IMPORT_CSV 是异步应答，
- * sendMessage 返回的 Promise 在 SW 调用 sendResponse 时 resolve。
+ * 各方法 = sendMessage + 就地收窄：返回值即 popup 可直接消费的收窄形态，
+ * Promise<unknown> 透传层不再单独存在（issue #54 Wave B：透传层与收窄层合一）。
+ * 畸形应答 / sendMessage 抛错（SW 未启动等）一律归一到各自的降级值，不向上层
+ * 传播；唯二例外——retryPush 保持透传（popup 侧 try/finally 自决），
+ * discardCollected fire-and-forget 静默吞错。
  */
-export interface SwChannel {
-  getCounts(): Promise<unknown>;
-  markPushed(lemmas: string[]): Promise<unknown>;
-  checkLogin(): Promise<unknown>;
-  getPushStatus(): Promise<unknown>;
-  retryPush(): Promise<unknown>;
-  /** T11：请求 SW 导出整个词库为 CSV 文本。 */
-  exportCsv(): Promise<unknown>;
-  /** T11：把本地 CSV 文本交给 SW（解析后驻留待确认批次，确认才入库）。 */
-  importCsv(csvText: string, fileName: string): Promise<unknown>;
-  /** issue #24；#38 改文件批：把本地纯文本文件批（UPLOAD_TEXT_SUFFIXES）交给 SW（整批 = 一次采集，驻留待确认批次）。 */
-  uploadFile(files: UploadedFilePart[]): Promise<unknown>;
-  /** issue #42 T5：把画布粘贴的纯文本交给 SW（直进提取管线，驻留待确认批次）。 */
-  uploadText(text: string): Promise<unknown>;
-  /** 确认待确认批次（issue #22）：SW 合并入词库并触发一轮推送。 */
-  confirmCollected(): Promise<unknown>;
-  /** 取消：丢弃 SW 内存中的待确认批次。 */
-  discardCollected(): Promise<unknown>;
-}
-
-export const chromeSwChannel: SwChannel = {
-  getCounts() {
-    const message: GetCountsMessage = { type: GET_COUNTS };
-    return chrome.runtime.sendMessage(message);
-  },
-  markPushed(lemmas: string[]) {
-    const message: MarkPushedMessage = { type: MARK_PUSHED, lemmas };
-    return chrome.runtime.sendMessage(message);
-  },
-  checkLogin() {
-    const message: CheckLoginMessage = { type: CHECK_LOGIN };
-    return chrome.runtime.sendMessage(message);
-  },
-  getPushStatus() {
-    return chrome.runtime.sendMessage({ type: GET_PUSH_STATUS });
-  },
-  retryPush() {
-    return chrome.runtime.sendMessage({ type: RETRY_PUSH });
-  },
-  exportCsv() {
-    const message: ExportCsvMessage = { type: EXPORT_CSV };
-    return chrome.runtime.sendMessage(message);
-  },
-  importCsv(csvText: string, fileName: string) {
-    const message: ImportCsvMessage = { type: IMPORT_CSV, csvText, fileName };
-    return chrome.runtime.sendMessage(message);
-  },
-  uploadFile(files: UploadedFilePart[]) {
-    const message: UploadFileMessage = { type: UPLOAD_FILE, files };
-    return chrome.runtime.sendMessage(message);
-  },
-  uploadText(text: string) {
-    const message: UploadTextMessage = { type: UPLOAD_TEXT, text };
-    return chrome.runtime.sendMessage(message);
-  },
-  confirmCollected() {
-    const message: ConfirmCollectedMessage = { type: CONFIRM_COLLECTED };
-    return chrome.runtime.sendMessage(message);
-  },
-  discardCollected() {
-    const message: DiscardCollectedMessage = { type: DISCARD_COLLECTED };
-    return chrome.runtime.sendMessage(message);
-  },
-};
-
-/**
- * 收窄 SW 应答到 Counts | null：
- * - 合法 Counts 对象 → 返回
- * - 任何其他应答 / 抛错 → 返回 null（popup 视作"未知"）
- */
-export async function fetchCounts(channel: SwChannel): Promise<Counts | null> {
-  try {
-    const raw = await channel.getCounts();
-    if (!isCounts(raw)) return null;
-    return raw;
-  } catch {
-    return null;
-  }
-}
-
-function isCounts(value: unknown): value is Counts {
-  if (typeof value !== "object" || value === null) return false;
-  const obj = value as Record<string, unknown>;
-  return typeof obj.total === "number" && typeof obj.pending === "number";
-}
-
-/**
- * popup 侧登录态查询收窄：
- * - SW 报 `{loggedIn:true|false}` → 原样返回（false 表示未登录）
- * - 任何其他应答 / 抛错 → 返回 `{loggedIn:false}`（按"未登录"保守处理，避免假阳性）
- *
- * 这里的收窄意图：popup 只关心"显示已登录 / 显示未登录 + 引导按钮"，
- * 真正的错误分类在 SW 端（已通过 BbdcAuthError / BbdcApiError 暴露给上层）。
- */
-export async function fetchLoginStatus(
-  channel: SwChannel,
-): Promise<{ loggedIn: boolean }> {
-  try {
-    const raw = await channel.checkLogin();
-    if (
-      typeof raw === "object" &&
-      raw !== null &&
-      "loggedIn" in raw &&
-      typeof (raw as { loggedIn: unknown }).loggedIn === "boolean"
-    ) {
-      return { loggedIn: (raw as { loggedIn: boolean }).loggedIn };
-    }
-    return { loggedIn: false };
-  } catch {
-    return { loggedIn: false };
-  }
-}
-
-export async function fetchPushStatus(channel: SwChannel): Promise<PushStatus | null> {
-  try {
-    const raw = await channel.getPushStatus();
-    return isPushStatus(raw) ? raw : null;
-  } catch {
-    return null;
-  }
-}
-
-export async function retryPush(channel: SwChannel): Promise<void> {
-  await channel.retryPush();
-}
-
-/**
- * 确认待确认批次（issue #22）：
- * - SW 返回 Counts（合并成功）→ `{ok:true,counts}`
- * - SW 返回 `{ok:false,error}`（无待确认批次 / 合并失败）→ 原样透传
- * - 任何其他应答 / 抛错 → `{ok:false}`
- */
+/** 确认待确认批次（issue #22）的应答（popup 侧收窄后的形态）。 */
 export type ConfirmCollectedOutcome =
   | { ok: true; counts: Counts }
   | { ok: false; error: string };
-
-export async function confirmCollected(
-  channel: SwChannel,
-): Promise<ConfirmCollectedOutcome> {
-  try {
-    const raw = await channel.confirmCollected();
-    if (isCounts(raw)) return { ok: true, counts: raw };
-    if (
-      typeof raw === "object" &&
-      raw !== null &&
-      (raw as { ok?: unknown }).ok === false &&
-      typeof (raw as { error?: unknown }).error === "string"
-    ) {
-      return { ok: false, error: (raw as { error: string }).error };
-    }
-    return { ok: false, error: "confirm-unavailable" };
-  } catch {
-    return { ok: false, error: "confirm-unavailable" };
-  }
-}
-
-/** 取消：丢弃待确认批次。fire-and-forget，失败不打扰用户。 */
-export async function discardCollected(channel: SwChannel): Promise<void> {
-  try {
-    await channel.discardCollected();
-  } catch {
-    // SW 不可达时批次同样只在内存，随 SW 生命周期消失
-  }
-}
 
 /** T11 导出应答（popup 侧收窄后的形态）。 */
 export type ExportCsvOutcome =
   | { ok: true; csv: string }
   | { ok: false; error: string };
 
-/**
- * T11 导出收窄：
- * - SW 报 `{ok:true,csv}` / `{ok:false,error}` → 原样透传
- * - 任何其他应答 / 抛错 → `{ok:false}`（popup 只负责展示失败）
- */
-export async function fetchExportCsv(
-  channel: SwChannel,
-): Promise<ExportCsvOutcome> {
-  try {
-    const raw = await channel.exportCsv();
-    if (isExportCsvResponse(raw)) return raw;
-    return { ok: false, error: "export-unavailable" };
-  } catch {
-    return { ok: false, error: "export-unavailable" };
-  }
-}
-
 /** T11 导入应答（popup 侧收窄后的形态）：成功为待确认批次预览。 */
 export type ImportCsvOutcome =
   | ({ ok: true } & BatchPreview)
   | { ok: false; error: string };
 
-/**
- * T11 导入收窄（review S-3：导入同过确认闸门）：
- * - SW 返回 BatchPreview（解析成功，批次已驻留）→ `{ok:true,total,newCount}`
- * - SW 返回 `{ok:false,error}`（坏 CSV：含文件名 + 行号）→ 原样透传
- * - 任何其他应答 / 抛错 → `{ok:false}`
- */
-export async function importCsv(
-  channel: SwChannel,
-  csvText: string,
-  fileName: string,
-): Promise<ImportCsvOutcome> {
-  try {
-    const raw = await channel.importCsv(csvText, fileName);
-    if (isBatchPreview(raw)) {
-      return { ok: true, total: raw.total, newCount: raw.newCount };
-    }
-    if (
-      typeof raw === "object" &&
-      raw !== null &&
-      (raw as { ok?: unknown }).ok === false &&
-      typeof (raw as { error?: unknown }).error === "string"
-    ) {
-      return { ok: false, error: (raw as { error: string }).error };
-    }
-    return { ok: false, error: "import-unavailable" };
-  } catch {
-    return { ok: false, error: "import-unavailable" };
-  }
-}
-
 /** 上传文件采集应答（popup 侧收窄后的形态）：成功为待确认批次预览。 */
 export type UploadFileOutcome =
   | ({ ok: true } & BatchPreview)
   | { ok: false; error: string };
+
+export interface SwChannel {
+  /**
+   * 收窄 SW 应答到 Counts | null：
+   * - 合法 Counts 对象 → 返回
+   * - 任何其他应答 / 抛错 → 返回 null（popup 视作「未知」）
+   */
+  getCounts(): Promise<Counts | null>;
+  /**
+   * popup 侧登录态查询收窄：
+   * - SW 报 `{loggedIn:true|false}` → 原样返回（false 表示未登录）
+   * - 任何其他应答 / 抛错 → 返回 `{loggedIn:false}`（按「未登录」保守处理，避免假阳性）
+   *
+   * 这里的收窄意图：popup 只关心「显示已登录 / 显示未登录 + 引导按钮」，
+   * 真正的错误分类在 SW 端（已通过 BbdcAuthError / BbdcApiError 暴露给上层）。
+   */
+  checkLogin(): Promise<{ loggedIn: boolean }>;
+  /** SW 推送轮快照；畸形应答 / 抛错 → null（popup 不渲染）。 */
+  getPushStatus(): Promise<PushStatus | null>;
+  /** 触发一轮推送；应答体为空，拒绝原样传播（popup 侧 try/finally 自决）。 */
+  retryPush(): Promise<void>;
+  /**
+   * T11 导出收窄：
+   * - SW 报 `{ok:true,csv}` / `{ok:false,error}` → 原样透传
+   * - 任何其他应答 / 抛错 → `{ok:false,"export-unavailable"}`（popup 只负责展示失败）
+   */
+  exportCsv(): Promise<ExportCsvOutcome>;
+  /**
+   * T11 导入收窄（review S-3：导入同过确认闸门）：
+   * - SW 返回 BatchPreview（解析成功，批次已驻留）→ `{ok:true,total,newCount}`
+   * - SW 返回 `{ok:false,error}`（坏 CSV：含文件名 + 行号）→ 原样透传
+   * - 任何其他应答 / 抛错 → `{ok:false,"import-unavailable"}`
+   */
+  importCsv(csvText: string, fileName: string): Promise<ImportCsvOutcome>;
+  /** issue #24；#38 改文件批：把本地纯文本文件批（UPLOAD_TEXT_SUFFIXES）交给 SW（整批 = 一次采集，驻留待确认批次）。 */
+  uploadFile(files: UploadedFilePart[]): Promise<UploadFileOutcome>;
+  /** issue #42 T5：把画布粘贴的纯文本交给 SW（直进提取管线，驻留待确认批次）；应答与 uploadFile 同构（UploadFileOutcome）。 */
+  uploadText(text: string): Promise<UploadFileOutcome>;
+  /** 确认待确认批次（issue #22）：SW 合并入词库并触发一轮推送。 */
+  confirmCollected(): Promise<ConfirmCollectedOutcome>;
+  /** 取消：丢弃 SW 内存中的待确认批次。fire-and-forget，失败不打扰用户。 */
+  discardCollected(): Promise<void>;
+}
+
+export const chromeSwChannel: SwChannel = {
+  async getCounts() {
+    const message: GetCountsMessage = { type: GET_COUNTS };
+    try {
+      const raw: unknown = await chrome.runtime.sendMessage(message);
+      return isCounts(raw) ? raw : null;
+    } catch {
+      return null;
+    }
+  },
+
+  async checkLogin() {
+    const message: CheckLoginMessage = { type: CHECK_LOGIN };
+    try {
+      const raw: unknown = await chrome.runtime.sendMessage(message);
+      if (
+        typeof raw === "object" &&
+        raw !== null &&
+        "loggedIn" in raw &&
+        typeof (raw as { loggedIn: unknown }).loggedIn === "boolean"
+      ) {
+        return { loggedIn: (raw as { loggedIn: boolean }).loggedIn };
+      }
+      return { loggedIn: false };
+    } catch {
+      return { loggedIn: false };
+    }
+  },
+
+  async getPushStatus() {
+    try {
+      const raw: unknown = await chrome.runtime.sendMessage({
+        type: GET_PUSH_STATUS,
+      });
+      return isPushStatus(raw) ? raw : null;
+    } catch {
+      return null;
+    }
+  },
+
+  async retryPush() {
+    // 不 catch：拒绝原样传播（原顶层 retryPush 的语义），popup 侧 try/finally 自决
+    await chrome.runtime.sendMessage({ type: RETRY_PUSH });
+  },
+
+  async exportCsv() {
+    const message: ExportCsvMessage = { type: EXPORT_CSV };
+    try {
+      const raw: unknown = await chrome.runtime.sendMessage(message);
+      return isExportCsvResponse(raw)
+        ? raw
+        : { ok: false, error: "export-unavailable" };
+    } catch {
+      return { ok: false, error: "export-unavailable" };
+    }
+  },
+
+  async importCsv(csvText: string, fileName: string) {
+    const message: ImportCsvMessage = { type: IMPORT_CSV, csvText, fileName };
+    try {
+      const raw: unknown = await chrome.runtime.sendMessage(message);
+      if (isBatchPreview(raw)) {
+        return { ok: true, total: raw.total, newCount: raw.newCount };
+      }
+      if (
+        typeof raw === "object" &&
+        raw !== null &&
+        (raw as { ok?: unknown }).ok === false &&
+        typeof (raw as { error?: unknown }).error === "string"
+      ) {
+        return { ok: false, error: (raw as { error: string }).error };
+      }
+      return { ok: false, error: "import-unavailable" };
+    } catch {
+      return { ok: false, error: "import-unavailable" };
+    }
+  },
+
+  uploadFile(files: UploadedFilePart[]) {
+    const message: UploadFileMessage = { type: UPLOAD_FILE, files };
+    return narrowUploadOutcome(() => chrome.runtime.sendMessage(message));
+  },
+
+  uploadText(text: string) {
+    const message: UploadTextMessage = { type: UPLOAD_TEXT, text };
+    return narrowUploadOutcome(() => chrome.runtime.sendMessage(message));
+  },
+
+  async confirmCollected() {
+    const message: ConfirmCollectedMessage = { type: CONFIRM_COLLECTED };
+    try {
+      const raw: unknown = await chrome.runtime.sendMessage(message);
+      if (isCounts(raw)) {
+        return { ok: true, counts: raw };
+      }
+      if (
+        typeof raw === "object" &&
+        raw !== null &&
+        (raw as { ok?: unknown }).ok === false &&
+        typeof (raw as { error?: unknown }).error === "string"
+      ) {
+        return { ok: false, error: (raw as { error: string }).error };
+      }
+      return { ok: false, error: "confirm-unavailable" };
+    } catch {
+      return { ok: false, error: "confirm-unavailable" };
+    }
+  },
+
+  async discardCollected() {
+    const message: DiscardCollectedMessage = { type: DISCARD_COLLECTED };
+    try {
+      await chrome.runtime.sendMessage(message);
+    } catch {
+      // SW 不可达时批次同样只在内存，随 SW 生命周期消失
+    }
+  },
+};
 
 /**
  * 上传两通道（UPLOAD_FILE / UPLOAD_TEXT）的应答同构，收窄逻辑抽成一份
@@ -301,34 +259,5 @@ async function narrowUploadOutcome(
   }
 }
 
-/**
- * issue #24 上传文件采集收窄（同过确认闸门；#38 改文件批）。
- */
-export function uploadFile(
-  channel: SwChannel,
-  files: UploadedFilePart[],
-): Promise<UploadFileOutcome> {
-  return narrowUploadOutcome(() => channel.uploadFile(files));
-}
-
-/**
- * issue #42 T5 粘贴文本采集收窄（决议 A3：直进提取管线，同过确认闸门）。
- * 应答与 uploadFile 同构（UploadFileOutcome），粘贴与拖放共用确认卡与
- * 失败反馈的渲染逻辑。
- */
-export function uploadPastedText(
-  channel: SwChannel,
-  text: string,
-): Promise<UploadFileOutcome> {
-  return narrowUploadOutcome(() => channel.uploadText(text));
-}
-
-function isPushStatus(value: unknown): value is PushStatus {  if (typeof value !== "object" || value === null) return false;
-  const status = value as Record<string, unknown>;
-  return ["idle", "running", "paused", "completed"].includes(String(status.phase)) &&
-    ["total", "processed", "succeeded", "existing", "failed", "pending"].every(
-      (field) => typeof status[field] === "number",
-    );
-}
 
 export type { CheckLoginResponse };

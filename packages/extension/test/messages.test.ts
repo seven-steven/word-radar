@@ -7,7 +7,6 @@ import {
   EXPORT_CSV,
   GET_COUNTS,
   IMPORT_CSV,
-  MARK_PUSHED,
   WORDS_COLLECTED,
   isCheckLoginMessage,
   isCheckLoginResponse,
@@ -19,7 +18,6 @@ import {
   isExportCsvResponse,
   isGetCountsMessage,
   isImportCsvMessage,
-  isMarkPushedMessage,
   isUploadFileMessage,
   isUploadTextMessage,
   isBatchPreview,
@@ -35,7 +33,6 @@ describe("消息协议常量", () => {
     expect(COLLECT_WORDS).toBe("COLLECT_WORDS");
     expect(WORDS_COLLECTED).toBe("WORDS_COLLECTED");
     expect(GET_COUNTS).toBe("GET_COUNTS");
-    expect(MARK_PUSHED).toBe("MARK_PUSHED");
     expect(CHECK_LOGIN).toBe("CHECK_LOGIN");
     expect(CONFIRM_COLLECTED).toBe("CONFIRM_COLLECTED");
     expect(DISCARD_COLLECTED).toBe("DISCARD_COLLECTED");
@@ -137,22 +134,6 @@ describe("isGetCountsMessage", () => {
     expect(isGetCountsMessage({ type: "OTHER" })).toBe(false);
     expect(isGetCountsMessage(null)).toBe(false);
     expect(isGetCountsMessage(42)).toBe(false);
-  });
-});
-
-describe("isMarkPushedMessage", () => {
-  it("接受合法消息（含空 lemmas 数组）", () => {
-    expect(isMarkPushedMessage({ type: "MARK_PUSHED", lemmas: ["a"] })).toBe(true);
-    expect(isMarkPushedMessage({ type: "MARK_PUSHED", lemmas: [] })).toBe(true);
-  });
-
-  it("拒绝缺 lemmas、非数组 lemmas 与非字符串元素", () => {
-    expect(isMarkPushedMessage({ type: "MARK_PUSHED" })).toBe(false);
-    expect(isMarkPushedMessage({ type: "MARK_PUSHED", lemmas: "a,b" })).toBe(false);
-    expect(isMarkPushedMessage({ type: "MARK_PUSHED", lemmas: [1, 2] })).toBe(
-      false,
-    );
-    expect(isMarkPushedMessage(null)).toBe(false);
   });
 });
 

@@ -43,20 +43,7 @@ import {
   openBbdcHome,
   requestCollection,
 } from "./lib/active-tab.js";
-import {
-  chromeSwChannel,
-  confirmCollected,
-  discardCollected,
-  fetchCounts,
-  fetchExportCsv,
-  fetchLoginStatus,
-  fetchPushStatus,
-  importCsv,
-  retryPush,
-  uploadFile,
-  uploadPastedText,
-  type UploadFileOutcome,
-} from "./lib/sw-channel.js";
+import { chromeSwChannel, type UploadFileOutcome } from "./lib/sw-channel.js";
 import { browserCsvFileGateway } from "./lib/csv-file.js";
 import { defaultErrorLogStorage, formatErrorLog, readErrorLog } from "./lib/error-log.js";
 import {
@@ -340,7 +327,7 @@ function renderPushStatus(status: PushStatus): void {
 }
 
 async function refreshPushStatus(): Promise<void> {
-  const status = await fetchPushStatus(chromeSwChannel);
+  const status = await chromeSwChannel.getPushStatus();
   if (status) {
     renderPushStatus(status);
     // 任何一次刷新发现 running 就自启轮询：boot 时轮询会因 phase=idle 自行
@@ -353,7 +340,7 @@ async function refreshPushStatus(): Promise<void> {
 async function requestRetryPush(): Promise<void> {
   if (retryPushButton) retryPushButton.disabled = true;
   try {
-    await retryPush(chromeSwChannel);
+    await chromeSwChannel.retryPush();
     await refreshPushStatus();
   } finally {
     // 恢复可用性交给 phase 语义：running 仍禁用（A），其余放行
@@ -390,7 +377,7 @@ async function exportCsv(): Promise<void> {
   if (exportCsvButton) exportCsvButton.disabled = true;
   renderSyncStatus(t("exporting"));
   try {
-    const outcome = await fetchExportCsv(chromeSwChannel);
+    const outcome = await chromeSwChannel.exportCsv();
     if (outcome.ok) {
       browserCsvFileGateway.download(csvExportFileName(), outcome.csv);
       renderSyncStatus(t("exportCsvSuccess"));
@@ -435,7 +422,7 @@ async function importCsvFromFile(): Promise<void> {
   if (importCsvButton) importCsvButton.disabled = true;
   renderSyncStatus(t1("importingFile", picked.name));
   try {
-    const outcome = await importCsv(chromeSwChannel, picked.text, picked.name);
+    const outcome = await chromeSwChannel.importCsv(picked.text, picked.name);
     if (outcome.ok) {
       // 批次已驻留 SW 内存：展示确认页（措辞用「导入」，计数语义与采集一致）
       renderConfirmPage("sourceImport", outcome.total, outcome.newCount);
@@ -697,7 +684,7 @@ async function processUploadFiles(files: File[], replacing: boolean): Promise<vo
     return;
   }
   await runUploadBatch(
-    () => uploadFile(chromeSwChannel, parts),
+    () => chromeSwChannel.uploadFile(parts),
     // 进行中状态行（issue #38）：单文件带文件名；多文件整批带文件数
     parts.length > 1
       ? t1("uploadCollectingFiles", parts.length)
@@ -764,14 +751,14 @@ async function performUploadFromPaste(
   // #20）——批次驻留后 renderConfirmPage 记录 lastBatchSource="upload"，
   // 后续覆盖判定与拖放/点选一致
   await runUploadBatch(
-    () => uploadPastedText(chromeSwChannel, snapshot.text),
+    () => chromeSwChannel.uploadText(snapshot.text),
     t("uploadCollectingPasted"),
     { replaced: replacing, summary: null },
   );
 }
 
 async function refreshCounts(): Promise<void> {
-  const counts = await fetchCounts(chromeSwChannel);
+  const counts = await chromeSwChannel.getCounts();
   if (counts) {
     renderCounts(counts.total, counts.pending);
   } else {
@@ -780,7 +767,7 @@ async function refreshCounts(): Promise<void> {
 }
 
 async function refreshLogin(): Promise<void> {
-  const { loggedIn } = await fetchLoginStatus(chromeSwChannel);
+  const { loggedIn } = await chromeSwChannel.checkLogin();
   renderLogin(loggedIn ? "logged-in" : "logged-out");
 }
 
@@ -884,7 +871,7 @@ async function confirmPush(): Promise<void> {
   if (confirmPushButton) confirmPushButton.disabled = true;
   if (cancelCollectButton) cancelCollectButton.disabled = true;
   try {
-    const outcome = await confirmCollected(chromeSwChannel);
+    const outcome = await chromeSwChannel.confirmCollected();
     if (outcome.ok) {
       // 批次已消费：驻留来源记忆与卡片快照一并清空（issue #41；code-review
       // #22——快照残留会让后续失败分支错误恢复已消费的旧卡）
@@ -907,7 +894,7 @@ async function confirmPush(): Promise<void> {
 
 /** 取消：丢弃待确认批次，什么都不发生（词库、推送状态不变）。 */
 async function cancelCollect(): Promise<void> {
-  await discardCollected(chromeSwChannel);
+  await chromeSwChannel.discardCollected();
   // 批次已丢弃：驻留来源记忆与卡片快照一并清空（issue #41；code-review #22）
   lastBatchSource = null;
   lastConfirmCard = null;

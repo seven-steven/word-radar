@@ -1,11 +1,21 @@
 import type { WordEntry } from "@word-radar/core";
 import type { Counts } from "./word-repository.js";
+// 类型依赖单向：messages ← push-coordinator（生产者），无环
+// （push-coordinator 不 import messages，已核）。
+import type { PushProgress as PushStatus } from "./push-coordinator.js";
 
 /**
  * 词库计数。唯一定义在 word-repository（数据层），此处 re-export 供
  * 消息协议使用方免于直连仓储模块。
  */
 export type { Counts };
+
+/** Counts 应答守卫：total / pending 均为 number 才算合法（畸形一律降级 null）。 */
+export function isCounts(value: unknown): value is Counts {
+  if (typeof value !== "object" || value === null) return false;
+  const obj = value as Record<string, unknown>;
+  return typeof obj.total === "number" && typeof obj.pending === "number";
+}
 
 /**
  * 扩展内部消息协议。
@@ -15,7 +25,7 @@ export type { Counts };
  * - content → popup：sendResponse 回 `CollectResponse`（同步应答，携带确认页预览）
  * - content → background：`WORDS_COLLECTED`（runtime.sendMessage，携带词条；
  *   SW 只把批次驻留内存（待确认批次）并应答新词 diff，不写库不推送）
- * - popup → background：`GET_COUNTS`（查 total/pending）+ `MARK_PUSHED`（标记已推）
+ * - popup → background：`GET_COUNTS`（查 total/pending）
  *   + `CONFIRM_COLLECTED`（确认：批次合并入词库 + 触发一轮推送全部待推）
  *   + `DISCARD_COLLECTED`（取消：丢弃待确认批次）
  * - popup → background（T11）：`EXPORT_CSV`（导出词库为 CSV 文本）
@@ -25,7 +35,7 @@ export type { Counts };
  * - popup → background（issue #42 v1.1-T5）：`UPLOAD_TEXT`（画布粘贴的纯文本
  *   直进提取管线——无文件名/后缀概念、不过白名单，同过确认闸门）
  *
- * background 是 WORDS_COLLECTED / GET_COUNTS / MARK_PUSHED / CONFIRM_COLLECTED /
+ * background 是 WORDS_COLLECTED / GET_COUNTS / CONFIRM_COLLECTED /
  * DISCARD_COLLECTED / EXPORT_CSV / IMPORT_CSV / UPLOAD_FILE / UPLOAD_TEXT 的
  * 唯一接收方
  * （独占 IndexedDB 写入 + 推送调度 + 所有 HTTP）。
@@ -36,7 +46,6 @@ export const WORDS_COLLECTED = "WORDS_COLLECTED" as const;
 export const CONFIRM_COLLECTED = "CONFIRM_COLLECTED" as const;
 export const DISCARD_COLLECTED = "DISCARD_COLLECTED" as const;
 export const GET_COUNTS = "GET_COUNTS" as const;
-export const MARK_PUSHED = "MARK_PUSHED" as const;
 export const CHECK_LOGIN = "CHECK_LOGIN" as const;
 export const RETRY_PUSH = "RETRY_PUSH" as const;
 export const GET_PUSH_STATUS = "GET_PUSH_STATUS" as const;
@@ -103,16 +112,26 @@ export function suffixOf(name: string): string {
   return name.slice(dot + 1).toLowerCase();
 }
 
-export interface PushStatus {
-  phase: "idle" | "running" | "paused" | "completed";
-  total: number;
-  processed: number;
-  succeeded: number;
-  existing: number;
-  failed: number;
-  pending: number;
-  current?: string;
-  error?: string;
+/**
+ * 推送轮状态。唯一定义在 push-coordinator（生产者：PushProgress，与
+ * PushCoordinator.getStatus / 进度回调同型），此处别名 re-export 供消息协议
+ * 消费方沿用 PushStatus 名（同构双胞胎合一，issue #54 Wave B）。
+ */
+export type { PushStatus };
+
+/**
+ * PushStatus 应答守卫：phase 枚举合法 + 六个计数字段均为 number
+ * （current / error 可选，不校验）。原 sw-channel 私有实现原样迁入。
+ */
+export function isPushStatus(value: unknown): value is PushStatus {
+  if (typeof value !== "object" || value === null) return false;
+  const status = value as Record<string, unknown>;
+  return (
+    ["idle", "running", "paused", "completed"].includes(String(status.phase)) &&
+    (["total", "processed", "succeeded", "existing", "failed", "pending"] as const).every(
+      (field) => typeof status[field] === "number",
+    )
+  );
 }
 
 export interface RetryPushMessage { type: typeof RETRY_PUSH }
@@ -163,12 +182,6 @@ export interface DiscardCollectedMessage {
 /** popup → background：查询词库累计 / 待推计数。 */
 export interface GetCountsMessage {
   type: typeof GET_COUNTS;
-}
-
-/** popup → background：把指定 lemma 标记为「不背单词已推」。 */
-export interface MarkPushedMessage {
-  type: typeof MARK_PUSHED;
-  lemmas: string[];
 }
 
 /**
@@ -269,7 +282,6 @@ export type ExtensionMessage =
   | ConfirmCollectedMessage
   | DiscardCollectedMessage
   | GetCountsMessage
-  | MarkPushedMessage
   | CheckLoginMessage
   | RetryPushMessage
   | GetPushStatusMessage
@@ -339,17 +351,6 @@ export function isGetCountsMessage(value: unknown): value is GetCountsMessage {
   return isObject(value) && value.type === GET_COUNTS;
 }
 
-export function isMarkPushedMessage(
-  value: unknown,
-): value is MarkPushedMessage {
-  return (
-    isObject(value) &&
-    value.type === MARK_PUSHED &&
-    Array.isArray(value.lemmas) &&
-    value.lemmas.every((lemma) => typeof lemma === "string")
-  );
-}
-
 export function isCheckLoginMessage(value: unknown): value is CheckLoginMessage {
   return isObject(value) && value.type === CHECK_LOGIN;
 }
@@ -410,7 +411,7 @@ export function isExportCsvResponse(value: unknown): value is ExportCsvResponse 
   return false;
 }
 
-  export function isCheckLoginResponse(value: unknown): value is CheckLoginResponse {
+export function isCheckLoginResponse(value: unknown): value is CheckLoginResponse {
   if (!isObject(value)) return false;
   if (value.loggedIn === true) return true;
   if (value.loggedIn === false) return true;

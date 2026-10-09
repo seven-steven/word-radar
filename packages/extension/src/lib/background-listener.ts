@@ -13,7 +13,6 @@ import {
   isExportCsvMessage,
   isGetCountsMessage,
   isImportCsvMessage,
-  isMarkPushedMessage,
   isUploadFileMessage,
   isUploadTextMessage,
   isWordsCollectedMessage,
@@ -103,7 +102,6 @@ export interface BackgroundListenerDeps {
  *   （覆盖整个待推池，含 CSV 导入的存量）；应答最新计数
  * - DISCARD_COLLECTED：取消——丢弃内存中的待确认批次，不持有通道
  * - GET_COUNTS：返回当前计数
- * - MARK_PUSHED：标记指定 lemma 已推，返回最新计数
  * - CHECK_LOGIN（T09）：调 BbdcClient.checkLogin；应答 {loggedIn}。
  *   登录状态不写 badge（issue #26）——未登录只在推送 paused 时经 "!" 表达
  * - EXPORT_CSV（T11）：getAll → core stringify，应答 {ok:true,csv}
@@ -124,8 +122,8 @@ export interface BackgroundListenerDeps {
  *
  * 其他消息一律忽略（返回 false，不持有消息通道）。
  *
- * 异步应答（WORDS_COLLECTED / CONFIRM_COLLECTED / GET_COUNTS / MARK_PUSHED /
- * CHECK_LOGIN / EXPORT_CSV / IMPORT_CSV / UPLOAD_FILE / UPLOAD_TEXT）通过
+ * 异步应答（WORDS_COLLECTED / CONFIRM_COLLECTED / GET_COUNTS / CHECK_LOGIN /
+ * EXPORT_CSV / IMPORT_CSV / UPLOAD_FILE / UPLOAD_TEXT）通过
  * return true 保持消息通道，sendResponse 在仓库 promise resolve 时调用。
  */
 export function createBackgroundListener(deps: BackgroundListenerDeps) {
@@ -234,13 +232,6 @@ export function createBackgroundListener(deps: BackgroundListenerDeps) {
       deps.repository
         .getCounts()
         .then(sendResponse, () => sendResponse({ ok: false, error: "counts-failed" }))
-        .catch(() => undefined);
-      return true;
-    }
-    if (isMarkPushedMessage(message)) {
-      deps.repository
-        .markPushed(message.lemmas)
-        .then(sendResponse, () => sendResponse({ ok: false, error: "mark-failed" }))
         .catch(() => undefined);
       return true;
     }

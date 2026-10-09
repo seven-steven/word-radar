@@ -11,7 +11,6 @@ import {
   EXPORT_CSV,
   GET_COUNTS,
   IMPORT_CSV,
-  MARK_PUSHED,
   RETRY_PUSH,
   GET_PUSH_STATUS,
   WORDS_COLLECTED,
@@ -144,37 +143,6 @@ describe("createBackgroundListener", () => {
     expect(sendResponse).toHaveBeenCalledWith({ total: 3, pending: 2 });
   });
 
-  it("MARK_PUSHED 转发 lemmas 给 repository；异步返回新计数", async () => {
-    const repository = fakeRepository();
-    const listener = createBackgroundListener({ repository });
-    const sendResponse = vi.fn();
-
-    const keepChannel = listener(
-      { type: MARK_PUSHED, lemmas: ["a", "b"] },
-      {},
-      sendResponse,
-    );
-
-    expect(keepChannel).toBe(true);
-    await Promise.resolve();
-    expect(repository.markPushed).toHaveBeenCalledWith(["a", "b"]);
-    expect(sendResponse).toHaveBeenCalledWith({ total: 3, pending: 1 });
-  });
-
-  it("MARK_PUSHED 仓库失败时 sendResponse 收到 {ok:false,error}", async () => {
-    const repository = fakeRepository();
-    repository.markPushed = vi.fn(async () => {
-      throw new Error("db boom");
-    });
-    const listener = createBackgroundListener({ repository });
-    const sendResponse = vi.fn();
-
-    listener({ type: MARK_PUSHED, lemmas: ["x"] }, {}, sendResponse);
-
-    await new Promise<void>((resolve) => setTimeout(resolve, 0));
-    expect(sendResponse).toHaveBeenCalledWith({ ok: false, error: "mark-failed" });
-  });
-
   it("GET_COUNTS 仓库失败时 sendResponse 收到 {ok:false,error}", async () => {
     const repository = fakeRepository();
     repository.getCounts = vi.fn(async () => {
@@ -197,9 +165,6 @@ describe("createBackgroundListener", () => {
     expect(listener({ type: "OTHER" }, {}, sendResponse)).toBe(false);
     expect(
       listener({ type: WORDS_COLLECTED, entries: "bad" }, {}, sendResponse),
-    ).toBe(false);
-    expect(
-      listener({ type: MARK_PUSHED, lemmas: "bad" }, {}, sendResponse),
     ).toBe(false);
 
     expect(sendResponse).not.toHaveBeenCalled();
