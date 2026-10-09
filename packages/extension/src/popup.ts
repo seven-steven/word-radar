@@ -44,7 +44,8 @@ import {
   requestCollection,
 } from "./lib/active-tab.js";
 import { createConfirmCard } from "./lib/confirm-card.js";
-import { chromeSwChannel, type UploadFileOutcome } from "./lib/sw-channel.js";
+import { isRevealOpen, setRevealOpen } from "./lib/reveal.js";
+import { chromeSwChannel, type BatchOutcome } from "./lib/sw-channel.js";
 import { browserCsvFileGateway } from "./lib/csv-file.js";
 import { defaultErrorLogStorage, formatErrorLog, readErrorLog } from "./lib/error-log.js";
 import {
@@ -137,15 +138,7 @@ if (pushProgressEl) {
   pushProgressEl.setAttribute("aria-label", t("pushProgress"));
 }
 
-// ── 显隐防抖（C）：confirm 卡片与工具面板统一走 grid-template-rows 过渡 ──
-
-function isRevealOpen(el: HTMLElement | null): boolean {
-  return el?.classList.contains("open") ?? false;
-}
-
-function setRevealOpen(el: HTMLElement | null, open: boolean): void {
-  el?.classList.toggle("open", open);
-}
+// ── 显隐防抖（C）：grid-template-rows 过渡；开合工具在 lib/reveal.ts ──
 
 // ── 状态行互斥（D）+ 空态提示 ──────────────────────────────────────────
 
@@ -452,8 +445,8 @@ async function importCsvFromFile(): Promise<void> {
 /**
  * 确认卡生命周期（issue #54 Wave E）：快照记账与渲染收进 lib/confirm-card.ts
  * （render / hide / 失败恢复 / 消费清空，#22 语义随迁可单测）。popup 只保留
- * 全局联动（D 状态行互斥、空态提示）与事件接线；reveal 开合工具与 toolsPanel
- * 共享，留在 popup（module 内自持等价实现）。
+ * 全局联动（D 状态行互斥、空态提示）与事件接线；reveal 开合工具在
+ * lib/reveal.ts（与 toolsPanel 同一出口）。
  */
 const confirmCard = createConfirmCard(
   {
@@ -617,7 +610,7 @@ function renderUploadSummary(
  * 隐藏，两段都在时以「·」并置）/ 失败恢复确认卡 + 错误状态行。
  */
 async function runUploadBatch(
-  send: () => Promise<UploadFileOutcome>,
+  send: () => Promise<BatchOutcome>,
   collectingStatus: string,
   meta: { replaced: boolean; summary: string | null },
 ): Promise<void> {

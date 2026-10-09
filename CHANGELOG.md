@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/
 
 ### 测试与工程
 
+- code-review 判断题清理（issue #54）：reveal 开合单一出口——新增 `lib/reveal.ts`（`setRevealOpen`/`isRevealOpen`，`.open` class 语义只拼写一次），popup.ts 与 confirm-card.ts 都改用（原「module 内自持逐字一致的等价实现」两处持有退场；aria-expanded 仍是 tools-toggle 调用点职责）；ImportCsvOutcome/UploadFileOutcome 同构双别名合一为 `BatchOutcome`（CSV 导入/文件上传/粘贴文本三通道共用一个名，粘贴复用 Upload 名的语义错位消除；Confirm/Export 两族成功体不同构，保持独立）
 - e2e 跨用例驻留批清理（issue #54 Wave D 适配）：beforeEach 走临时 popup 页发 `DISCARD_COLLECTED` 并轮询 `GET_BATCH_STATE` 双确认清掉 SW 驻留的待确认批次——覆盖闸门判定依据从 popup 影子记账（每用例重开 popup 即清零，感知不到残留）改为查询 SW 真相后，前序用例驻留的 collect/import 批会拦下后续上传用例（弹覆盖确认条而非直接上传），与 #27 的路由/页面泄漏同类。已知遗留（取证链在 #54）：极少数时序下驻留批于清理后「复活」（疑似多 SW 实例并存导致消息路由分叉），受影响上传用例单跑均绿、非本轮重构回归，专项跟踪
 - code-review 修复（issue #54）：`dispatchUpload` 防重入同步前置（闸门改 async 查询 SW 真相后，`isUploading` 置位被推到 await 之后，往返窗口内快速二次输入可双双放行并发上传——Spec 轴评审发现的 TOCTOU，旧影子同步判定无此窗口；gate 查询防御性降级放行，任何异常不把 isUploading 卡死）；`resideAndRespond` 分支配置改判别联合（collect 分支无 stage 亦无 failText，空函数占位退场）
 - 构建侧 core 入口稳定化（issue #54 Wave F）：build-blacklist 的 `registerHooks` 内联 loader 钩子（Node 原生加载 core TS 源所需的 .js→.ts 重写）抽出为 `scripts/lib/load-core-lemmatizer.mjs` 共享工具——「core TS 加载协议」单一持有处，构建脚本不再持有 core 内部 import 风格知识（core 改用 .ts 后缀 import 时钩子可整体删除）；加载后新增哨兵断言（went→go / knives→knife / pyjamas→pyjamas / arenas→arenas，期望值锁在 core lemma.test，覆盖 #48 守门与 #50 负启发两修复路径）——core 还原行为漂移时全量 ~2.5h 管线起步即失败，不再跑完后悄悄产出与管线行为不一致的黑名单；黑名单内容零变化（未跑再生成，冒烟实测加载与哨兵通过）

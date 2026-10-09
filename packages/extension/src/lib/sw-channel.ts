@@ -54,13 +54,8 @@ export type ExportCsvOutcome =
   | { ok: true; csv: string }
   | { ok: false; error: string };
 
-/** T11 导入应答（popup 侧收窄后的形态）：成功为待确认批次预览。 */
-export type ImportCsvOutcome =
-  | ({ ok: true } & BatchPreview)
-  | { ok: false; error: string };
-
-/** 上传文件采集应答（popup 侧收窄后的形态）：成功为待确认批次预览。 */
-export type UploadFileOutcome =
+/** 批次驻留应答（popup 侧收窄后的形态）：CSV 导入 / 文件上传 / 粘贴文本三通道共用，成功为待确认批次预览。 */
+export type BatchOutcome =
   | ({ ok: true } & BatchPreview)
   | { ok: false; error: string };
 
@@ -103,11 +98,11 @@ export interface SwChannel {
    * - SW 返回 `{ok:false,error}`（坏 CSV：含文件名 + 行号）→ 原样透传
    * - 任何其他应答 / 抛错 → `{ok:false,"import-unavailable"}`
    */
-  importCsv(csvText: string, fileName: string): Promise<ImportCsvOutcome>;
+  importCsv(csvText: string, fileName: string): Promise<BatchOutcome>;
   /** issue #24；#38 改文件批：把本地纯文本文件批（UPLOAD_TEXT_SUFFIXES）交给 SW（整批 = 一次采集，驻留待确认批次）。 */
-  uploadFile(files: UploadedFilePart[]): Promise<UploadFileOutcome>;
-  /** issue #42 T5：把画布粘贴的纯文本交给 SW（直进提取管线，驻留待确认批次）；应答与 uploadFile 同构（UploadFileOutcome）。 */
-  uploadText(text: string): Promise<UploadFileOutcome>;
+  uploadFile(files: UploadedFilePart[]): Promise<BatchOutcome>;
+  /** issue #42 T5：把画布粘贴的纯文本交给 SW（直进提取管线，驻留待确认批次）；应答与 uploadFile 同构（BatchOutcome）。 */
+  uploadText(text: string): Promise<BatchOutcome>;
   /** 确认待确认批次（issue #22）：SW 合并入词库并触发一轮推送。 */
   confirmCollected(): Promise<ConfirmCollectedOutcome>;
   /** 取消：丢弃 SW 内存中的待确认批次。fire-and-forget，失败不打扰用户。 */
@@ -255,7 +250,7 @@ export const chromeSwChannel: SwChannel = {
  */
 async function narrowUploadOutcome(
   send: () => Promise<unknown>,
-): Promise<UploadFileOutcome> {
+): Promise<BatchOutcome> {
   try {
     const raw = await send();
     if (isBatchPreview(raw)) {

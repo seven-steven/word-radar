@@ -7,12 +7,13 @@
  * 直接喂真实元素，popup 的 i18n 适配层只做参数转发；popup 级联动（状态行
  * 互斥、空态提示）经 ConfirmCardHooks 回调留在 popup（全局状态不搬）。
  *
- * reveal 开合（.open class）在 module 内自持等价实现：popup 的
- * setRevealOpen/isRevealOpen 是与 toolsPanel 共享的工具（popup.ts 保留），
- * 确认卡侧的开合语义（toggle "open" / contains("open")）与此处逐字一致。
+ * reveal 开合（.open class）走 lib/reveal.ts 的 setRevealOpen/isRevealOpen
+ * ——与 popup.ts / toolsPanel 同一出口，开合语义单点持有。
  * 焦点回收（hide 侧）：卡片持有焦点时收起会把焦点坠回 body——先归还给
  * 稳定入口（focusReturnTarget，popup 传 collectButton）。
  */
+
+import { isRevealOpen, setRevealOpen } from "./reveal.js";
 
 /** 确认卡内容快照（code-review #22）：上传失败分支用它恢复被收起的卡片。 */
 export interface ConfirmCardSnapshot {
@@ -59,7 +60,7 @@ export interface ConfirmCard {
   /** 批次已消费（确认成功/取消）：清空快照——后续失败分支不再恢复旧卡（#22）。 */
   consume(): void;
   snapshot(): ConfirmCardSnapshot | null;
-  /** 与 popup 的 isRevealOpen(confirmSection) 语义等价。 */
+  /** 即 lib/reveal.ts 的 isRevealOpen(section)。 */
   isVisible(): boolean;
 }
 
@@ -89,7 +90,7 @@ export function createConfirmCard(
       dom.meta.textContent = snapshot.meta ?? "";
       dom.meta.hidden = !snapshot.meta;
     }
-    dom.section?.classList.toggle("open", true);
+    setRevealOpen(dom.section, true);
     if (dom.pushButton) {
       dom.pushButton.disabled = false;
       // B 焦点管理：卡片浮现即落到主操作
@@ -111,7 +112,7 @@ export function createConfirmCard(
       if (dom.section?.contains(document.activeElement)) {
         dom.focusReturnTarget?.focus();
       }
-      dom.section?.classList.toggle("open", false);
+      setRevealOpen(dom.section, false);
       hooks.onHidden();
     },
 
@@ -130,7 +131,7 @@ export function createConfirmCard(
     },
 
     isVisible(): boolean {
-      return dom.section?.classList.contains("open") ?? false;
+      return isRevealOpen(dom.section);
     },
   };
 }
