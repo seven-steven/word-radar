@@ -571,17 +571,27 @@ function withUploadGuard(job: () => Promise<void>): () => Promise<void> {
  * - collect/import 驻留批：不执行上传，暂存作业并显示内联确认条。
  * replacing 在闸门判定时一并取值注入作业（accept 路径恒 false——需要确认
  * 的必然是 collect/import 驻留批，不存在「替换上传批」的确认形态）。
+ *
+ * 防重入必须同步前置（#54 code-review TOCTOU）：闸门改查 SW 真相后判定
+ * 是 async 往返，若先 await 再置位，往返窗口内的快速二次输入仍见
+ * isUploading=false 双双放行（旧影子记账同步判定无此窗口）。置位后各路径
+ * 自行归位：放行/accept 路径由 withUploadGuard 的 finally 复位，确认条
+ * 待决路径由 hideOverwriteAsk（dismiss/Esc/收尾）复位。
  */
 async function dispatchUpload(
   job: (replacing: boolean) => Promise<void>,
 ): Promise<void> {
   if (isUploading) return; // 上传进行中 / 确认条待决：防重入
-  const gate = await requestOverwriteGate();
-  if (!gate.allowed) {
+  isUploading = true;
+  // gate 查询恒 resolve（getBatchState 畸形/抛错降级 null=放行）；防御性
+  // catch 兜底，保证任何异常路径都不会把 isUploading 卡死在 true
+  const gate = await requestOverwriteGate().catch(() => null);
+  const decision = gate ?? { allowed: true, replacing: false };
+  if (!decision.allowed) {
     showOverwriteAsk(withUploadGuard(() => job(false)));
     return;
   }
-  await withUploadGuard(() => job(gate.replacing))();
+  await withUploadGuard(() => job(decision.replacing))();
 }
 
 /**

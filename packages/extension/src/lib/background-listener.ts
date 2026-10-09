@@ -182,14 +182,25 @@ export function createBackgroundListener(deps: BackgroundListenerDeps) {
    * - 管线异常（reject）：错误写环形缓冲（stage/文案随分支）+ errback 字面量；
    * - 采集分支 stage=null：预览失败无更多细节可报、不写日志（历史语义保持）。
    */
+  /**
+   * 分支配置（#54 code-review：stage 与 failText 互斥，判别联合替代死参数——
+   * 采集分支无日志 stage，也就没有 failText，空函数占位不再可能）：
+   * - 有 stage 的分支（import/upload）：拒绝时错误写环形缓冲，reject 文案
+   *   由 failText 格式化；
+   * - 采集分支（collect）：预览失败无更多细节可报、不写日志（历史语义保持）。
+   */
+  type ResideBranch =
+    | {
+        source: BatchSource;
+        stage: "import" | "upload";
+        failText: (error: unknown) => string;
+        errback: string;
+      }
+    | { source: "collect"; stage: null; errback: string };
+
   function resideAndRespond(
     work: Promise<ResideOutcome>,
-    branch: {
-      source: BatchSource;
-      stage: "import" | "upload" | null;
-      failText: (error: unknown) => string;
-      errback: string;
-    },
+    branch: ResideBranch,
     respond: (response: BatchPreview | { ok: false; error: string }) => void,
   ): void {
     void work
@@ -241,7 +252,7 @@ export function createBackgroundListener(deps: BackgroundListenerDeps) {
         handleWordsCollected(message, deps.repository).then(
           (preview): ResideOutcome => ({ entries: message.entries, preview }),
         ),
-        { source: "collect", stage: null, failText: () => "", errback: "preview-failed" },
+        { source: "collect", stage: null, errback: "preview-failed" },
         sendResponse,
       );
       return true;
