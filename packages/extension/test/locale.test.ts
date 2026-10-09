@@ -37,7 +37,7 @@ const SRC_DIR = join(dirname(fileURLToPath(import.meta.url)), "../src");
 
 /**
  * 经由变量动态派发、字面量扫描不可见的 key：
- * - renderConfirmPage 的来源措辞（联合类型参数）
+ * - confirm-card.ts 的来源措辞（快照联合类型参数，经 texts.source 动态派发）
  * - context-menu.ts 的菜单 title（getMessage(key) 形参，issue #40 复盘改
  *   显式解析后不再有 __MSG_*__ 字面量）
  */

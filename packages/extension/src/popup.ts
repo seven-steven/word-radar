@@ -43,6 +43,7 @@ import {
   openBbdcHome,
   requestCollection,
 } from "./lib/active-tab.js";
+import { createConfirmCard } from "./lib/confirm-card.js";
 import { chromeSwChannel, type UploadFileOutcome } from "./lib/sw-channel.js";
 import { browserCsvFileGateway } from "./lib/csv-file.js";
 import { defaultErrorLogStorage, formatErrorLog, readErrorLog } from "./lib/error-log.js";
@@ -425,7 +426,7 @@ async function importCsvFromFile(): Promise<void> {
     const outcome = await chromeSwChannel.importCsv(picked.text, picked.name);
     if (outcome.ok) {
       // 批次已驻留 SW 内存：展示确认页（措辞用「导入」，计数语义与采集一致）
-      renderConfirmPage("sourceImport", outcome.total, outcome.newCount);
+      confirmCard.render({ sourceKey: "sourceImport", total: outcome.total, newCount: outcome.newCount });
       renderSyncStatus(t1("importParsedPending", picked.name));
     } else {
       renderStatusLine(syncStatusEl, t1("importFailed", outcome.error), "error");
@@ -448,30 +449,45 @@ async function importCsvFromFile(): Promise<void> {
  */
 
 
-/** 确认卡内容快照（code-review #22）：上传失败分支用它恢复被收起的卡片。 */
-interface ConfirmCardSnapshot {
-  sourceKey: "sourceCollect" | "sourceImport" | "sourceUpload";
-  total: number;
-  newCount: number;
-  meta?: string;
-  /** 已过滤 N 个（issue #43）：提取通道有值，CSV 导入缺省。 */
-  filteredCount?: number;
-}
-
-// 最近一次确认卡快照：renderConfirmPage 时记录，批次确认 / 取消后清空
-// （此时批次已消费，恢复旧卡反而错误）。上传失败分支恢复用——SW 整批拒绝
-// 时旧 pendingBatch 仍驻留内存，卡片已撤会让它成孤儿（无法确认/取消、
-// badge "?" 常驻）。
-let lastConfirmCard: ConfirmCardSnapshot | null = null;
+/**
+ * 确认卡生命周期（issue #54 Wave E）：快照记账与渲染收进 lib/confirm-card.ts
+ * （render / hide / 失败恢复 / 消费清空，#22 语义随迁可单测）。popup 只保留
+ * 全局联动（D 状态行互斥、空态提示）与事件接线；reveal 开合工具与 toolsPanel
+ * 共享，留在 popup（module 内自持等价实现）。
+ */
+const confirmCard = createConfirmCard(
+  {
+    section: confirmSection,
+    summary: confirmSummaryEl,
+    filtered: confirmFilteredEl,
+    meta: confirmMetaEl,
+    pushButton: confirmPushButton,
+    focusReturnTarget: collectButton,
+  },
+  {
+    source: (key) => t(key),
+    summary: (source, total, newCount) => t3("confirmSummary", source, total, newCount),
+    filtered: (count) => t1("confirmFiltered", count),
+  },
+  {
+    onRendered: () => {
+      updateStatusVisibility(); // D 状态行互斥
+      updateEmptyHint();
+    },
+    onHidden: () => {
+      updateStatusVisibility(); // D：卡片收起后恢复状态行
+      updateEmptyHint();
+    },
+  },
+);
 
 // 上传进行中防重入（issue #41）：期间忽略画布新的点击/拖放输入。
 // 覆盖确认条可见期间同样置 true（防并发新输入），关闭时复位。
 let isUploading = false;
 
 /**
-/**
  * 上传前的覆盖闸门（决议 A5；code-review P1 改 requestOverwriteGate 一次
- * 返回两值，消掉「gate 放行后、hideConfirmPage 前取值」的隐式时序陷阱）：
+ * 返回两值，消掉「gate 放行后、收卡前取值」的隐式时序陷阱）：
  * - 无驻留批（SW 真相 source=null）：放行；
  * - upload 驻留批：静默替换，replacing=true（确认卡内提示「已替换」）；
  * - collect/import 驻留批：allowed=false → 弹内联确认条。
@@ -505,7 +521,7 @@ function hideOverwriteAsk(): void {
   pendingOverwriteJob = null;
   if (overwriteAskEl) overwriteAskEl.hidden = true;
   isUploading = false; // 复位防重入：accept 路径不经此函数（自行保持 true 到作业收尾）
-  if (hadFocus) uploadCanvas?.focus(); // 焦点回收：回到上传入口（同 hideConfirmPage 先例）
+  if (hadFocus) uploadCanvas?.focus(); // 焦点回收：回到上传入口（同确认卡收起先例）
 }
 
 overwriteAcceptButton?.addEventListener("click", () => {
@@ -595,7 +611,7 @@ async function runUploadBatch(
   collectingStatus: string,
   meta: { replaced: boolean; summary: string | null },
 ): Promise<void> {
-  hideConfirmPage();
+  confirmCard.hide();
   renderStatusLine(statusEl, collectingStatus);
   const outcome = await send();
   if (outcome.ok) {
@@ -603,29 +619,20 @@ async function runUploadBatch(
     const notes = [meta.replaced ? t("uploadReplacedBatch") : null, meta.summary]
       .filter(Boolean)
       .join(" · ");
-    renderConfirmPage(
-      "sourceUpload",
-      outcome.total,
-      outcome.newCount,
-      notes || undefined,
-      outcome.filteredCount,
-    );
+    confirmCard.render({
+      sourceKey: "sourceUpload",
+      total: outcome.total,
+      newCount: outcome.newCount,
+      meta: notes || undefined,
+      filteredCount: outcome.filteredCount,
+    });
   } else {
-    // 失败恢复确认卡（code-review #22）：开头 hideConfirmPage 已把卡片撤下，
+    // 失败恢复确认卡（code-review #22）：开头收卡已把卡片撤下，
     // 而 SW 整批拒绝时旧 pendingBatch 仍驻留内存——不恢复就成孤儿（无法确认/
     // 取消、badge "?" 常驻）。用快照重渲染恢复是正确语义；若失败源于
     // sendMessage 断连（批次实际已丢），恢复后的确认会得到 SW 的明确错误
     //（no-pending-batch），可接受边界。
-    const snapshot = lastConfirmCard;
-    if (snapshot) {
-      renderConfirmPage(
-        snapshot.sourceKey,
-        snapshot.total,
-        snapshot.newCount,
-        snapshot.meta,
-        snapshot.filteredCount,
-      );
-    }
+    confirmCard.restoreFromSnapshot();
     renderStatusLine(statusEl, t1("uploadFailed", outcome.error), "error");
   }
 }
@@ -782,59 +789,6 @@ async function checkLogin(): Promise<void> {
   }
 }
 
-/**
- * 确认页：展示待确认批次的总数 / 新词数，并挂起确认 / 取消按钮。
- * sourceKey 仅影响措辞（采集 / 导入 / 上传采集），计数语义与按钮行为完全一致（review S-3）。
- * meta（可选，code-review P1）：上传批的替换提示 / 收录摘要，挂卡内
- * confirm-meta——状态行在卡片展开期间被 D 互斥隐藏，meta 必须随卡呈现。
- * filteredCount（可选，issue #43）：>0 时加显「已过滤 N 个」行（confirm-filtered），
- * =0 或缺省（CSV 导入）不渲染；随快照记录，上传失败恢复分支同形重渲。
- * 同时记录驻留批次来源（issue #41 覆盖语义的判定依据）；确认 / 取消后由各自路径清空。
- */
-function renderConfirmPage(
-  sourceKey: "sourceCollect" | "sourceImport" | "sourceUpload",
-  total: number,
-  newCount: number,
-  meta?: string,
-  filteredCount?: number,
-): void {
-  lastConfirmCard = { sourceKey, total, newCount, meta, filteredCount }; // #22 失败恢复用快照
-  if (confirmSummaryEl) {
-    const source = t(sourceKey);
-    confirmSummaryEl.textContent = t3("confirmSummary", source, total, newCount);
-  }
-  if (confirmFilteredEl) {
-    // >0 才渲染：过滤数为 0 时这行是纯噪音
-    const filtered = filteredCount ?? 0;
-    confirmFilteredEl.textContent = filtered > 0 ? t1("confirmFiltered", filtered) : "";
-    confirmFilteredEl.hidden = filtered <= 0;
-  }
-  if (confirmMetaEl) {
-    confirmMetaEl.textContent = meta ?? "";
-    confirmMetaEl.hidden = !meta;
-  }
-  setRevealOpen(confirmSection, true);
-  if (confirmPushButton) {
-    confirmPushButton.disabled = false;
-    // B 焦点管理：卡片浮现即落到主操作
-    confirmPushButton.focus();
-  }
-  updateStatusVisibility(); // D 状态行互斥
-  updateEmptyHint();
-}
-
-function hideConfirmPage(): void {
-  // 焦点回收（B 的对称侧）：卡片持有焦点时收起（确认成功 / 取消 / Esc /
-  // 上传开头），reveal-clip 转 visibility:hidden 会把焦点坠回 body——先
-  // 归还给稳定的采集入口；随后状态行更新由 role="status" 播报。
-  if (confirmSection?.contains(document.activeElement)) {
-    collectButton?.focus();
-  }
-  setRevealOpen(confirmSection, false);
-  updateStatusVisibility(); // D：卡片收起后恢复状态行
-  updateEmptyHint();
-}
-
 async function collect(): Promise<void> {
   // 挂起的上传覆盖确认 = 隐式取消（sweeper #24）：新采集会替换 SW 驻留批并
   // 重渲卡片——确认条若继续挂起，用户稍后点「继续上传」覆盖的将是他未同意
@@ -842,13 +796,18 @@ async function collect(): Promise<void> {
   if (pendingOverwriteJob) hideOverwriteAsk();
   renderStatusLine(statusEl, t("statusCollecting"));
   if (collectButton) collectButton.disabled = true;
-  hideConfirmPage();
+  confirmCard.hide();
   resetPushProgress(); // F：新采集周期收束上一轮的完成定格
   try {
     const outcome = await requestCollection(chromeTabsGateway);
     if (outcome.ok) {
       // 确认闸门：采集结果只在 SW 内存（待确认批次），此处仅展示预览
-      renderConfirmPage("sourceCollect", outcome.total, outcome.newCount, undefined, outcome.filteredCount);
+      confirmCard.render({
+        sourceKey: "sourceCollect",
+        total: outcome.total,
+        newCount: outcome.newCount,
+        filteredCount: outcome.filteredCount,
+      });
       renderStatusLine(statusEl, t("pendingConfirm"));
     } else {
       renderStatusLine(statusEl, outcome.error, "error");
@@ -867,10 +826,10 @@ async function confirmPush(): Promise<void> {
     if (outcome.ok) {
       // 批次已消费：驻留来源记忆与卡片快照一并清空（issue #41；code-review
       // #22——快照残留会让后续失败分支错误恢复已消费的旧卡）
-      lastConfirmCard = null;
+      confirmCard.consume();
       renderCounts(outcome.counts.total, outcome.counts.pending);
       renderStatusLine(statusEl, t("confirmedPushStarted"));
-      hideConfirmPage();
+      confirmCard.hide();
       // 确认即推送：拉起进度轮询（推送在 SW，popup 关闭不中断）
       await refreshPushStatus();
       startPushStatusPolling();
@@ -887,8 +846,8 @@ async function confirmPush(): Promise<void> {
 async function cancelCollect(): Promise<void> {
   await chromeSwChannel.discardCollected();
   // 批次已丢弃：驻留来源记忆与卡片快照一并清空（issue #41；code-review #22）
-  lastConfirmCard = null;
-  hideConfirmPage();
+  confirmCard.consume();
+  confirmCard.hide();
   renderStatusLine(statusEl, t("cancelled"));
 }
 
