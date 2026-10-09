@@ -39,7 +39,7 @@ export async function runCollection(deps: RunCollectionDeps): Promise<CollectRes
   const getFilterSettings = deps.getFilterSettings ?? getIntakeFilterSettings;
   const filterSettings = await getFilterSettings();
   const text = deps.collectText();
-  // 两开关透传给 core：所有格剥离在 core 内部归一化，不受开关控制
+  // 两开关透传给 core；开关语义见 core intake-filter
   const { entries, filteredCount } = extract(text, {
     filterAbbreviations: filterSettings.filterAbbreviations,
     filterContractions: filterSettings.filterContractions,

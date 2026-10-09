@@ -16,6 +16,8 @@ export function mergeWordEntries(...lists: WordEntry[][]): WordEntry[] {
   }
   const result: WordEntry[] = [];
   for (const [lemma, flags] of map) {
+    // 不走 createWordEntry：它 trim 且对空白 lemma 抛错，而 merge 接受任意
+    // 输入词条（不 trim、原样小写），替换会改变对未规范化输入的行为。
     result.push({ lemma, flags });
   }
   return result;

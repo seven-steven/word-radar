@@ -1,14 +1,6 @@
 import nlp from "compromise";
-import { isEnglishWord } from "./extract.js";
+import { isEnglishWord } from "./predicate.js";
 import { LEXICON } from "./lexicon.js";
-
-/**
- * T03 词形还原选项（由 extract.ts 的 ExtractOptions 组合）。
- * `excludeProperNouns`：默认 `true`，用 compromise `#ProperNoun` 排除专名。
- */
-export interface LemmatizeOptions {
-  excludeProperNouns?: boolean;
-}
 
 /** 判断 token（保留原始大小写）是否为 compromise 识别的专名。 */
 export function isProperNoun(token: string): boolean {

@@ -1,4 +1,5 @@
 import type { WordEntry } from "./types.js";
+import { createWordEntry } from "./entry.js";
 
 /**
  * 解析两列 CSV 文本为 WordEntry 数组。
@@ -47,7 +48,8 @@ export function parseWordListCsv(text: string): WordEntry[] {
 
     const flags = Number(rawFlags);
 
-    entries.push({ lemma, flags });
+    // lemma 已在上方 trim + toLowerCase + 空值拒绝，createWordEntry 的规范化幂等
+    entries.push(createWordEntry(lemma, flags));
   }
 
   return entries;

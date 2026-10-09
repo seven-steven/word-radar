@@ -1,6 +1,8 @@
 import type { WordEntry } from "./types.js";
+import { createWordEntry } from "./entry.js";
 import { isProperNoun, lemmatizeWord } from "./lemma.js";
-import { ABBREVIATION_BLACKLIST } from "./blacklist.js";
+import { isEnglishWord } from "./predicate.js";
+import { createIntakeFilter } from "./intake-filter.js";
 
 /**
  * extractWordEntries 的选项。
@@ -51,25 +53,6 @@ const CANDIDATE_RE = /[A-Za-z0-9$][A-Za-z0-9$.:'@/_-]*/g;
  */
 const TRAILING_PUNCT_RE = /[.'-]+$/;
 
-/** URL：带 scheme 或 www. 前缀。 */
-const URL_RE = /^(https?:\/\/|www\.)/i;
-/** email：任意 `x@y` 形态。 */
-const EMAIL_RE = /^[^@\s]+@[^@\s]+$/;
-/** 路径：含 `/`（URL 已先行拒绝）。 */
-const PATH_RE = /\//;
-/** snake_case：含 `_`。 */
-const SNAKE_RE = /_/;
-/** camelCase：小写后紧跟大写。 */
-const CAMEL_RE = /[a-z][A-Z]/;
-/** PascalCase：首字母大写且内部再出现大写（如 App.tsx 已被含数字/路径挡掉，此处兜底 XMLHttpRequest）。 */
-const PASCAL_RE = /^[A-Z][a-z]*[A-Z]/;
-/** 含 `$`（模板变量、jQuery 等）。 */
-const DOLLAR_RE = /\$/;
-/** 含数字（含纯数字、v2、IPv4 等）。 */
-const DIGIT_RE = /\d/;
-/** 合法英文词：纯字母，内部可含 `'` / `-`。 */
-const WORD_RE = /^[A-Za-z]+(?:['-][A-Za-z]+)*$/;
-
 /** 所有格后缀：词尾 `'s`（弯撇号已在 normalizeText 归一为直撇号）。 */
 const POSSESSIVE_RE = /'s$/;
 
@@ -91,22 +74,6 @@ export function normalizeText(text: string): string {
     out = out.replace(re, replacement);
   }
   return out.normalize("NFKC");
-}
-
-/**
- * 判断一个候选 token 是否应被接受为英文词。
- * 拒绝顺序按工单：URL → email → 路径 → snake/camel/Pascal → `$` → 含数字 → 形态校验。
- */
-export function isEnglishWord(token: string): boolean {
-  if (URL_RE.test(token)) return false;
-  if (EMAIL_RE.test(token)) return false;
-  if (PATH_RE.test(token)) return false;
-  if (SNAKE_RE.test(token)) return false;
-  if (CAMEL_RE.test(token)) return false;
-  if (PASCAL_RE.test(token)) return false;
-  if (DOLLAR_RE.test(token)) return false;
-  if (DIGIT_RE.test(token)) return false;
-  return WORD_RE.test(token);
 }
 
 /**
@@ -137,12 +104,10 @@ export function extractWordEntries(
   options?: ExtractOptions,
 ): ExtractResult {
   const excludeProperNouns = options?.excludeProperNouns ?? true;
-  const filterAbbreviations = options?.filterAbbreviations ?? true;
-  const filterContractions = options?.filterContractions ?? true;
-  const blacklist = options?.abbreviationBlacklist ?? ABBREVIATION_BLACKLIST;
+  // 收词过滤（缩合 + 黑名单双判据）收拢为 intake-filter seam（issue #54）。
+  const intake = createIntakeFilter(options);
   const normalized = normalizeText(text);
   const seen = new Set<string>();
-  const filtered = new Set<string>();
   const entries: WordEntry[] = [];
   for (const rawToken of tokenize(normalized)) {
     // 所有格剥离属归一化：剥 's 后按普通词条继续（dog's → dog、it's → it）。
@@ -150,20 +115,12 @@ export function extractWordEntries(
     if (token.length === 0) continue; // 裸 's 不产生词条
     if (!isEnglishWord(token)) continue;
     if (excludeProperNouns && isProperNoun(token)) continue;
-    // 缩合形式拦截：剥离所有格后仍含撇号（don't、aren't、o'clock），不展开成分词。
-    if (filterContractions && token.includes("'")) {
-      filtered.add(token.toLowerCase());
-      continue;
-    }
+    if (intake.rejectsContraction(token)) continue;
     const lemma = lemmatizeWord(token);
-    // 缩略词黑名单：词形还原后按小写 lemma 精确命中（docs → doc 命中）。
-    if (filterAbbreviations && blacklist.has(lemma)) {
-      filtered.add(lemma);
-      continue;
-    }
+    if (intake.rejectsAbbreviation(lemma)) continue;
     if (seen.has(lemma)) continue;
     seen.add(lemma);
-    entries.push({ lemma, flags: 0 });
+    entries.push(createWordEntry(lemma));
   }
-  return { entries, filteredCount: filtered.size };
+  return { entries, filteredCount: intake.filteredCount };
 }

@@ -60,7 +60,7 @@ async function processFile(filePath: string, outPath?: string): Promise<void> {
   // 读取文件内容（自动 strip BOM）
   const content = await readTextWithoutBom(filePath);
 
-  // 提取词条（core v3 管线：收词过滤默认全开，CLI 不暴露开关）
+  // 提取词条（开关语义见 core intake-filter；CLI 不暴露开关，恒默认全开）
   const { entries, filteredCount } = extractWordEntries(content);
 
   // 序列化为 CSV

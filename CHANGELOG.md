@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/
 
 ### 测试与工程
 
+- core deepening 重构（issue #54 Wave A）：收词过滤双判据收拢为 `intake-filter` module（`createIntakeFilter`——缩合 + 黑名单判据与 Set 计账单点化，extract 管线改经该 seam，两开关与黑名单注入语义不变）；`isEnglishWord` 连同全部形态正则迁至零依赖 `predicate.ts`，解 extract↔lemma import 环（两文件均改依赖 predicate，lemma←extract 方向保留）；barrel 收窄——撤下 `tokenize`、`isEnglishWord`、`normalizeText`、`isProperNoun`、`lemmatizeWord`、`ABBREVIATION_BLACKLIST`（内部实现不再上公开面，core 测试改直载 src）；词条产地共用 `createWordEntry`（extract/csv；merge 豁免——它不 trim 且须容忍未规范化输入词条）
 - 词典构建管线 `scripts/build-lexicon.mjs`（issue #48）：Norvig `count_1w.txt` top-20000 静态词典生成 `packages/core/src/lexicon.ts`（gzip 84KB）；N=20000 由实测排名夹逼（覆盖线 thrive@18549 < 20000 < 排杂线 thi@20241——N 过大会让 thi 这类伪词当词典词骗过守门）；构建期自检硬断言：issue 11 词全在典、thi/actife 必不在，任一不过拒绝生成产物
 - e2e harness 防睡眠加固:Playwright globalSetup 挂 `caffeinate -is -t 3600` 断言、globalTeardown 收割(darwin 专属,非 darwin 静默跳过)——本机 `pmset sleep 1` 曾让无人值守长跑 e2e 中途整机睡眠,墙钟超时在下次唤醒才被收割,伪装成「推送循环冻结在词间」的假回归(pmset 日志取证定案)
 - e2e push.spec 空轮用例竞态修复（#36 复核取证发现，与 SW 修复正交、HEAD 下同样存在）：第一段终态锚由 not-running（反向断言立即评估，confirm 后 popup 短暂仍显示旧 completed 态时会瞬间通过）改为「成功 2」确定锚——第二段若与第一轮并行发起，`start()` 去重会吞掉空轮、succeeded 永不重置

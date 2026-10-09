@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   extractWordEntries,
-  isEnglishWord,
   tokenize,
   type ExtractOptions,
-} from "../src/index.js";
+} from "../src/extract.js";
+import { isEnglishWord } from "../src/predicate.js";
 
 /** 空黑名单：机制测试与真实黑名单数据隔离（spec：不依赖真实数据文件）。 */
 const EMPTY_BLACKLIST = new Set<string>();
