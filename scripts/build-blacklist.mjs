@@ -51,6 +51,7 @@ import { writeFileSync, readFileSync, existsSync, mkdirSync, appendFileSync, sta
 import { resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
+import { loadCoreLemmatizer } from "./lib/load-core-lemmatizer.mjs";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const REPO_ROOT = resolve(__dirname, "..");
@@ -467,29 +468,13 @@ async function fetchWikitexts(titles) {
 
 // ---------- 层2：Norvig 高频守卫 ----------
 
-/**
- * 加载 packages/core 的真实 lemmatizer（TS 源，Node 原生 type-stripping）。
- * lemma.ts 内部以 "./extract.js" 风格引用同目录 TS 模块，Node 解析不了
- * .js→.ts 映射，故挂一个内联 data-URL loader 钩子做重写。
- * 守卫必须与管线使用同一还原器：否则 kids→kid、yes→ye、tips→tip 这类
- * 「表层高频在守卫内、还原形落守卫外」的词形缺口会漏杀（2026-09-10 实测）。
- */
-async function loadLemmatizer() {
-  const { registerHooks } = await import("node:module");
-  registerHooks({
-    resolve(specifier, context, next) {
-      if (
-        specifier.startsWith(".") &&
-        specifier.endsWith(".js") &&
-        (context.parentURL ?? "").includes("/packages/core/src/")
-      ) {
-        return next(specifier.slice(0, -3) + ".ts", context);
-      }
-      return next(specifier, context);
-    },
-  });
-  return import(resolve(CORE_SRC_DIR, "lemma.ts"));
-}
+// lemmatizer 经 scripts/lib/load-core-lemmatizer.mjs 稳定入口加载（issue #54
+// Wave F）：Node 原生加载 core TS 源所需的 resolve 钩子与加载后哨兵断言都
+// 收在该工具里——core 还原行为漂移时管线起步即失败，不再持有 core 内部
+// import 风格知识。守卫必须与管线使用同一还原器：否则 kids→kid、yes→ye、
+// tips→tip 这类「表层高频在守卫内、还原形落守卫外」的词形缺口会漏杀
+// （2026-09-10 实测）。
+const loadLemmatizer = () => loadCoreLemmatizer(CORE_SRC_DIR);
 
 /**
  * 解析 count_1w.txt：返回前 max(needTopN, 10000) 个 /^[a-z]+$/ 词（排名序）。
