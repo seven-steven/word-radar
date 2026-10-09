@@ -298,7 +298,7 @@ test.beforeEach(async ({ extContext }) => {
   pagesBefore = [...extContext.pages()];
 });
 
-test.afterEach(async ({ extContext, swConsole }, testInfo) => {
+test.afterEach(async ({ extContext, swConsole, popupUrl }, testInfo) => {
   // 跨用例清理（issue #27，#23 unroute 先例的同类推广）：持久 context 整套
   // run 共享，任何中途失败/跳过的用例都会把路由与页面泄漏给后续用例
   //（失败点漂移的放大器）。
@@ -316,6 +316,28 @@ test.afterEach(async ({ extContext, swConsole }, testInfo) => {
   const all = extContext.pages();
   const toClose = leftover.length === all.length && all.length > 0 ? leftover.slice(1) : leftover;
   await Promise.allSettled(toClose.map((p) => p.close()));
+
+  // 3) 清掉 SW 驻留的待确认批次（issue #54 Wave D 适配）：覆盖闸门判定依据
+  //    从 popup 影子记账（每用例重开 popup 即清零，感知不到残留）改为查询
+  //    SW 真相后，前序用例驻留的 collect/import 批会拦下后续上传用例（弹
+  //    覆盖确认条而非直接上传）——驻留批与路由/页面泄漏同类，用例收尾清。
+  //    走临时 popup 页发 DISCARD_COLLECTED（chrome.runtime 仅扩展页可用；
+  //    DISCARD 不持通道，sendMessage 的 promise 会以端口关闭收场，吞掉）。
+  try {
+    const cleanupPage = await extContext.newPage();
+    try {
+      await cleanupPage.goto(popupUrl);
+      await cleanupPage.evaluate(() => {
+        void chrome.runtime.sendMessage({ type: "DISCARD_COLLECTED" }).catch(() => undefined);
+      });
+      // 消息发出即入队，稍候 SW 处理完再关页，避免竞态丢消息
+      await cleanupPage.waitForTimeout(100);
+    } finally {
+      await cleanupPage.close();
+    }
+  } catch {
+    // 清理尽力而为：极端场景（context 已收尾）不拖垮用例判定
+  }
 
   if (testInfo.status !== testInfo.expectedStatus) {
     // 失败现场：SW console 随 testInfo 落进 outputDir（trace.zip 同目录）
