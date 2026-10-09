@@ -5,6 +5,7 @@ import {
   CONFIRM_COLLECTED,
   DISCARD_COLLECTED,
   EXPORT_CSV,
+  GET_BATCH_STATE,
   GET_COUNTS,
   GET_PUSH_STATUS,
   RETRY_PUSH,
@@ -380,5 +381,41 @@ describe("chromeSwChannel.discardCollected（原 discardCollected 语义迁移�
 
     rejectWith(new Error("Could not establish connection"));
     await expect(chromeSwChannel.discardCollected()).resolves.toBeUndefined();
+  });
+});
+
+describe("chromeSwChannel.getBatchState（issue #54 Wave D：覆盖闸门真相查询）", () => {
+  it("发 GET_BATCH_STATE 并透传三来源字面量", async () => {
+    resolveWith({ source: "collect" });
+    await expect(chromeSwChannel.getBatchState()).resolves.toBe("collect");
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    expect(sendMessage).toHaveBeenCalledWith({ type: GET_BATCH_STATE });
+
+    resolveWith({ source: "import" });
+    await expect(chromeSwChannel.getBatchState()).resolves.toBe("import");
+
+    resolveWith({ source: "upload" });
+    await expect(chromeSwChannel.getBatchState()).resolves.toBe("upload");
+  });
+
+  it("无驻留批（source=null）原样返回 null", async () => {
+    resolveWith({ source: null });
+    await expect(chromeSwChannel.getBatchState()).resolves.toBeNull();
+  });
+
+  it("畸形应答降级 null（缺 source 字段 / 未知来源值 / 非对象）", async () => {
+    resolveWith({});
+    await expect(chromeSwChannel.getBatchState()).resolves.toBeNull();
+
+    resolveWith({ source: "warp" });
+    await expect(chromeSwChannel.getBatchState()).resolves.toBeNull();
+
+    resolveWith("garbage");
+    await expect(chromeSwChannel.getBatchState()).resolves.toBeNull();
+  });
+
+  it("sendMessage 抛错降级 null，不传播（视同无驻留批，同影子失忆时代）", async () => {
+    rejectWith(new Error("Could not establish connection"));
+    await expect(chromeSwChannel.getBatchState()).resolves.toBeNull();
   });
 });

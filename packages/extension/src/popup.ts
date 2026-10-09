@@ -447,10 +447,6 @@ async function importCsvFromFile(): Promise<void> {
  * 拒绝即丢弃本次输入。
  */
 
-// 驻留批次来源（issue #41 覆盖语义）：renderConfirmPage 时记录，批次确认 /
-// 取消后清空。仅 popup 本地记忆——popup 重开后对 SW 内存中的旧批次不可知，
-// 视同无驻留批（与确认卡可见性同一记忆边界）。
-let lastBatchSource: "collect" | "import" | "upload" | null = null;
 
 /** 确认卡内容快照（code-review #22）：上传失败分支用它恢复被收起的卡片。 */
 interface ConfirmCardSnapshot {
@@ -473,18 +469,20 @@ let lastConfirmCard: ConfirmCardSnapshot | null = null;
 let isUploading = false;
 
 /**
+/**
  * 上传前的覆盖闸门（决议 A5；code-review P1 改 requestOverwriteGate 一次
  * 返回两值，消掉「gate 放行后、hideConfirmPage 前取值」的隐式时序陷阱）：
- * - 无驻留批（lastBatchSource === null，即 popup 认为没有驻留批）：放行；
+ * - 无驻留批（SW 真相 source=null）：放行；
  * - upload 驻留批：静默替换，replacing=true（确认卡内提示「已替换」）；
  * - collect/import 驻留批：allowed=false → 弹内联确认条。
- * 判定依据从确认卡可见性改为 lastBatchSource（驻留记忆本身）：collect /
- * 上传失败路径 hideConfirmPage 不清 lastBatchSource——SW 内存里的批次仍
- * 驻留，卡片可见性判定会静默越过 confirm。
+ * 判定依据从 popup 影子记账（popup 重开即失忆的本地记忆）改为查询
+ * SW 驻留真相（getBatchState，issue #54 Wave D）：popup 重开后对 collect/
+ * import 驻留批不再失忆，被新上传静默替换的豁口关闭（决议 A5 语义补全）。
  */
-function requestOverwriteGate(): { allowed: boolean; replacing: boolean } {
-  if (lastBatchSource === null) return { allowed: true, replacing: false };
-  if (lastBatchSource === "upload") return { allowed: true, replacing: true };
+async function requestOverwriteGate(): Promise<{ allowed: boolean; replacing: boolean }> {
+  const source = await chromeSwChannel.getBatchState();
+  if (source === null) return { allowed: true, replacing: false };
+  if (source === "upload") return { allowed: true, replacing: true };
   return { allowed: false, replacing: false };
 }
 
@@ -562,7 +560,7 @@ async function dispatchUpload(
   job: (replacing: boolean) => Promise<void>,
 ): Promise<void> {
   if (isUploading) return; // 上传进行中 / 确认条待决：防重入
-  const gate = requestOverwriteGate();
+  const gate = await requestOverwriteGate();
   if (!gate.allowed) {
     showOverwriteAsk(withUploadGuard(() => job(false)));
     return;
@@ -748,8 +746,8 @@ async function performUploadFromPaste(
     return;
   }
   // 文本通道（决议 A3）：与文件通道共用 runUploadBatch 尾段（code-review
-  // #20）——批次驻留后 renderConfirmPage 记录 lastBatchSource="upload"，
-  // 后续覆盖判定与拖放/点选一致
+  // #20）——批次驻留与来源都在 SW（pendingBatch module）；
+  // 后续覆盖判定查真相（getBatchState），与拖放/点选一致
   await runUploadBatch(
     () => chromeSwChannel.uploadText(snapshot.text),
     t("uploadCollectingPasted"),
@@ -800,12 +798,6 @@ function renderConfirmPage(
   meta?: string,
   filteredCount?: number,
 ): void {
-  lastBatchSource =
-    sourceKey === "sourceCollect"
-      ? "collect"
-      : sourceKey === "sourceImport"
-        ? "import"
-        : "upload";
   lastConfirmCard = { sourceKey, total, newCount, meta, filteredCount }; // #22 失败恢复用快照
   if (confirmSummaryEl) {
     const source = t(sourceKey);
@@ -875,7 +867,6 @@ async function confirmPush(): Promise<void> {
     if (outcome.ok) {
       // 批次已消费：驻留来源记忆与卡片快照一并清空（issue #41；code-review
       // #22——快照残留会让后续失败分支错误恢复已消费的旧卡）
-      lastBatchSource = null;
       lastConfirmCard = null;
       renderCounts(outcome.counts.total, outcome.counts.pending);
       renderStatusLine(statusEl, t("confirmedPushStarted"));
@@ -896,7 +887,6 @@ async function confirmPush(): Promise<void> {
 async function cancelCollect(): Promise<void> {
   await chromeSwChannel.discardCollected();
   // 批次已丢弃：驻留来源记忆与卡片快照一并清空（issue #41；code-review #22）
-  lastBatchSource = null;
   lastConfirmCard = null;
   hideConfirmPage();
   renderStatusLine(statusEl, t("cancelled"));

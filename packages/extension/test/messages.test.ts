@@ -5,6 +5,7 @@ import {
   CONFIRM_COLLECTED,
   DISCARD_COLLECTED,
   EXPORT_CSV,
+  GET_BATCH_STATE,
   GET_COUNTS,
   IMPORT_CSV,
   WORDS_COLLECTED,
@@ -21,6 +22,8 @@ import {
   isUploadFileMessage,
   isUploadTextMessage,
   isBatchPreview,
+  isGetBatchStateMessage,
+  isBatchStateResponse,
   UPLOAD_FILE,
   UPLOAD_TEXT,
   NO_SUFFIX,
@@ -331,5 +334,31 @@ describe("isUploadTextMessage（issue #42 粘贴文本）", () => {
     ).toBe(false);
     expect(isUploadTextMessage(null)).toBe(false);
     expect(isUploadTextMessage(UPLOAD_TEXT)).toBe(false);
+  });
+});
+
+describe("isGetBatchStateMessage / isBatchStateResponse（issue #54 Wave D）", () => {
+  it("守卫接受 GET_BATCH_STATE 消息", () => {
+    expect(isGetBatchStateMessage({ type: GET_BATCH_STATE })).toBe(true);
+  });
+
+  it("守卫拒绝非对象与错误 type", () => {
+    expect(isGetBatchStateMessage(null)).toBe(false);
+    expect(isGetBatchStateMessage({ type: "GET_COUNTS" })).toBe(false);
+    expect(isGetBatchStateMessage({ type: 42 })).toBe(false);
+  });
+
+  it("应答守卫接受三来源字面量与 null", () => {
+    expect(isBatchStateResponse({ source: "collect" })).toBe(true);
+    expect(isBatchStateResponse({ source: "import" })).toBe(true);
+    expect(isBatchStateResponse({ source: "upload" })).toBe(true);
+    expect(isBatchStateResponse({ source: null })).toBe(true);
+  });
+
+  it("应答守卫拒绝畸形 source（未知值 / 缺字段 / 非对象）", () => {
+    expect(isBatchStateResponse({ source: "warp" })).toBe(false);
+    expect(isBatchStateResponse({})).toBe(false);
+    expect(isBatchStateResponse(null)).toBe(false);
+    expect(isBatchStateResponse("garbage")).toBe(false);
   });
 });

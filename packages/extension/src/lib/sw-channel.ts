@@ -1,4 +1,5 @@
 import {
+  GET_BATCH_STATE,
   GET_COUNTS,
   CHECK_LOGIN,
   CONFIRM_COLLECTED,
@@ -10,9 +11,11 @@ import {
   UPLOAD_FILE,
   UPLOAD_TEXT,
   isBatchPreview,
+  isBatchStateResponse,
   isCounts,
   isExportCsvResponse,
   isPushStatus,
+  type BatchSource,
   type BatchPreview,
   type CheckLoginResponse,
   type ConfirmCollectedMessage,
@@ -20,6 +23,7 @@ import {
   type DiscardCollectedMessage,
   type PushStatus,
   type ExportCsvMessage,
+  type GetBatchStateMessage,
   type GetCountsMessage,
   type ImportCsvMessage,
   type CheckLoginMessage,
@@ -78,6 +82,13 @@ export interface SwChannel {
   checkLogin(): Promise<{ loggedIn: boolean }>;
   /** SW 推送轮快照；畸形应答 / 抛错 → null（popup 不渲染）。 */
   getPushStatus(): Promise<PushStatus | null>;
+  /**
+   * 驻留批来源真相查询（issue #54 Wave D，覆盖闸门判定依据）：
+   * - SW 报 {source:"collect"|"import"|"upload"|null} → 原样返回
+   * - 畸形应答 / sendMessage 抛错（SW 未启动等）→ null（视同无驻留批，
+   *   与影子失忆时代的行为一致）
+   */
+  getBatchState(): Promise<BatchSource | null>;
   /** 触发一轮推送；应答体为空，拒绝原样传播（popup 侧 try/finally 自决）。 */
   retryPush(): Promise<void>;
   /**
@@ -138,6 +149,18 @@ export const chromeSwChannel: SwChannel = {
         type: GET_PUSH_STATUS,
       });
       return isPushStatus(raw) ? raw : null;
+    } catch {
+      return null;
+    }
+  },
+
+  async getBatchState() {
+    const message: GetBatchStateMessage = { type: GET_BATCH_STATE };
+    try {
+      const raw: unknown = await chrome.runtime.sendMessage(message);
+      // 守卫已校验 source ∈ {collect,import,upload,null}；畸形（缺字段 /
+      // 未知值）与抛错一律降级 null = 无驻留批
+      return isBatchStateResponse(raw) ? raw.source : null;
     } catch {
       return null;
     }

@@ -10,6 +10,7 @@ import {
   DISCARD_COLLECTED,
   EXPORT_CSV,
   GET_COUNTS,
+  GET_BATCH_STATE,
   IMPORT_CSV,
   RETRY_PUSH,
   GET_PUSH_STATUS,
@@ -1091,5 +1092,45 @@ describe("createBackgroundListener 推送自动恢复（issue #26 resumeOnStart�
 
     expect(repository.listPending).not.toHaveBeenCalled();
     expect(push.start).not.toHaveBeenCalled();
+  });
+});
+
+describe("createBackgroundListener GET_BATCH_STATE（issue #54 Wave D）", () => {
+  it("无驻留批 → 同步应答 {source:null}；不持有通道", () => {
+    const repository = fakeRepository();
+    const listener = createBackgroundListener({ repository });
+    const sendResponse = vi.fn();
+
+    const keepChannel = listener({ type: GET_BATCH_STATE }, {}, sendResponse);
+
+    expect(keepChannel).toBe(false);
+    expect(sendResponse).toHaveBeenCalledTimes(1);
+    expect(sendResponse).toHaveBeenCalledWith({ source: null });
+  });
+
+  it("采集驻留后 → 应答 {source:\"collect\"}；DISCARD 后回到 null（badge 联动由 onChange 驱动）", async () => {
+    const repository = fakeRepository();
+    const badge = fakeActionBadge();
+    const listener = createBackgroundListener({ repository, actionBadge: badge });
+    const sendResponse = vi.fn();
+
+    listener(
+      { type: WORDS_COLLECTED, entries: [{ lemma: "run", flags: 0 }], filteredCount: 0 },
+      {},
+      vi.fn(),
+    );
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+    const duringPending = vi.fn();
+    listener({ type: GET_BATCH_STATE }, {}, duringPending);
+    expect(duringPending).toHaveBeenCalledWith({ source: "collect" });
+    // badge "?" 来自批次 set 的 onChange 联动（分支内无手工 renderBadge）
+    expect(badge.set).toHaveBeenLastCalledWith("?", "#888888");
+
+    listener({ type: DISCARD_COLLECTED }, {}, vi.fn());
+    const afterDiscard = vi.fn();
+    listener({ type: GET_BATCH_STATE }, {}, afterDiscard);
+    expect(afterDiscard).toHaveBeenCalledWith({ source: null });
+    expect(badge.set).toHaveBeenLastCalledWith(null);
   });
 });

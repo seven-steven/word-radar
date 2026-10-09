@@ -11,6 +11,7 @@ import {
   isConfirmCollectedMessage,
   isDiscardCollectedMessage,
   isExportCsvMessage,
+  isGetBatchStateMessage,
   isGetCountsMessage,
   isImportCsvMessage,
   isUploadFileMessage,
@@ -21,6 +22,7 @@ import {
   suffixOf,
   UPLOAD_TEXT_SUFFIXES,
   type BatchPreview,
+  type BatchStateResponse,
   type CheckLoginResponse,
   type Counts,
   type ExportCsvResponse,
@@ -31,6 +33,8 @@ import {
 } from "./messages.js";
 import { createBbdcClient, type BbdcClient } from "./bbdc-client.js";
 import { chromeActionBadge, composeBadge } from "./action-badge.js";
+import { createPendingBatch, type BatchSource } from "./pending-batch.js";
+import { admitPushRound } from "./push-trigger.js";
 import { PushCoordinator } from "./push-coordinator.js";
 import { createErrorLogger, type ErrorLogger } from "./error-log.js";
 import { getIntakeFilterSettings, type IntakeFilterSettings } from "./settings.js";
@@ -143,26 +147,70 @@ export function createBackgroundListener(deps: BackgroundListenerDeps) {
     onError: (event) => errorLogger.log(event),
   });
   /**
-   * 待确认批次：只存活于内存（issue #22）。下一次 WORDS_COLLECTED 覆盖；
-   * DISCARD_COLLECTED / 确认后清空；SW 被杀即丢弃——永不持久化。
+   * 待确认批次（issue #54 Wave D module 化）：只存活于 SW 内存（issue #22），
+   * SW 被杀即丢弃——永不持久化；单驻留（下一次采集/导入/上传覆盖旧批）；
+   * peek 只读不消费，确认合并成功才 clear（失败保留重试）。驻留 / 清空的
+   * badge 联动由 onChange 订阅统一驱动，生产分支不再手工 renderBadge。
    */
-  let pendingBatch: WordEntry[] | null = null;
+  const pendingBatch = createPendingBatch();
 
   /** 按优先级合成并写入 badge：推送 x/y > 暂停/完成回执 > 待确认 ?。 */
   const renderBadge = (): void => {
     const spec = composeBadge({
       push: pushCoordinator.getStatus(),
-      hasPendingBatch: pendingBatch !== null,
+      hasPendingBatch: pendingBatch.source() !== null,
     });
     // badge 写失败不阻塞消息处理（SW 重启后 chrome.action 短暂不可用等）
     void (spec ? actionBadge.set(spec.text, spec.color) : actionBadge.set(null))
       .catch(() => undefined);
   };
 
-  /** 合并入库后触发一轮推送（确认即推送是唯一路径，无自动推送开关）。 */
-  const startPushRound = (): void => {
-    void pushCoordinator.start();
-  };
+  // badge 联动单一挂点（issue #54 Wave D）：批次 set / clear 自动重算。
+  pendingBatch.onChange(renderBadge);
+
+  /** 生产分支工作结果的统一形状：成功驻留批 + 预览，失败为已格式化错误。 */
+  type ResideOutcome =
+    | { entries: WordEntry[]; preview: BatchPreview }
+    | { ok: false; error: string };
+
+  /**
+   * 四个生产分支（采集/导入/上传文件/上传文本）共用的驻留尾段（issue #54
+   * Wave D）：工作 promise 落定后，「驻留 + badge 联动 + 预览应答」只经
+   * pendingBatch module 一处（badge 重算由 onChange 订阅自动触发，分支内
+   * 不再手工 renderBadge）。
+   * - 结果 {ok:false}（解析/校验拒绝，零写入）：错误写环形缓冲 + 原样应答；
+   * - 管线异常（reject）：错误写环形缓冲（stage/文案随分支）+ errback 字面量；
+   * - 采集分支 stage=null：预览失败无更多细节可报、不写日志（历史语义保持）。
+   */
+  function resideAndRespond(
+    work: Promise<ResideOutcome>,
+    branch: {
+      source: BatchSource;
+      stage: "import" | "upload" | null;
+      failText: (error: unknown) => string;
+      errback: string;
+    },
+    respond: (response: BatchPreview | { ok: false; error: string }) => void,
+  ): void {
+    void work
+      .then((result) => {
+        if ("entries" in result) {
+          pendingBatch.set(result.entries, branch.source);
+          respond(result.preview);
+          return;
+        }
+        if (branch.stage !== null) {
+          errorLogger.log({ stage: branch.stage, summary: result.error });
+        }
+        respond(result);
+      }, (error: unknown) => {
+        if (branch.stage !== null) {
+          errorLogger.log({ stage: branch.stage, summary: branch.failText(error) });
+        }
+        respond({ ok: false, error: branch.errback });
+      })
+      .catch(() => undefined);
+  }
 
   // SW 冷启动推送自动恢复（issue #26）：待推池非空且无轮在跑 → 自动起一轮。
   if (deps.resumeOnStart === true) {
@@ -180,6 +228,7 @@ export function createBackgroundListener(deps: BackgroundListenerDeps) {
         | PushStatus
         | ExportCsvResponse
         | ImportCsvResponse
+        | BatchStateResponse
         | { ok: false; error: string },
     ) => void,
   ): boolean => {
@@ -188,35 +237,35 @@ export function createBackgroundListener(deps: BackgroundListenerDeps) {
       // 持有通道保证 content 侧应答在预览就绪后才返回（popup 确认页拿到
       // 的 total/newCount 一定与本批次一致）。filteredCount 在提取发生地
       // （content script）产生，SW 不消费、只随预览原样回传（issue #43）。
-      void handleWordsCollected(message, deps.repository)
-        .then((preview) => {
-          pendingBatch = message.entries;
-          renderBadge(); // 待确认批次 → badge "?" 提示（issue #23）
-          sendResponse(preview);
-        }, () => sendResponse({ ok: false, error: "preview-failed" }))
-        .catch(() => undefined);
+      resideAndRespond(
+        handleWordsCollected(message, deps.repository).then(
+          (preview): ResideOutcome => ({ entries: message.entries, preview }),
+        ),
+        { source: "collect", stage: null, failText: () => "", errback: "preview-failed" },
+        sendResponse,
+      );
       return true;
     }
     if (isConfirmCollectedMessage(message)) {
-      const batch = pendingBatch;
+      const batch = pendingBatch.peek();
       if (batch === null) {
         sendResponse({ ok: false, error: "no-pending-batch" });
         return false;
       }
       // 不在此清空批次（review St-1）：mergeCollected 失败时批次必须保留，
-      // 用户重按「确认推送」即可重试；仅在合并成功后清空。
-      void handleConfirm(batch, deps.repository)
+      // 用户重按「确认推送」即可重试；仅在合并成功后 clear。
+      void handleConfirm(batch.entries, deps.repository)
         .then((counts) => {
-          pendingBatch = null; // 合并成功，批次生命周期结束
+          pendingBatch.clear(); // 合并成功，批次生命周期结束（badge 由 onChange 联动）
           sendResponse(counts);
-          // 确认即推送：合并完成后非阻塞触发一轮推送全部待推（含 CSV 存量）
-          startPushRound();
-          renderBadge(); // 批次清空：badge 转入推送 x/y 或回执（issue #23）
+          // 确认即推送（issue #22 主路径）：合并完成后非阻塞起一轮推送
+          // 全部待推（含 CSV 导入的存量）——准入策略见 lib/push-trigger.ts
+          void admitPushRound("confirm", { repository: deps.repository, pushCoordinator });
         }, (error: unknown) => {
           // 确认失败（issue #25）：批次保留 + 错误写环形缓冲
           errorLogger.log({
             stage: "confirm",
-            summary: t2("errorConfirmMergeFailed", batch.length, errorSummary(error)),
+            summary: t2("errorConfirmMergeFailed", batch.entries.length, errorSummary(error)),
           });
           sendResponse({ ok: false, error: "confirm-failed" });
         })
@@ -224,8 +273,12 @@ export function createBackgroundListener(deps: BackgroundListenerDeps) {
       return true;
     }
     if (isDiscardCollectedMessage(message)) {
-      pendingBatch = null;
-      renderBadge(); // 批次丢弃：撤销 "?" 提示
+      pendingBatch.clear(); // 批次丢弃：撤销 "?" 提示（badge 由 onChange 联动）
+      return false;
+    }
+    if (isGetBatchStateMessage(message)) {
+      // 覆盖闸门的真相查询（issue #54 Wave D）：popup 不再养影子记账
+      sendResponse({ source: pendingBatch.source() });
       return false;
     }
     if (isGetCountsMessage(message)) {
@@ -264,22 +317,16 @@ export function createBackgroundListener(deps: BackgroundListenerDeps) {
     if (isImportCsvMessage(message)) {
       // CSV 导入同过确认闸门（review S-3）：解析 + 新词 diff → 驻留待确认
       // 批次 → 应答预览。不写库、不推送；入库与推送仅由确认动作触发。
-      void handleImportCsv(message.csvText, message.fileName, deps.repository)
-        .then((result) => {
-          if ("entries" in result) {
-            pendingBatch = result.entries;
-            renderBadge(); // 导入驻留待确认批次 → badge "?"（issue #23）
-            sendResponse(result.preview);
-          } else {
-            // 解析失败（issue #25）：零写入 + 错误写环形缓冲
-            errorLogger.log({ stage: "import", summary: result.error });
-            sendResponse(result);
-          }
-        }, (error: unknown) => {
-          errorLogger.log({ stage: "import", summary: t1("errorImportFailed", errorSummary(error)) });
-          sendResponse({ ok: false, error: "import-failed" });
-        })
-        .catch(() => undefined);
+      resideAndRespond(
+        handleImportCsv(message.csvText, message.fileName, deps.repository),
+        {
+          source: "import",
+          stage: "import",
+          failText: (error) => t1("errorImportFailed", errorSummary(error)),
+          errback: "import-failed",
+        },
+        sendResponse,
+      );
       return true;
     }
     if (isUploadFileMessage(message)) {
@@ -289,26 +336,20 @@ export function createBackgroundListener(deps: BackgroundListenerDeps) {
       // html/xml 已由 popup 侧预处理为纯文本，这里收到的 text 一律当纯文本。
       // 与 IMPORT_CSV 的区别：这是自然语言文本，不是 lemma,flags 结构化词表。
       // 提取前读收词过滤开关（issue #43），与网页采集同一判据。
-      void handleUploadFile(message.files, {
-        repository: deps.repository,
-        extract: deps.extract ?? extractWordEntries,
-        getFilterSettings,
-      })
-        .then((result) => {
-          if ("entries" in result) {
-            pendingBatch = result.entries;
-            renderBadge(); // 上传驻留待确认批次 → badge "?"（issue #23）
-            sendResponse(result.preview);
-          } else {
-            // 非法文件（issue #25）：零写入 + 错误写环形缓冲（stage=upload）
-            errorLogger.log({ stage: "upload", summary: result.error });
-            sendResponse(result);
-          }
-        }, (error: unknown) => {
-          errorLogger.log({ stage: "upload", summary: t1("errorUploadFailed", errorSummary(error)) });
-          sendResponse({ ok: false, error: "upload-failed" });
-        })
-        .catch(() => undefined);
+      resideAndRespond(
+        handleUploadFile(message.files, {
+          repository: deps.repository,
+          extract: deps.extract ?? extractWordEntries,
+          getFilterSettings,
+        }),
+        {
+          source: "upload",
+          stage: "upload",
+          failText: (error) => t1("errorUploadFailed", errorSummary(error)),
+          errback: "upload-failed",
+        },
+        sendResponse,
+      );
       return true;
     }
     if (isUploadTextMessage(message)) {
@@ -317,27 +358,20 @@ export function createBackgroundListener(deps: BackgroundListenerDeps) {
       // 不推送，确认动作是唯一入库路径）；驻留即覆盖旧批次。错误日志与
       // UPLOAD_FILE 同 stage=upload（同属上传手势）。提取前读收词过滤开关
       // （issue #43），与网页采集同一判据。
-      void handleUploadText(message.text, {
-        repository: deps.repository,
-        extract: deps.extract ?? extractWordEntries,
-        getFilterSettings,
-      })
-        .then((result) => {
-          if ("entries" in result) {
-            pendingBatch = result.entries;
-            renderBadge(); // 上传驻留待确认批次 → badge "?"（issue #23）
-            sendResponse(result.preview);
-          } else {
-            // 空文本等防御性拒绝（sweeper #26）：零驻留 + 错误写环形缓冲
-            // （stage=upload，与 UPLOAD_FILE 同手势）
-            errorLogger.log({ stage: "upload", summary: result.error });
-            sendResponse(result);
-          }
-        }, (error: unknown) => {
-          errorLogger.log({ stage: "upload", summary: t1("errorUploadFailed", errorSummary(error)) });
-          sendResponse({ ok: false, error: "upload-failed" });
-        })
-        .catch(() => undefined);
+      resideAndRespond(
+        handleUploadText(message.text, {
+          repository: deps.repository,
+          extract: deps.extract ?? extractWordEntries,
+          getFilterSettings,
+        }),
+        {
+          source: "upload",
+          stage: "upload",
+          failText: (error) => t1("errorUploadFailed", errorSummary(error)),
+          errback: "upload-failed",
+        },
+        sendResponse,
+      );
       return true;
     }
     return false;
@@ -513,13 +547,9 @@ async function handleCheckLogin(
   try {
     const result = await bbdcClient.checkLogin();
     if (result.loggedIn) {
-      // 「确认即推送是唯一路径」指 采集/导入→推送 这条主路径（issue #22）；
-      // 这里是登录恢复后对存量待推的重推，属于允许的恢复路径，不是自动推送开关。
-      // issue #36：待推池为空时跳过整轮——零词轮会空转出 phase=completed 的
-      // 「推送完成 0/0/0」噪音回执。查库失败同样跳过（与 resumePendingPush
-      // 同语义，下次 SW 唤醒再试）。
-      const pending = await repository.listPending().catch(() => undefined);
-      if (pending && pending.length > 0) void pushCoordinator.start();
+      // 登录恢复轮的准入策略（空池跳过 / 查库失败跳过）已代码化在
+      // lib/push-trigger.ts——「确认即推送是唯一路径」的不变量锚点也在那里。
+      await admitPushRound("login-recovery", { repository, pushCoordinator });
       return { loggedIn: true };
     }
     return { loggedIn: false };
@@ -539,10 +569,7 @@ async function handleCheckLogin(
 export async function resumePendingPush(
   deps: { repository: Pick<BackgroundRepository, "listPending">; pushCoordinator: PushCoordinator },
 ): Promise<void> {
-  const pending = await deps.repository.listPending().catch(() => undefined);
-  if (!pending || pending.length === 0) return;
-  if (deps.pushCoordinator.getStatus().phase !== "idle") return;
-  void deps.pushCoordinator.start();
+  await admitPushRound("cold-start", deps);
 }
 
 // ---------------------------------------------------------------------------

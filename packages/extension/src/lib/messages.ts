@@ -3,6 +3,15 @@ import type { Counts } from "./word-repository.js";
 // 类型依赖单向：messages ← push-coordinator（生产者），无环
 // （push-coordinator 不 import messages，已核）。
 import type { PushProgress as PushStatus } from "./push-coordinator.js";
+// 类型依赖单向：messages ← pending-batch（生产者），无环
+// （pending-batch 只 import @word-radar/core 类型，issue #54 Wave D）。
+import type { BatchSource } from "./pending-batch.js";
+
+/**
+ * 驻留批来源。唯一定义在 pending-batch（领域 module），此处 re-export 供
+ * 消息协议使用方免于直连批次模块（同 Counts / PushStatus 先例）。
+ */
+export type { BatchSource };
 
 /**
  * 词库计数。唯一定义在 word-repository（数据层），此处 re-export 供
@@ -34,6 +43,8 @@ export function isCounts(value: unknown): value is Counts {
  *   文件批整批算一次采集，同过确认闸门；html/xml 由 popup 侧预处理为纯文本）
  * - popup → background（issue #42 v1.1-T5）：`UPLOAD_TEXT`（画布粘贴的纯文本
  *   直进提取管线——无文件名/后缀概念、不过白名单，同过确认闸门）
+ * - popup → background（issue #54 Wave D）：`GET_BATCH_STATE`（查询 SW 内存
+ *   中驻留待确认批次的来源——覆盖闸门的真相查询，popup 不再养影子记忆）
  *
  * background 是 WORDS_COLLECTED / GET_COUNTS / CONFIRM_COLLECTED /
  * DISCARD_COLLECTED / EXPORT_CSV / IMPORT_CSV / UPLOAD_FILE / UPLOAD_TEXT 的
@@ -53,6 +64,7 @@ export const EXPORT_CSV = "EXPORT_CSV" as const;
 export const IMPORT_CSV = "IMPORT_CSV" as const;
 export const UPLOAD_FILE = "UPLOAD_FILE" as const;
 export const UPLOAD_TEXT = "UPLOAD_TEXT" as const;
+export const GET_BATCH_STATE = "GET_BATCH_STATE" as const;
 
 /**
  * 上传文件采集允许的纯文本后缀（issue #24 验收修订放宽；issue #38 v1.1-T1
@@ -257,6 +269,19 @@ export interface UploadTextMessage {
   text: string;
 }
 
+/**
+ * popup → background（issue #54 Wave D）：查询 SW 内存中驻留待确认批次的
+ * 来源（无驻留批 = null）。这是 popup 覆盖闸门的真相查询——此前 popup 养
+ * lastBatchSource 影子记账，重开弹窗即失忆，collect/import 驻留批被新上传
+ * 静默替换（决议 A5 豁口）。应答：`BatchStateResponse`。
+ */
+export interface GetBatchStateMessage {
+  type: typeof GET_BATCH_STATE;
+}
+
+/** background → popup 的批次状态应答：source 为三来源之一，无驻留批为 null。 */
+export type BatchStateResponse = { source: BatchSource | null };
+
 /** service worker → popup 的导出应答。 */
 export type ExportCsvResponse =
   | { ok: true; csv: string }
@@ -288,7 +313,8 @@ export type ExtensionMessage =
   | ExportCsvMessage
   | ImportCsvMessage
   | UploadFileMessage
-  | UploadTextMessage;
+  | UploadTextMessage
+  | GetBatchStateMessage;
 
 /**
  * content → popup 的同步应答：成功携带确认页预览（总数 + 新词数），
@@ -401,6 +427,26 @@ export function isUploadTextMessage(
     isObject(value) &&
     value.type === UPLOAD_TEXT &&
     typeof value.text === "string"
+  );
+}
+
+export function isGetBatchStateMessage(
+  value: unknown,
+): value is GetBatchStateMessage {
+  return isObject(value) && value.type === GET_BATCH_STATE;
+}
+
+/**
+ * BatchStateResponse 守卫：source 必须为三来源字面量之一或 null
+ * （畸形一律拒绝，由 sw-channel 降级为 null = 无驻留批）。
+ */
+export function isBatchStateResponse(value: unknown): value is BatchStateResponse {
+  if (!isObject(value)) return false;
+  return (
+    value.source === null ||
+    value.source === "collect" ||
+    value.source === "import" ||
+    value.source === "upload"
   );
 }
 
