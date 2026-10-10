@@ -83,7 +83,7 @@ test("cancel discards the pending batch: counts unchanged, nothing merged", asyn
   // drain）：本用例的「取消零副作用」断言要求干净起点——池里有遗留词的话，
   // boot CHECK_LOGIN 的 login-recovery 恢复轮（startIfIdle）会在基线之后
   // 推走它们，污染「取消不触发任何推送」断言。#57 后「非 running」也不再
-  // 等价于「推送结束」（completed 后 ~600ms 可观测窗口内可能有补轮排队），
+  // 等价于「推送结束」（completed 后 ~1s 可观测窗口内可能有补轮排队），
   // 等相位不如直接排空：drainPendingPool 收敛到「池空 + 无轮」。
   await drainPendingPool(popup);
   // 等一次稳定计数（boot 不自动采集——issue #39，计数即词库现状）

@@ -20,9 +20,10 @@ import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 
 const GLOBAL_KEY = "__wordRadarE2eCaffeinate__";
 
-/** 断言续期检查间隔：远小于 `-t 3600` 的 1h 泄漏兜底，长 run 中最多暴露
- *  30 分钟无保护窗口的边缘（恰好检查点前后到期）。 */
-const RESPAWN_INTERVAL_MS = 30 * 60 * 1000;
+/** 断言续期检查间隔：远小于 `-t 3600` 的 1h 泄漏兜底。30 分钟间隔在最坏
+ *  相位（检查点恰逢到期前一瞬）会留 30 分钟无保护窗口——5 分钟把边界裸奔
+ *  压到可忽略，检查成本是一次 exitCode 读数。 */
+const RESPAWN_INTERVAL_MS = 5 * 60 * 1000;
 
 /** globalThis 上挂的守护句柄（teardown 收尾用）。 */
 interface CaffeinateGuard {

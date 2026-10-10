@@ -149,8 +149,12 @@ describe("issue #55 lemma 候选政策（双上下文并发 + 词典内输出优
   });
 
   it("平局集钉死：动词/名词词元都在词典的判给名词（ADR-0003）", () => {
-    // lives(live/life)、leaves(leave/leaf) 双词元在典；halves/shelves/calves
-    // 的动词形（halve/shelve/calve）不在典，名词词元直接胜出。
+    // 机制归因（对抗审查勘误）：leaves 是真平局——名词 toSingular 输出 leaf
+    // （在典）、动词输出 leave（在典），chooseLexicalLemma 名词优先选出 leaf；
+    // lives 的 toSingular 失误输出 live（撞形），life 由 IRREGULAR_VES_NOUNS
+    // 表前置兑现（去表条目则平局政策产出 live）——撞形保障靠表不靠政策。
+    // halves/shelves/calves 的动词形（halve/shelve/calve）不在典，名词词元
+    // 直接胜出。
     expect(lemmatizeWord("lives")).toBe("life");
     expect(lemmatizeWord("leaves")).toBe("leaf");
     expect(lemmatizeWord("halves")).toBe("half");
@@ -185,6 +189,28 @@ describe("issue #55 lemma 候选政策（双上下文并发 + 词典内输出优
     expect(lemmatizeWord("wives")).toBe("wife");
     expect(lemmatizeWord("elves")).toBe("elf");
     expect(lemmatizeWord("dwarves")).toBe("dwarf");
+  });
+
+  it("lies/dies 不被名词侧伪造短词元吞并（对抗审查发现的 ly/dy 噪声词元回归）", () => {
+    // compromise 名词上下文对 lies/dies 伪造输出 ly/dy（toSingular 失误），
+    // 而 ly/dy 恰在词典（Norvig 噪声）且命中缩略词黑名单——名词优先平局会让
+    // 伪词元压过在典动词词元 lie/die，extract 管线下词条更是被黑名单静默
+    // 吞掉。与 goes/does 同型：高频不规则动词三单显式进表前置拦截。
+    expect(lemmatizeWord("lies")).toBe("lie");
+    expect(lemmatizeWord("dies")).toBe("die");
+    // 管线级：词条不消失（ly/dy 命中黑名单的静默拦截不可达）
+    const out = extractWordEntries("the truth lies here and hope dies last");
+    const lemmasOut = out.entries.map((e) => e.lemma);
+    expect(lemmasOut).toContain("lie");
+    expect(lemmasOut).toContain("die");
+  });
+
+  it("-ies 家族其余词名词路径输出正确词元（ties→tie、cries→cry、skies→sky）", () => {
+    expect(lemmatizeWord("ties")).toBe("tie");
+    expect(lemmatizeWord("cries")).toBe("cry");
+    expect(lemmatizeWord("flies")).toBe("fly");
+    expect(lemmatizeWord("skies")).toBe("sky");
+    expect(lemmatizeWord("stories")).toBe("story");
   });
 });
 

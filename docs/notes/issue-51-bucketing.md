@@ -16,23 +16,31 @@
 
 ## 结果（570 词）
 
-| 桶 | 词数 | 占比 |
-|---|---|---|
-| true-clip（真缩略） | 338 | 59.3% |
-| false-kill（有独立词义） | 211 | 37.0% |
-| unsure（存疑，待人工核） | 21 | 3.7% |
+| 桶                       | 词数 | 占比  |
+| ------------------------ | ---- | ----- |
+| true-clip（真缩略）      | 338  | 59.3% |
+| false-kill（有独立词义） | 211  | 37.0% |
+| unsure（存疑，待人工核） | 21   | 3.7%  |
 
 ### lemma 修正后的用户可见面
 
-| 分类 | 词数 | 占 570 | 说明 |
-|---|---|---|---|
-| **用户可见真误杀** | **187** | **32.8%** | lemma 命中：sad/silent/egg/powder/wash/juice/steam/damn/mars/rod/eve/witch/lamb/frog/spice/ant/nut/pig/moss/mug… |
-| 有效拦截（真 clipping） | 316 | 55.4% | hrs/rpm/fbi/nato/ssl/dns… |
-| 死条目（false-kill 侧） | 24 | 4.2% | platforms/caps/fed/puts/chose 等 复数·屈折形，lemma 还原原型后放行（platform/cap/feed/put/choose 不在黑名单），**不构成误杀** |
-| 死条目（true-clip 侧） | 24 | 4.2% | ns/tvs/cms/bios/mods 等复数缩写，lemma 化掉 s 后单数形不在黑名单，纯体积冗余 |
-| 存疑 | 21 | 3.7% | 待人工核 |
+| 分类                    | 词数    | 占 570    | 说明                                                                                                                          |
+| ----------------------- | ------- | --------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| **用户可见真误杀**      | **187** | **32.8%** | lemma 命中：sad/silent/egg/powder/wash/juice/steam/damn/mars/rod/eve/witch/lamb/frog/spice/ant/nut/pig/moss/mug…              |
+| 有效拦截（真 clipping） | 316     | 55.4%     | hrs/rpm/fbi/nato/ssl/dns…                                                                                                     |
+| 死条目（false-kill 侧） | 24      | 4.2%      | platforms/caps/fed/puts/chose 等 复数·屈折形，lemma 还原原型后放行（platform/cap/feed/put/choose 不在黑名单），**不构成误杀** |
+| 死条目（true-clip 侧）  | 24      | 4.2%      | ns/tvs/cms/bios/mods 等复数缩写，lemma 化掉 s 后单数形不在黑名单，纯体积冗余                                                  |
+| 存疑                    | 21      | 3.7%      | 待人工核                                                                                                                      |
 
 **核心决策数字：守卫外碰撞段用户可见误杀 187/570 = 32.8%**，有效拦截 : 真误杀 ≈ 1.7 : 1——远超「该收的比误杀的多」直觉的隐含预期，数据显著指向「值得修」。最终「修 or 接受」由人工决策（规格：不预埋阈值）。
+
+> **账目勘误（2026-10-10 完结审计发现）**：上表五行合计 572 ≠ 570（+2）。
+> 用户可见真误杀 187 = false-kill 桶 211 − 死条目 24，独立自洽；不平出在
+> true-clip 侧（316 + 24 = 340 ≠ 桶 338）——最可能是「有效拦截 316」的
+> 口径混入了 2 个 570 集合之外的词（md/doc 豁免词条最可疑），或死条目
+> 计数差 2。核心决策数字（187 / 32.8% / ≈1.7:1）不受影响。下次黑名单
+> 再生成时以 `scripts/audit-blacklist-collisions.mjs` 重算消解（本次
+> Norvig 缓存已失，无法离线复核）。
 
 ## 哨兵校准过程（11/13 → 重审 → 13/13）
 

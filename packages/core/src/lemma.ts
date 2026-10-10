@@ -19,6 +19,9 @@ const IRREGULAR_VERBS: Readonly<Record<string, string>> = {
   has: "have", had: "have", does: "do", did: "do", done: "do",
   // go / come
   go: "go", goes: "go", went: "go", gone: "go", came: "come", come: "come",
+  // lie / die（对抗审查补：lies/dies 的名词侧 toSingular 伪造 ly/dy 且恰在
+  // 词典，名词优先平局会让伪词元吞并在典动词词元——三单进表前置拦截）
+  lies: "lie", dies: "die",
   // take / give / get
   took: "take", taken: "take", gave: "give", given: "give",
   got: "get", gotten: "get",

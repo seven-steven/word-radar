@@ -51,10 +51,10 @@ export async function waitCountsLoaded(
  * 未排空则轮内重开 popup（reload 后 boot 重拉计数/推送状态，与驻页轮询
  * 等价）+ 固定 3s 循环保底。结束时断言池已清、无推送在跑。
  *
- * #57 后「非 running」不再等价于「推送结束」：轮 completed 后 ~600ms 可
+ * #57 后「非 running」不再等价于「推送结束」：轮 completed 后 ~1s 可
  * 观测窗口内可能有补轮在排队（BUSY 期确认的新词靠它推走）。在瞬态里点
  * retry-push 会撞 hidden 按钮挂死（completed 无失败时按钮不显示）——先
- * 穿窗（1s > 600ms）让补轮显形，仍无推进再手动重试；retry 不可见时仅
+ * 穿窗（1.5s > 1s 窗口）让补轮显形，仍无推进再手动重试；retry 不可见时仅
  * reload，boot 的 check-login 恢复路径（startIfIdle 查池非空即起轮）兜底。
  */
 export async function drainPendingPool(page: Page): Promise<void> {
@@ -63,7 +63,7 @@ export async function drainPendingPool(page: Page): Promise<void> {
     const phase = await page.getByTestId("push-status").getAttribute("data-phase");
     if (pending === 0 && phase !== "running") break;
     if (pending > 0 && phase !== "running") {
-      await page.waitForTimeout(1_000); // 穿补轮可观测窗口（issue #57）
+      await page.waitForTimeout(1_500); // 穿补轮可观测窗口（issue #57，>FOLLOW_UP_DELAY_MS=1000）
       const phaseAfter = await page
         .getByTestId("push-status")
         .getAttribute("data-phase");

@@ -325,3 +325,61 @@ test("completed EMPTY round collapses retry-push and keeps popup scroll-free", a
 
   await page.close();
 });
+
+/**
+ * 补轮回执在弹窗最终渲染（issue #57 对抗审查补的 popup 侧 pin）：
+ * 轮 A BUSY 期确认的批 B 由补轮推走，轮 B 的「成功 2」必须渲染出来。
+ * 该断言同时钉死两端——coordinator 补轮链（链断则停在轮 A 的「成功 3」）
+ * 与 popup 轮询的 settle 收摊延迟（popup.ts PUSH_SETTLE_TICKS：若被删，
+ * 轮询在轮 A completed 即停，轮 B 在弹窗视野外跑完、succeeded 定格 3，
+ * 此处红——611 单测 + 45 e2e 都拦不住这类无声回归，故必须有这条）。
+ */
+test("follow-up round's receipt is finally rendered in the popup (settle polling pin)", async ({
+  extContext,
+  popupUrl,
+}) => {
+  test.setTimeout(180_000);
+  const page = await extContext.newPage();
+  await page.goto(popupUrl);
+  await waitCountsLoaded(page);
+
+  const csvA = "/tmp/word-radar-e2e-followup-a.csv";
+  const csvB = "/tmp/word-radar-e2e-followup-b.csv";
+  writeFileSync(csvA, "lemma,flags\nfollowupalpha,0\nfollowupbeta,0\nfollowupgamma,0\n");
+  writeFileSync(csvB, "lemma,flags\nfollowupdelta,0\nfollowupepsilon,0\n");
+
+  const importCsv = async (path: string): Promise<void> => {
+    const [chooser] = await Promise.all([
+      page.waitForEvent("filechooser"),
+      page.getByTestId("import-csv").click(),
+    ]);
+    await chooser.setFiles(path);
+    await page.getByTestId("confirm-push").click();
+  };
+
+  await page.getByTestId("tools-toggle").click();
+
+  // 批 A（3 词）确认 → 轮 A 启动；running 期间（3 词 × ~1.4s/词）立即确认
+  // 批 B（2 词）——BUSY 去重转化为补轮标记（issue #47）
+  await importCsv(csvA);
+  await expect(page.getByTestId("push-status")).toHaveAttribute(
+    "data-phase",
+    "running",
+    { timeout: 15_000 },
+  );
+  await importCsv(csvB);
+
+  // 轮 A 完成：成功 3（coordinator 侧锚——补轮链断裂则永远停在这里红）
+  await expect(page.getByTestId("push-succeeded")).toHaveText("3", {
+    timeout: 120_000,
+  });
+
+  // 轮 A completed → 可观测窗口 → 补轮 B 推走批 B：成功重置为 2。
+  // settle 轮询失效（轮询停在轮 A completed）则 DOM 定格 3，此断言红。
+  await expect(page.getByTestId("push-succeeded")).toHaveText("2", {
+    timeout: 30_000,
+  });
+  await expect(page.getByTestId("pending")).toHaveText("0", { timeout: 30_000 });
+
+  await page.close();
+});

@@ -46,12 +46,15 @@ const WORD_GAP = 400;
 
 /**
  * 补轮可观测窗口（issue #57）：轮 A 的 completed 回执（「推送完成 成功 N」）
- * 先停留一个弹窗轮询周期以上（popup ~500ms 拉一次状态），getStatus 轮询至少
- * 能观察到一次完成态，再被轮 B 开头的 emptyProgress 重置吞掉。600ms 对
- * 500ms 轮询留出调度余量；不宜过长——窗口期 BUSY 确认的新词要等窗口结束
- * 才被补轮推走。
+ * 先停留一个弹窗轮询周期以上（popup ~500ms 拉一次状态，且每 tick 串行两次
+ * SW 消息往返——refreshPushStatus + refreshCounts），getStatus 轮询至少能
+ * 观察到一次完成态，再被轮 B 开头的 emptyProgress 重置吞掉。1000ms = 2×
+ * 名义轮询周期：对抗审查指出 600ms 对 500ms 只有 100ms 余量，消息往返毛刺
+ * （SW 唤醒/IndexedDB 抖动）理论上可吃掉；2× 周期把余量做厚（参数扫描
+ * 证实周期 ≤ 窗口时零违约）。代价是 BUSY 期确认的新词晚 400ms 被补轮推走
+ * （用户无感）。
  */
-export const FOLLOW_UP_DELAY_MS = 600;
+export const FOLLOW_UP_DELAY_MS = 1000;
 
 export class PushCoordinator {
   private readonly client: PushCoordinatorOptions["client"];
