@@ -16,7 +16,7 @@
  * i18n（issue #28）：测试 Chromium 在 fixtures.ts 钉死 zh-CN locale，断言中文渲染。
  */
 import type { Page } from "@playwright/test";
-import { test, expect, waitCountsLoaded, collectFilterFixture } from "./fixtures.js";
+import { test, expect, waitCountsLoaded, collectCurrentPage } from "./fixtures.js";
 
 test.beforeEach(({ mockBbdc }) => {
   mockBbdc.reset();
@@ -319,7 +319,7 @@ test("upload over a resident collect batch asks via the inline bar (issue #41 �
   await waitPopupReady(page);
 
   // 先制造网页采集驻留批：文章页带回前台后点「采集当前页」（同 collect.spec）
-  await collectFilterFixture(page, article);
+  await collectCurrentPage(page, article);
 
   // 驻留批来源 collect → 拖放弹内联确认条（window.confirm 在 action popup
   // 不显示且恒 false，popup 会被直接关掉——code-review P0）
@@ -515,7 +515,7 @@ test("failed upload restores the resident confirm card (code-review #22)", async
   await waitPopupReady(page);
 
   // 制造 collect 驻留批（同覆盖确认用例的制备段）
-  await collectFilterFixture(page, article);
+  await collectCurrentPage(page, article);
 
   // 模拟 SW 整批拒绝：chromeSwChannel 在调用时动态解析
   // chrome.runtime.sendMessage，页面级覆写即可拦截 UPLOAD_FILE 应答。
@@ -571,7 +571,7 @@ test("new collect implicitly cancels a pending overwrite ask (sweeper #24)", asy
   await waitPopupReady(page);
 
   // 制造 collect 驻留批，拖放触发覆盖确认条
-  await collectFilterFixture(page, article);
+  await collectCurrentPage(page, article);
   await dropOnCanvas(page, [
     { name: "stale.txt", text: "The quiet potter shaped a clay bowl.\n" },
   ]);

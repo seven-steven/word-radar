@@ -7,7 +7,7 @@
  * 超出容量从最旧端淘汰。chrome.* 调用收在可注入网关后面，便于单测。
  */
 
-import { chromeStorageGateway, defaultStorageGateway } from "./storage-gateway.js";
+import { defaultStorageGateway } from "./storage-gateway.js";
 
 /** storage.local 中的存储键。 */
 export const ERROR_LOG_KEY = "errorLog";
@@ -35,8 +35,6 @@ export interface ErrorLogStorage {
   get(key: string): Promise<unknown>;
   set(items: Record<string, unknown>): Promise<void>;
 }
-
-export const chromeErrorLogStorage: ErrorLogStorage = chromeStorageGateway("local");
 
 export function defaultErrorLogStorage(): ErrorLogStorage {
   return defaultStorageGateway("local");

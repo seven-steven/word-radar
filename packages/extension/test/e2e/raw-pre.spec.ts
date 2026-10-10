@@ -4,7 +4,7 @@
  * 2. 活动页为扩展自身页面(不可注入)→ popup 显示「此页面无法采集」
  *    (不可注入页的机制复现:chrome:// / chrome-extension:// 等页面)
  */
-import { test, expect, collectFilterFixture } from "./fixtures.js";
+import { test, expect, collectCurrentPage } from "./fixtures.js";
 
 test.beforeEach(({ mockBbdc }) => {
   mockBbdc.reset();
@@ -22,7 +22,7 @@ test("collects words from a raw-like pre-only page", async ({
   const popup = await extContext.newPage();
   await popup.goto(popupUrl);
   // popup 标签页自身是「活动标签」→ 把 raw 页带回前台再手动采集
-  await collectFilterFixture(popup, raw);
+  await collectCurrentPage(popup, raw);
   // 取消弃批（测试卫生）：驻留批次不清会泄漏给后续用例——upload 用例的
   // 覆盖确认条（「上传将丢弃网页采集批次」）会拦住它的确认卡。
   await popup.getByTestId("cancel-collect").click();

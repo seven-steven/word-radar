@@ -12,8 +12,8 @@ import {
   expect,
   drainPendingPool,
   waitCountsLoaded,
-  openFilterFixturePair,
-  collectFilterFixture,
+  openArticlePopupPair,
+  collectCurrentPage,
 } from "./fixtures.js";
 
 test.beforeEach(({ mockBbdc }) => {
@@ -467,14 +467,14 @@ async function collectWithIntakeFilters(
   off: ReadonlyArray<"filter-abbreviations" | "filter-contractions"> = [],
   page = "filter-gate.html",
 ): Promise<{ popup: Page; article: Page }> {
-  const { popup, article } = await openFilterFixturePair(extContext, popupUrl, fixtureServer, page);
+  const { popup, article } = await openArticlePopupPair(extContext, popupUrl, fixtureServer, page);
   if (off.length > 0) {
     await popup.getByTestId("tools-toggle").click();
     for (const testId of off) {
       await popup.getByTestId(testId).uncheck();
     }
   }
-  await collectFilterFixture(popup, article);
+  await collectCurrentPage(popup, article);
   return { popup, article };
 }
 
@@ -557,8 +557,8 @@ test("default-on filters collect the fixture page: filtered line shows 4 (issue 
   popupUrl,
   fixtureServer,
 }) => {
-  const { popup, article } = await openFilterFixturePair(extContext, popupUrl, fixtureServer);
-  await collectFilterFixture(popup, article);
+  const { popup, article } = await openArticlePopupPair(extContext, popupUrl, fixtureServer);
+  await collectCurrentPage(popup, article);
 
   // 双开：doc/md（黑名单）+ you've/aren't（缩合判据）被拦，过滤 4；
   // the/and/serendipity/monorepo 按 lemma 去重后入批 + dog's 剥离成 dog

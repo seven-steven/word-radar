@@ -9,7 +9,7 @@
  * chrome.* 调用收在可注入网关后面，便于单测。
  */
 
-import { chromeStorageGateway, defaultStorageGateway } from "./storage-gateway.js";
+import { defaultStorageGateway } from "./storage-gateway.js";
 
 /** 旧「自动推送」开关的存储键（v0.1.0 及更早写入）。 */
 export const LEGACY_AUTO_PUSH_KEY = "autoPush";
@@ -24,8 +24,6 @@ export interface SettingsStorage {
   get(key: string): Promise<unknown>;
   set(items: Record<string, unknown>): Promise<void>;
 }
-
-export const chromeSettingsStorage: SettingsStorage = chromeStorageGateway("local");
 
 export function defaultSettingsStorage(): SettingsStorage {
   return defaultStorageGateway("local");

@@ -5,7 +5,7 @@
  *
  * i18n（issue #28）：测试 Chromium 在 fixtures.ts 钉死 zh-CN locale，断言中文渲染
  */
-import { test, expect, waitCountsLoaded, collectFilterFixture } from "./fixtures.js";
+import { test, expect, waitCountsLoaded, collectCurrentPage } from "./fixtures.js";
 
 test.beforeEach(({ mockBbdc }) => {
   mockBbdc.reset();
@@ -23,7 +23,7 @@ test("collects into a fresh tab with no declarative injection and no reload", as
   // 不刷新、不等 document_idle —— 直接开 popup 采集
   const popup = await extContext.newPage();
   await popup.goto(popupUrl);
-  await collectFilterFixture(popup, article);
+  await collectCurrentPage(popup, article);
 
   // 确认 → 入库 → 计数刷新
   await popup.getByTestId("confirm-push").click();

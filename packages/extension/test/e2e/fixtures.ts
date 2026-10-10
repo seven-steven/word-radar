@@ -93,11 +93,12 @@ export interface TmpUpload {
 }
 
 /**
- * 收词过滤用例的采集底座（issue #43；自 popup.spec 提升为 e2e 共享）：
- * 开 fixture 文章页 + popup 标签页，等内容脚本注入余量后返回两页；采集动作
- * 由用例自行驱动——各用例采集前有不同的开关操作（check/uncheck）。
+ * 采集用例的通用底座（issue #43；自 popup.spec 收词过滤区块提升为 e2e 共享，
+ * 出身区块名 Filter 已除）：开 fixture 文章页 + popup 标签页，等内容脚本注入
+ * 余量后返回两页；采集动作由用例自行驱动——各用例采集前有不同的开关操作
+ * （check/uncheck）或直接采集。
  */
-export async function openFilterFixturePair(
+export async function openArticlePopupPair(
   extContext: BrowserContext,
   popupUrl: string,
   fixtureServer: { url: string },
@@ -119,7 +120,7 @@ export async function openFilterFixturePair(
  * 新词 0」等更紧形状的用例保持内联（push.spec / collect.spec 如此）。
  * timeout 参数吸收个别用例的 10s 窗口（不改断言语义）。
  */
-export async function collectFilterFixture(
+export async function collectCurrentPage(
   popup: Page,
   article: Page,
   timeout = 15_000,
