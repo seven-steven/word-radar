@@ -53,8 +53,10 @@ const CANDIDATE_RE = /[A-Za-z0-9$][A-Za-z0-9$.:'@/_-]*/g;
  */
 const TRAILING_PUNCT_RE = /[.'-]+$/;
 
-/** 所有格后缀：词尾 `'s`（弯撇号已在 normalizeText 归一为直撇号）。 */
-const POSSESSIVE_RE = /'s$/;
+/** 所有格后缀：词尾 `'s`（弯撇号已在 normalizeText 归一为直撇号）；大小写
+ * 不敏感（issue #56）：剥离是无条件归一化、不受开关控制，dog'S 与 dog's
+ * 同待遇，大写 S 不得把词条挤进缩合形式误计数。 */
+const POSSESSIVE_RE = /'s$/i;
 
 /**
  * 显式字符替换表：弯引号 / Unicode 连字符。
@@ -90,11 +92,24 @@ export function tokenize(text: string): string[] {
 }
 
 /**
+ * 全大写判定：含大写字母且无小写字母（THE、FOX、DON'T；dog'S、GitHub 不是）。
+ */
+function isAllCaps(token: string): boolean {
+  return /[A-Z]/.test(token) && !/[a-z]/.test(token);
+}
+
+/**
  * 提取管线（v3，含词形还原、专名排除与收词过滤）：
- * NFKC 规范化 → 候选分词 → 所有格剥离（归一化，永不受开关控制）
- * → 过滤非英文词 → 可选专名排除 → 可选缩合形式拦截
- * → 词形还原（lemma 聚合前）→ 可选缩略词黑名单拦截
- * → 按 lemma 去重 → `{ entries, filteredCount }`。
+ * NFKC 规范化 → 候选分词 → 所有格剥离（归一化，永不受开关控制，大小写不敏感）
+ * → 过滤非英文词 → 全大写折叠（缩略词黑名单预查 → 原始大小写专名排除 →
+ * 按小写形继续）→ 可选缩合形式拦截 → 词形还原（lemma 聚合前）→ 可选缩略词
+ * 黑名单拦截 → 按 lemma 去重 → `{ entries, filteredCount }`。
+ *
+ * 大小写折叠（issue #56，ADR-0003 关联决策）：全大写词形按小写形继续管线
+ * （THE→the、FOX→fox）。折叠点必须排在专名排除**之后**——专名排除依赖原始
+ * 大小写，先折叠会让 LONDON→london 逃过排除；而 FBI/NASA/BBC 类缩略词
+ * （compromise 同样判 #ProperNoun）由黑名单预查先行拦截——收词过滤的
+ * 黑名单判据先于形态启发式，拦截照常计数。
  *
  * 词形还原：compromise（不规则动词表优先 + 保守后缀 fallback），详见 lemma.ts。
  * 纯函数，仅依赖 compromise（纯 JS），扩展与 Node 共用。
@@ -114,9 +129,13 @@ export function extractWordEntries(
     const token = rawToken.replace(POSSESSIVE_RE, "");
     if (token.length === 0) continue; // 裸 's 不产生词条
     if (!isEnglishWord(token)) continue;
+    // 大小写折叠：全大写词先给缩略词黑名单预查机会（BBC 计数拦截），
+    // 再过原始大小写的专名检查（LONDON 仍被排除），之后按小写形继续管线。
+    const folded = isAllCaps(token) ? token.toLowerCase() : token;
+    if (folded !== token && intake.rejectsAbbreviation(folded)) continue;
     if (excludeProperNouns && isProperNoun(token)) continue;
-    if (intake.rejectsContraction(token)) continue;
-    const lemma = lemmatizeWord(token);
+    if (intake.rejectsContraction(folded)) continue;
+    const lemma = lemmatizeWord(folded);
     if (intake.rejectsAbbreviation(lemma)) continue;
     if (seen.has(lemma)) continue;
     seen.add(lemma);

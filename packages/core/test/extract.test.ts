@@ -190,6 +190,58 @@ describe("extractWordEntries", () => {
   });
 });
 
+describe("issue #56 归一化：所有格剥离大小写不敏感 + 全大写折叠采集", () => {
+  it("dog'S 剥离为大写不敏感所有格：采集 dog、不误计 filteredCount", () => {
+    const out = extractWithBlacklist("the dog'S bone");
+    expect(out.entries.map((e) => e.lemma)).toEqual(["the", "dog", "bone"]);
+    expect(out.filteredCount).toBe(0);
+  });
+
+  it("filterContractions:false 时 dog'S 也不产生伪 lemma（dog's 不入库）", () => {
+    const out = extractWithBlacklist("the dog'S bone", { filterContractions: false });
+    const words = out.entries.map((e) => e.lemma);
+    expect(words).toContain("dog");
+    expect(words).not.toContain("dog's");
+  });
+
+  it("全大写词形按小写形继续管线（THE→the、FOX→fox、JUMPS→jump）", () => {
+    const out = extractWithBlacklist(
+      "THE QUICK BROWN FOX JUMPS OVER THE LAZY DOG",
+    );
+    expect(out.entries.map((e) => e.lemma)).toEqual([
+      "the",
+      "quick",
+      "brown",
+      "fox",
+      "jump",
+      "over",
+      "lazy",
+      "dog",
+    ]);
+  });
+
+  it("全大写仍过原始大小写的专名检查：LONDON 被排除；缩略词 BBC 先走黑名单拦截（计数）", () => {
+    // compromise 把 BBC 判为 #ProperNoun——缩略词黑名单判据必须先于专名
+    // 排除给全大写词机会（CONTEXT「大小写折叠」：黑名单照常拦截），否则
+    // FBI/NASA/BBC 类缩略词全部零反馈死于专名排除。
+    const out = extractWordEntries("Visit LONDON and BBC with FOX.", {
+      abbreviationBlacklist: new Set(["bbc"]),
+    });
+    expect(out.entries.map((e) => e.lemma)).toEqual(["visit", "and", "with", "fox"]);
+    expect(out.filteredCount).toBe(1); // bbc
+  });
+
+  it("PASCAL 判定只拒混合大小写：全大写放行、GitHub/XMLHttpRequest 仍拒", () => {
+    expect(isEnglishWord("LONDON")).toBe(true);
+    expect(isEnglishWord("THE")).toBe(true);
+    expect(isEnglishWord("FOX")).toBe(true);
+    expect(isEnglishWord("GitHub")).toBe(false);
+    expect(isEnglishWord("XMLHttpRequest")).toBe(false);
+    expect(isEnglishWord("Running")).toBe(true); // 句首普通词不受影响
+    expect(isEnglishWord("PascalCase")).toBe(false); // 既有拒绝语义保持
+  });
+});
+
 describe("extraction filtering (ADR-0002)", () => {
   it("filters blacklisted lemmas after lemmatization (docs → doc)", () => {
     const out = extractWithBlacklist("The md file and the docs describe each doc.");

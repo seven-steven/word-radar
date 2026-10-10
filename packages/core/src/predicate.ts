@@ -13,8 +13,13 @@ const PATH_RE = /\//;
 const SNAKE_RE = /_/;
 /** camelCase：小写后紧跟大写。 */
 const CAMEL_RE = /[a-z][A-Z]/;
-/** PascalCase：首字母大写且内部再出现大写（如 App.tsx 已被含数字/路径挡掉，此处兜底 XMLHttpRequest）。 */
-const PASCAL_RE = /^[A-Z][a-z]*[A-Z]/;
+/**
+ * PascalCase（混合大小写形态）：首字母大写、后续仍出现大写、且含小写
+ * （GitHub、XMLHttpRequest、App 组件名）。纯全大写（LONDON、FOX）不在此列
+ * ——放行后由提取管线的大小写折叠按小写形继续采集（issue #56，ADR-0003
+ * 关联决策；App.tsx 类含路径/数字的仍被上游判据挡掉）。
+ */
+const PASCAL_RE = /^[A-Z](?=.*[A-Z])(?=.*[a-z])/;
 /** 含 `$`（模板变量、jQuery 等）。 */
 const DOLLAR_RE = /\$/;
 /** 含数字（含纯数字、v2、IPv4 等）。 */
