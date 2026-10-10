@@ -51,6 +51,20 @@ const IRREGULAR_VERBS: Readonly<Record<string, string>> = {
 };
 
 /**
+ * 不规则 f/fe 复数表（小写：复数 → 名词词元），issue #55。
+ *
+ * compromise toSingular 已知失误的显式修正。失误模式：双 POS 撞形——动词与
+ * 名词两条上下文输出同词，名词词元被高频动词形吞并（lives 两侧都给 live，
+ * 而 lives 作为名词复数的词元是 life）。与 IRREGULAR_VERBS 同构：表优先于
+ * compromise 判定，保证确定性。注意勿为撞形词开「-ves 拼接优先」通道——
+ * gif/cafe/prof/strife 都在词典，拼接通道会把 gives/caves/proves/strives
+ * 一并改写（见 chooseLexicalLemma 的候选序）；新发现撞形失误时增补本表。
+ */
+const IRREGULAR_VES_NOUNS: Readonly<Record<string, string>> = {
+  lives: "life",
+};
+
+/**
  * 保守后缀 fallback 规则（仅当 compromise 未识别出词性时使用）。
  * 每条 = [后缀, 剥离后是否需要额外处理]；stem 必须仍是合法英文词元。
  */
@@ -94,47 +108,103 @@ function clean(out: string): string {
     .replace(/[.'-]+$/g, "");
 }
 
+/**
+ * 动词上下文收集（"he X." → toInfinitive）：极简句子上下文提升 POS 判断
+ * 稳定性；无识别或产物非法（非英文词形）时返回 null。
+ */
+function collectVerbLemma(lower: string): string | null {
+  const doc = nlp(`he ${lower}`).verbs();
+  if (!doc.found) return null;
+  const out = doc.toInfinitive().out("array")[0];
+  const lemma = out ? clean(out) : "";
+  return lemma !== "" && isEnglishWord(lemma) ? lemma : null;
+}
+
+/**
+ * 名词上下文收集（"the X." → toSingular）：此前因动词路径短路而不可达
+ * （issue #55 打开）；实测对 f/fe 复数家族质量可靠（wolves→wolf、
+ * leaves→leaf、halves→half），失误词（lives→live）由 IRREGULAR_VES_NOUNS
+ * 显式修正。
+ */
+function collectNounLemma(lower: string): string | null {
+  const doc = nlp(`the ${lower}`).nouns();
+  if (!doc.found) return null;
+  const out = doc.toSingular().out("array")[0];
+  const lemma = out ? clean(out) : "";
+  return lemma !== "" && isEnglishWord(lemma) ? lemma : null;
+}
+
 /** 词典级守门：还原输出是否为真实英文词（Norvig top-20000 截选，见 lexicon.ts）。 */
 function inLexicon(word: string): boolean {
   return LEXICON.has(word);
 }
 
 /**
- * 词典级守门 + -f/-fe 拼接修正（issue #48，fixF 并入此单点）：
- * 1. 输出是词典词 → 直接采用；
- * 2. 输出非词典词且以 -ve/-ves 结尾 → 尝试 -f/-fe 拼接形态，仅当拼接形态
- *    本身是词典词才采用（knives→knife 保留；actife 类伪造形态被拒）；
- * 3. 输出非词典词而原词形是词典词 → 回退原词形（thi→this）；
- * 4. 两者都不在词典（截选外冷僻词）→ 负启发审查后放行（零误杀：不丢弃、
- *    行为与无守门时一致）。
- *    负启发（issue #50）：原词以 -as 结尾而输出以 -ave 结尾 → 回退原词形。
- *    compromise 会把 -as 词误判为动词三单并套拉丁式 -as→-ave 规则制造伪词
- *    （pyjamas→pyjamave；扫描证实 arenas/umbrellas 类 -as 复数同中招）。
- *    真实英语变位只有 -ave→-aves 与 has→have，后者由 IRREGULAR_VERBS 前置
- *    拦截不进本函数，故该规则零误伤。
+ * 词典候选政策（issue #55 / ADR-0003）：双上下文产物按显式优先序裁决。
+ * 返回 null 表示两条路径都无产物，交由后缀 fallback。
+ *
+ * 1. -as 负启发（issue #50）前置：原词 -as 而动词输出 -ave 是 compromise
+ *    的拉丁式伪变位（pyjamave/arenave），伪输出不得参与词典裁决，直接回退
+ *    原词形。真实英语变位只有 -ave→-aves 与 has→have，后者由
+ *    IRREGULAR_VERBS 前置拦截，故此规则零误伤。
+ * 2. 词典内词元：动词+名词双上下文的输出中，词典词优先于一切拼接；与原词
+ *    形相同的输出视为「无还原」、不作候选（否则 walked 会以词典内词形身份
+ *    劫走 walked→walk 的动词还原）。动词词元与名词词元都命中词典的平局
+ *    判给名词（lives→life、leaves→leaf）。
+ * 3. 原词形在词典 → 回退原词形（thi→this 类：畸形输出 + 词典原词）。
+ * 4. -f/-fe 拼接救援（issue #48）降为无词典命中时的兜底：对输出尝试
+ *    -ve/-ves → -f/-fe 变体，仅当拼接形态本身在词典才采用。词典内输出与
+ *    原词形都排在其前——wolfe/gif 类词典噪声不再有穿透通道。
+ * 5. 双冷僻（输出与原词形都不在典，截选外冷僻词）→ 放行名词输出，其次
+ *    动词输出（issue #48 的「零误杀」：不丢弃、保持还原输出；名词优先是
+ *    平局政策的自然延伸）。
  */
-function finalize(lemma: string, original: string): string {
-  if (inLexicon(lemma)) return lemma;
-  if (/ves?$/.test(lemma)) {
-    const rescued = [
-      lemma.replace(/ves$/, "f"),
-      lemma.replace(/ves$/, "fe"),
-      lemma.replace(/ve$/, "fe"),
-      lemma.replace(/ve$/, "f"),
-    ].find((c) => c !== lemma && inLexicon(c));
-    if (rescued) return rescued;
+function chooseLexicalLemma(
+  verbOut: string | null,
+  nounOut: string | null,
+  original: string,
+): string | null {
+  if (verbOut === null && nounOut === null) return null;
+  if (/as$/.test(original) && verbOut !== null && /ave$/.test(verbOut)) {
+    return original;
   }
+  const nounLexeme = nounOut !== null && nounOut !== original && inLexicon(nounOut) ? nounOut : null;
+  const verbLexeme = verbOut !== null && verbOut !== original && inLexicon(verbOut) ? verbOut : null;
+  if (nounLexeme !== null) return nounLexeme;
+  if (verbLexeme !== null) return verbLexeme;
   if (inLexicon(original)) return original;
-  if (/as$/.test(original) && /ave$/.test(lemma)) return original;
-  return lemma;
+  for (const out of [nounOut, verbOut]) {
+    if (out === null || !/ves?$/.test(out)) continue;
+    const rescued = [
+      out.replace(/ves$/, "f"),
+      out.replace(/ves$/, "fe"),
+      out.replace(/ve$/, "fe"),
+      out.replace(/ve$/, "f"),
+    ].find((c) => c !== out && inLexicon(c));
+    if (rescued !== undefined) return rescued;
+  }
+  return nounOut ?? verbOut ?? original;
+}
+
+/**
+ * 后缀 fallback 产物的精简守门：stem 在典直取；原词形在典回退（this 的
+ * 剥 s 产物 thi 非典、this 在典 → this）；否则放行 stem。-as 负启发不在此
+ * 层重复——-ave 伪输出的唯一产源是 compromise 动词路径，已在
+ * chooseLexicalLemma 前置拦截。
+ */
+function finalizeStem(stem: string, original: string): string {
+  if (inLexicon(stem)) return stem;
+  if (inLexicon(original)) return original;
+  return stem;
 }
 
 /**
  * 单词词形还原（输入为已通过过滤的合法英文词，保留原大小写仅用于诊断）。
  *
- * 顺序：不规则动词表 → compromise（极简句子上下文）→ 保守后缀 fallback → 原词；
- * compromise/fallback 的产出统一过词典级守门 finalize（畸形 lemma 回退原词形，
- * 见 issue #48）。
+ * 顺序：不规则动词表 → 不规则 f/fe 复数表 → compromise 双上下文并发收集
+ * （动词 "he X." / 名词 "the X."，不再让「动词先跑、命中即返回」的代码顺序
+ * 决定结果）→ 词典候选政策裁决（chooseLexicalLemma）→ 保守后缀 fallback
+ * → 原词。
  */
 export function lemmatizeWord(word: string): string {
   const lower = word.toLowerCase();
@@ -146,22 +216,15 @@ export function lemmatizeWord(word: string): string {
   const irregular = IRREGULAR_VERBS[lower];
   if (irregular) return irregular;
 
-  // 2. compromise：放进极简句子上下文提升 POS 判断稳定性。
-  //    动词上下文 "he X."，名词上下文 "the X."。输出过词典级守门 finalize。
-  const vDoc = nlp(`he ${lower}`).verbs();
-  if (vDoc.found) {
-    const out = vDoc.toInfinitive().out("array")[0];
-    const lemma = out ? clean(out) : "";
-    if (lemma && isEnglishWord(lemma)) return finalize(lemma, lower);
-  }
-  const nDoc = nlp(`the ${lower}`).nouns();
-  if (nDoc.found) {
-    const out = nDoc.toSingular().out("array")[0];
-    const lemma = out ? clean(out) : "";
-    if (lemma && isEnglishWord(lemma)) return finalize(lemma, lower);
-  }
+  // 2. 不规则 f/fe 复数表（toSingular 撞形失误的显式修正）。
+  const vesNoun = IRREGULAR_VES_NOUNS[lower];
+  if (vesNoun) return vesNoun;
 
-  // 3. 保守后缀 fallback。
+  // 3. compromise 双上下文并发收集（issue #55），产出统一过词典候选政策。
+  const chosen = chooseLexicalLemma(collectVerbLemma(lower), collectNounLemma(lower), lower);
+  if (chosen !== null) return chosen;
+
+  // 4. 保守后缀 fallback。
   for (const rule of SUFFIX_RULES) {
     if (!lower.endsWith(rule.suffix) || lower.length <= rule.suffix.length + 1) {
       continue;
@@ -170,9 +233,9 @@ export function lemmatizeWord(word: string): string {
     if (rule.suffix === "ing" || rule.suffix === "ed") {
       stem = dedupConsonant(stem);
     }
-    if (isValidStem(stem)) return finalize(stem, lower);
+    if (isValidStem(stem)) return finalizeStem(stem, lower);
   }
 
-  // 4. 找不到可靠词元，保守返回小写原词。
+  // 5. 找不到可靠词元，保守返回小写原词。
   return lower;
 }

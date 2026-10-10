@@ -141,6 +141,53 @@ describe("issue #50 pyjamas→pyjamave regression (Latin -as→-ave negative heu
   });
 });
 
+describe("issue #55 lemma 候选政策（双上下文并发 + 词典内输出优先 + 名词平局）", () => {
+  it("f/fe 家族复数还原为名词词元", () => {
+    expect(lemmatizeWord("wolves")).toBe("wolf");
+    expect(lemmatizeWord("lives")).toBe("life");
+    expect(lemmatizeWord("leaves")).toBe("leaf");
+  });
+
+  it("平局集钉死：动词/名词词元都在词典的判给名词（ADR-0003）", () => {
+    // lives(live/life)、leaves(leave/leaf) 双词元在典；halves/shelves/calves
+    // 的动词形（halve/shelve/calve）不在典，名词词元直接胜出。
+    expect(lemmatizeWord("lives")).toBe("life");
+    expect(lemmatizeWord("leaves")).toBe("leaf");
+    expect(lemmatizeWord("halves")).toBe("half");
+    expect(lemmatizeWord("shelves")).toBe("shelf");
+    expect(lemmatizeWord("calves")).toBe("calf");
+  });
+
+  it("hooves 不返回拼接伪词（hoof 不在词典截选，放行 toSingular 真实输出）", () => {
+    const out = lemmatizeWord("hooves");
+    // hoof 是 toSingular 的真实还原（非拼接形、非伪词）；若实现选择回退
+    // 原词形 hooves 也符合验收（允许项），但绝不允许 hoove/hoofe 类伪词。
+    expect(out === "hoof" || out === "hooves").toBe(true);
+  });
+
+  it("词典噪声不穿透：ve+s 家族的伪拼接形态不再有通道", () => {
+    // gif/cafe/prof/strife 都在词典（Norvig 姓名/缩写/高频词噪声），
+    // 任何「-ves 拼接优先」通道都会把三单/规则复数改写成它们。
+    expect(lemmatizeWord("gives")).toBe("give");
+    expect(lemmatizeWord("caves")).toBe("cave");
+    expect(lemmatizeWord("proves")).toBe("prove");
+    expect(lemmatizeWord("strives")).toBe("strive");
+  });
+
+  it("动词词元仍在：名词路径不得劫走动词还原", () => {
+    // walked 在词典（词形级），若把「无还原的原词形」当名词词元候选，
+    // walked→walk 会被平局判名词劫成 walked。
+    expect(lemmatizeWord("walked")).toBe("walk");
+    expect(lemmatizeWord("survived")).toBe("survive");
+  });
+
+  it(" wives/elves/dwarves 等无动词同形的 f/fe 复数照常还原", () => {
+    expect(lemmatizeWord("wives")).toBe("wife");
+    expect(lemmatizeWord("elves")).toBe("elf");
+    expect(lemmatizeWord("dwarves")).toBe("dwarf");
+  });
+});
+
 describe("proper noun exclusion", () => {
   it("excludes proper nouns by default", () => {
     expect(isProperNoun("Alice")).toBe(true);
