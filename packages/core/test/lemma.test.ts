@@ -256,6 +256,53 @@ describe("issue #55 lemma 候选政策（双上下文并发 + 词典内输出优
   });
 });
 
+describe("issue #58 -ve/-ves 词形全管线输出钉测（拼接救援表基线）", () => {
+  // 期望值先以一次性探针走真实 lemmatizeWord 管线固化（2026-10-10），
+  // 用于钉死第 4 步拼接救援表收紧（删除死通道）前后的行为等价。
+  it("f/fe 复数家族：第 2 步名词 toSingular 直出在典词元，不经拼接救援", () => {
+    expect(lemmatizeWord("wolves")).toBe("wolf");
+    expect(lemmatizeWord("knives")).toBe("knife");
+    expect(lemmatizeWord("calves")).toBe("calf");
+    expect(lemmatizeWord("halves")).toBe("half");
+    expect(lemmatizeWord("loaves")).toBe("loaf");
+    expect(lemmatizeWord("thieves")).toBe("thief");
+    expect(lemmatizeWord("shelves")).toBe("shelf");
+    expect(lemmatizeWord("wives")).toBe("wife");
+    expect(lemmatizeWord("lives")).toBe("life");
+    expect(lemmatizeWord("leaves")).toBe("leaf");
+    expect(lemmatizeWord("dwarves")).toBe("dwarf");
+    expect(lemmatizeWord("elves")).toBe("elf");
+    expect(lemmatizeWord("scarves")).toBe("scarf");
+    expect(lemmatizeWord("wharves")).toBe("wharf");
+  });
+
+  it("三单 -ves 家族：第 2 步动词 toInfinitive 直出在典词元，不经拼接救援", () => {
+    expect(lemmatizeWord("gives")).toBe("give");
+    expect(lemmatizeWord("caves")).toBe("cave");
+    expect(lemmatizeWord("proves")).toBe("prove");
+    expect(lemmatizeWord("strives")).toBe("strive");
+    expect(lemmatizeWord("solves")).toBe("solve");
+  });
+
+  it("冷僻动词形 -ve（第 4 步 ve→f 通道）", () => {
+    // halve/shelve/calve/thieve 不在词典截选，双输出（原形）不在典 →
+    // 走到第 4 步拼接救援，ve→f 拼接形态在典被采纳。
+    expect(lemmatizeWord("halve")).toBe("half");
+    expect(lemmatizeWord("shelve")).toBe("shelf");
+    expect(lemmatizeWord("calve")).toBe("calf");
+    expect(lemmatizeWord("thieve")).toBe("thief");
+  });
+
+  it("冷僻动词形 -ve（第 4 步 ve→fe 通道）", () => {
+    expect(lemmatizeWord("wive")).toBe("wife");
+  });
+
+  it("在典 -ve 原词形不动（第 3 步词典原词形回退）", () => {
+    expect(lemmatizeWord("solve")).toBe("solve");
+    expect(lemmatizeWord("dissolve")).toBe("dissolve");
+  });
+});
+
 describe("proper noun exclusion", () => {
   it("excludes proper nouns by default", () => {
     expect(isProperNoun("Alice")).toBe(true);

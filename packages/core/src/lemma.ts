@@ -169,8 +169,9 @@ function inLexicon(word: string): boolean {
  *    判给名词（lives→life、leaves→leaf）。
  * 3. 原词形在词典 → 回退原词形（thi→this 类：畸形输出 + 词典原词）。
  * 4. -f/-fe 拼接救援（issue #48）降为无词典命中时的兜底：对输出尝试
- *    -ve/-ves → -f/-fe 变体，仅当拼接形态本身在词典才采用。词典内输出与
- *    原词形都排在其前——wolfe/gif 类词典噪声不再有穿透通道。
+ *    -ve → -f/-fe 变体，仅当拼接形态本身在词典才采用（-ves 结尾通道在
+ *    语料探针 0 命中，issue #58 删除）。词典内输出与原词形都排在其前
+ *    ——wolfe/gif 类词典噪声不再有穿透通道。
  * 5. 双冷僻（输出与原词形都不在典，截选外冷僻词）→ 放行名词输出，其次
  *    动词输出（issue #48 的「零误杀」：不丢弃、保持还原输出；名词优先是
  *    平局政策的自然延伸）——但输出为超短串/无元音串的伪形（cs/gp 类
@@ -221,9 +222,11 @@ function chooseLexicalLemma(
   if (inLexicon(original)) return original;
   for (const out of [nounOut, verbOut]) {
     if (out === null || !/ves?$/.test(out)) continue;
+    // -ves → -f/-fe 通道已删（issue #58）：能抵达此处的 out 实测只有动词形
+    // -ve 结尾（halve/shelve/calve/wive/thieve），-ves 结尾输出在词典候选
+    // 第 2/3 步已全部消化（2026-10-10 语料探针：1949 个 -ve/-ves 词上
+    // ves→f/ves→fe 均 0 命中，钉测 lemma.test.ts issue #58 块固化）。
     const rescued = [
-      out.replace(/ves$/, "f"),
-      out.replace(/ves$/, "fe"),
       out.replace(/ve$/, "fe"),
       out.replace(/ve$/, "f"),
     ].find((c) => c !== out && inLexicon(c));
