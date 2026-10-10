@@ -10,7 +10,7 @@
  *
  * i18n（issue #28）：测试 Chromium 在 fixtures.ts 钉死 zh-CN locale，断言中文渲染
  */
-import { test, expect, waitCountsLoaded } from "./fixtures.js";
+import { test, expect, drainPendingPool, waitCountsLoaded } from "./fixtures.js";
 
 test.beforeEach(({ mockBbdc }) => {
   mockBbdc.reset();
@@ -79,13 +79,13 @@ test("cancel discards the pending batch: counts unchanged, nothing merged", asyn
 
   const popup = await extContext.newPage();
   await popup.goto(popupUrl);
-  // 前序 spec 确认触发的推送可能仍在后台跑：等它停下来再取基线，
-  // 否则 pending 会被并发推送改写造成假失败。
-  await expect(popup.getByTestId("push-status")).not.toHaveAttribute(
-    "data-phase",
-    "running",
-    { timeout: 120_000 },
-  );
+  // 前序 spec 确认触发的推送可能仍在后台跑（active-tab / collect#1 均不
+  // drain）：本用例的「取消零副作用」断言要求干净起点——池里有遗留词的话，
+  // boot CHECK_LOGIN 的 login-recovery 恢复轮（startIfIdle）会在基线之后
+  // 推走它们，污染「取消不触发任何推送」断言。#57 后「非 running」也不再
+  // 等价于「推送结束」（completed 后 ~600ms 可观测窗口内可能有补轮排队），
+  // 等相位不如直接排空：drainPendingPool 收敛到「池空 + 无轮」。
+  await drainPendingPool(popup);
   // 等一次稳定计数（boot 不自动采集——issue #39，计数即词库现状）
   await waitCountsLoaded(popup); // 基线读取前置：等 total 脱骨架（骨架屏契约）
   await expect(popup.getByTestId("total")).toHaveText(/^\d+$/);

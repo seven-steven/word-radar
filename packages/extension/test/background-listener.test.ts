@@ -86,13 +86,16 @@ function fakePushCoordinator(): PushCoordinator & {
     failed: 0,
     pending: 0,
   };
-  // listener 只消费 start/getStatus；类其余成员（client/repository 等私有
-  // 状态）不在依赖面内，故以结构化 mock + 单点 as 断言收窄，避免伪造整套类。
+  // listener 只消费 start/startIfIdle/getStatus（login-recovery 走 startIfIdle，
+  // issue #57）；类其余成员（client/repository 等私有状态）不在依赖面内，
+  // 故以结构化 mock + 单点 as 断言收窄，避免伪造整套类。
   return {
     start: vi.fn(async () => idle),
+    startIfIdle: vi.fn(async () => idle),
     getStatus: vi.fn(() => idle),
   } as unknown as PushCoordinator & {
     start: ReturnType<typeof vi.fn>;
+    startIfIdle: ReturnType<typeof vi.fn>;
     getStatus: ReturnType<typeof vi.fn>;
   };
 }
@@ -176,7 +179,7 @@ describe("createBackgroundListener", () => {
 });
 
 describe("createBackgroundListener CHECK_LOGIN（T09 + T10）", () => {
-  it("已登录 → 应答 {loggedIn:true} + 清除 badge + 非阻塞触发 pushCoordinator.start()", async () => {
+  it("已登录 → 应答 {loggedIn:true} + 清除 badge + 非阻塞触发推送（login-recovery 走 startIfIdle，issue #57）", async () => {
     const repository = fakeRepository();
     const bbdcClient = fakeBbdcClient({
       checkLogin: vi.fn(async () => ({ loggedIn: true, resultCode: 200 })),
@@ -199,7 +202,8 @@ describe("createBackgroundListener CHECK_LOGIN（T09 + T10）", () => {
     // CHECK_LOGIN 不再写 badge（issue #26）
     expect(badge.set).not.toHaveBeenCalled();
     expect(sendResponse).toHaveBeenCalledWith({ loggedIn: true });
-    expect(push.start).toHaveBeenCalledTimes(1);
+    expect(push.startIfIdle).toHaveBeenCalledTimes(1);
+    expect(push.start).not.toHaveBeenCalled(); // login-recovery 不走置补轮标记的 start()
   });
 
   it("check-login result_code 非 200 → 应答 {loggedIn:false} + 不触发 push；badge 不亮（issue #26：未登录不写 badge）", async () => {

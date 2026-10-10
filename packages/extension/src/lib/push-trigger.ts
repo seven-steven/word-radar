@@ -25,7 +25,12 @@ export interface PushTriggerDeps {
  *   （BUSY 去重与补轮是 PushCoordinator 的职责，issue #47）。
  * - login-recovery：登录恢复后查待推池；空池跳过、查库失败跳过（吞错，
  *   与 cold-start 同语义——下次 SW 唤醒再试）。issue #36：零词轮会空转
- *   出「推送完成 0/0/0」噪音回执。
+ *   出「推送完成 0/0/0」噪音回执。issue #57 门控：BUSY 期改走 startIfIdle
+ *   （返回 null、不置补轮标记）——补轮标记只属于真实改动待推池的调用方
+ *   （confirm）；此前 BUSY 期弹窗 boot 的 CHECK_LOGIN 无条件 start() 置
+ *   标记，每次开弹窗都空转出一轮 0/0/0。忙判定看 running promise：paused
+ *   （登录失效暂停，登录恢复正是它的重推入口）与 completed（failed 词仍
+ *   待推）不算 BUSY。
  * - cold-start：SW 冷启动恢复（issue #26），准入同 login-recovery，另加
  *   相位为 idle 才起——不抢进行中的轮。
  */
@@ -39,7 +44,11 @@ export async function admitPushRound(
   }
   const pending = await deps.repository.listPending().catch(() => undefined);
   if (!pending || pending.length === 0) return;
-  if (trigger === "cold-start" && deps.pushCoordinator.getStatus().phase !== "idle") {
+  if (trigger === "login-recovery") {
+    void deps.pushCoordinator.startIfIdle();
+    return;
+  }
+  if (deps.pushCoordinator.getStatus().phase !== "idle") {
     return;
   }
   void deps.pushCoordinator.start();

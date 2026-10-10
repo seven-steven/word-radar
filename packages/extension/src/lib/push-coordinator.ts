@@ -44,6 +44,15 @@ export interface PushCoordinatorOptions {
 const RETRY_DELAYS: readonly [number, number, number] = [0, 800, 2000];
 const WORD_GAP = 400;
 
+/**
+ * 补轮可观测窗口（issue #57）：轮 A 的 completed 回执（「推送完成 成功 N」）
+ * 先停留一个弹窗轮询周期以上（popup ~500ms 拉一次状态），getStatus 轮询至少
+ * 能观察到一次完成态，再被轮 B 开头的 emptyProgress 重置吞掉。600ms 对
+ * 500ms 轮询留出调度余量；不宜过长——窗口期 BUSY 确认的新词要等窗口结束
+ * 才被补轮推走。
+ */
+export const FOLLOW_UP_DELAY_MS = 600;
+
 export class PushCoordinator {
   private readonly client: PushCoordinatorOptions["client"];
   private readonly repository: PushRepository;
@@ -85,17 +94,40 @@ export class PushCoordinator {
     return this.running;
   }
 
-  /** 单轮生命周期 + 收尾分派（补轮或清理）。running 字段只在此收尾处变更。 */
+  /**
+   * 恢复路径的起轮（issue #57 门控）：仅空闲（无轮在跑、无补轮排队）时触发
+   * start()；BUSY 期返回 null——不置补轮标记。补轮标记只属于真实改动待推池
+   * 的调用方（确认合并/导入），登录恢复不得借 BUSY 去重制造空转补轮
+   * （#36 零词轮守卫语义的延伸：BUSY 期弹窗 boot 的 CHECK_LOGIN 曾无条件
+   * 置标记，每次开弹窗都空转出一轮 0/0/0 回执）。
+   *
+   * 忙判定看 running promise 而非 phase：paused（登录失效暂停）与 completed
+   * （轮刚收尾，failed 词仍待推）时 running 已清、轮并未在跑——登录恢复恰是
+   * paused 遗留待推的重推入口；补轮可观测窗口期 running 被 deferred promise
+   * 占位，同样视为 BUSY。
+   */
+  startIfIdle(): Promise<PushProgress> | null {
+    if (this.running) return null;
+    return this.start();
+  }
+
+  /**
+   * 单轮生命周期 + 收尾分派（补轮或清理）。running 字段只在此收尾处变更。
+   */
   private async runLoop(): Promise<PushProgress> {
     try {
       const finished = await this.run();
       if (finished.phase === "completed" && this.needsAnotherRound) {
         // 补轮从 run() 开头完整重跑：emptyProgress 重置计数（空轮的
-        // 「推送完成 0」回执正是确认闸门两段式期望的语义）。补轮是
-        // fire-and-forget：防御分支（run() 外异常）不得悬空成 unhandled
-        // rejection，此 catch 正常不可达。
+        // 「推送完成 0」回执正是确认闸门两段式期望的语义）。补轮延迟一个
+        // 可观测窗口 spawn（issue #57）：先让轮 A 的 completed 回执被弹窗
+        // 轮询观察到，再进轮 B 的 running 重置。窗口期 this.running 已被
+        // deferred promise 占位：期间的并发 start() 仍走 BUSY 去重（置
+        // 标记、返回同一 deferred promise），「确认即推送」不回归。
+        // 补轮链是 fire-and-forget：防御分支（run() 外异常）不得悬空成
+        // unhandled rejection，此 catch 正常不可达。
         this.needsAnotherRound = false;
-        const next = this.runLoop();
+        const next = this.deferredFollowUp();
         next.catch(() => undefined);
         this.running = next;
         return finished;
@@ -110,6 +142,12 @@ export class PushCoordinator {
       this.running = null;
       throw error;
     }
+  }
+
+  /** 补轮延迟 spawn：可观测窗口过后完整重跑 runLoop（含后续补轮链）。 */
+  private async deferredFollowUp(): Promise<PushProgress> {
+    await this.sleep(FOLLOW_UP_DELAY_MS);
+    return this.runLoop();
   }
 
   private async run(): Promise<PushProgress> {

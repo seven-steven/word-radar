@@ -6,7 +6,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { BbdcAuthError, BbdcHttpError } from "../src/lib/bbdc-client.js";
-import { PushCoordinator } from "../src/lib/push-coordinator.js";
+import { PushCoordinator, FOLLOW_UP_DELAY_MS } from "../src/lib/push-coordinator.js";
 
 interface FakeEntry {
   lemma: string;
@@ -655,5 +655,99 @@ describe("PushCoordinator 错误日志钩子（issue #25）", () => {
     await coordinator.start();
 
     expect(onError).not.toHaveBeenCalled();
+  });
+});
+
+describe("PushCoordinator 推送轮次治理（issue #57）", () => {
+  it("startIfIdle：BUSY 期返回 null 且不置补轮标记——轮完成后无空转补轮", async () => {
+    // 闸门：轮 A 处理 "a" 时挂起，测试在挂起期（BUSY）调 startIfIdle
+    let releaseA!: () => void;
+    const gateA = new Promise<void>((resolve) => {
+      releaseA = resolve;
+    });
+    const client = makeClient({
+      checkExisting: vi.fn(async (word: string) => {
+        if (word === "a") await gateA;
+        return { exists: false };
+      }),
+    });
+    const repository = makeDrainingRepository([makeEntry("a")]);
+    const { sleep } = makeSleep();
+    const coordinator = new PushCoordinator({ client, repository, sleep });
+
+    const first = coordinator.start();
+    await vi.waitFor(() => expect(client.checkExisting).toHaveBeenCalledWith("a"));
+
+    // BUSY 期 startIfIdle：返回 null（调用方无从等待）、不置补轮标记
+    expect(coordinator.startIfIdle()).toBeNull();
+
+    releaseA();
+    const roundA = await first;
+    expect(roundA.phase).toBe("completed");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    // 补轮不发生：login-recovery 语义的起轮不得借 BUSY 去重制造空转
+    // （#36 零词轮噪音的治理延伸）
+    expect(client.checkLogin).toHaveBeenCalledTimes(1);
+    expect(repository.listPending).toHaveBeenCalledTimes(1);
+  });
+
+  it("startIfIdle：空闲期（含 paused/completed 收尾后）等价 start() 完整起轮", async () => {
+    const client = makeClient();
+    const repository = makeRepository([makeEntry("run")]);
+    const { sleep } = makeSleep();
+    const coordinator = new PushCoordinator({ client, repository, sleep });
+
+    const started = coordinator.startIfIdle();
+    expect(started).not.toBeNull();
+    const result = await started!;
+    expect(result.phase).toBe("completed");
+    expect(client.checkExisting).toHaveBeenCalledWith("run");
+  });
+
+  it("补轮延迟可观测窗口：轮 A completed 回执先可被 getStatus 轮询观察到，再进轮 B running", async () => {
+    const repository = makeDrainingRepository([makeEntry("a")]);
+    let releaseA!: () => void;
+    const gateA = new Promise<void>((resolve) => {
+      releaseA = resolve;
+    });
+    const client = makeClient({
+      checkExisting: vi.fn(async (word: string) => {
+        if (word === "a") await gateA;
+        return { exists: false };
+      }),
+    });
+    // 受控 sleep：仅拦截补轮可观测窗口（FOLLOW_UP_DELAY_MS）挂起，其余立即放行
+    let releaseWindow!: () => void;
+    const windowGate = new Promise<void>((resolve) => {
+      releaseWindow = resolve;
+    });
+    const sleep = vi.fn(async (milliseconds: number) => {
+      if (milliseconds === FOLLOW_UP_DELAY_MS) await windowGate;
+    });
+    const coordinator = new PushCoordinator({ client, repository, sleep });
+
+    const first = coordinator.start();
+    await vi.waitFor(() => expect(client.checkExisting).toHaveBeenCalledWith("a"));
+    const second = coordinator.start(); // BUSY 拒入 → 置补轮标记（确认路径语义）
+    expect(second).toBe(first);
+
+    releaseA();
+    const roundA = await first;
+    expect(roundA.phase).toBe("completed");
+    await vi.waitFor(() => expect(sleep).toHaveBeenCalledWith(FOLLOW_UP_DELAY_MS));
+
+    // 窗口期内：轮 A 的 completed 回执对 getStatus 轮询可见（弹窗 500ms 轮询
+    // 至少观察到一次「推送完成」），轮 B 的 emptyProgress 重置尚未吞掉它；
+    // 窗口 ≥ 弹窗轮询间隔。
+    expect(FOLLOW_UP_DELAY_MS).toBeGreaterThanOrEqual(500);
+    expect(coordinator.getStatus().phase).toBe("completed");
+    expect(client.checkLogin).toHaveBeenCalledTimes(1);
+
+    // 窗口过后补轮启动：轮 B 完整走一轮推走 BUSY 期入池的词
+    repository.add(makeEntry("b"));
+    releaseWindow();
+    await vi.waitFor(() => expect(repository.markPushed).toHaveBeenCalledWith(["b"]));
+    await vi.waitFor(() => expect(coordinator.getStatus().phase).toBe("completed"));
+    expect(client.checkLogin).toHaveBeenCalledTimes(2);
   });
 });
