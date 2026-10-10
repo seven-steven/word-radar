@@ -32,7 +32,10 @@ function buildContentScript(): Plugin {
         target: "es2022",
         outfile: resolve(here, "dist", CONTENT_SCRIPT_OUTPUT),
         sourcemap: true,
-        minify: false,
+        // minify 关闭曾是调试便利，代价是每次「采集当前页」注入 1.2MB
+        // 未压缩脚本（blacklist/lexicon 生成数据占 ~410KB）；压缩后
+        // ~663KB/−44%，同步 IIFE 性质不变（issue #53-2）。
+        minify: true,
         logLevel: "warning",
       });
     },

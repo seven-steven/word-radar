@@ -556,8 +556,23 @@ async function main() {
   }
 
   // ---------- 层0：类目候选 ----------
+  // --resume 装载类目缓存须容错（issue #53-4）：缓存由下方非原子
+  // writeFileSync 写出，~2.5h 运行期间被杀（SIGKILL/断电/pmset sleep）会留
+  // 下断尾 JSON，裸 JSON.parse 使此后每次 --resume 启动即 SyntaxError
+  // （错误里连文件名都没有）、被迫手工删缓存丢全部类目进度——恰是 --resume
+  // 要在崩溃残骸中存活的对象。损坏按空缓存从头重爬（自愈，wikitext JSONL
+  // 缓存仍有效），stderr 带文件名提示。
   const catCache = RESUME && existsSync(CACHE_CATEGORIES)
-    ? JSON.parse(readFileSync(CACHE_CATEGORIES, "utf8"))
+    ? (() => {
+        try {
+          return JSON.parse(readFileSync(CACHE_CATEGORIES, "utf8"));
+        } catch (error) {
+          console.error(
+            `build-blacklist: 类目缓存损坏，按空缓存从头重爬（${CACHE_CATEGORIES}）：${error.message}`,
+          );
+          return {};
+        }
+      })()
     : {};
   const wordTitles = new Map(); // 归一化词 → Set<原始标题>
   let rawTitleCount = 0;

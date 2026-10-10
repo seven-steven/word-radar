@@ -37,7 +37,15 @@ export interface RunCollectionDeps {
 export async function runCollection(deps: RunCollectionDeps): Promise<CollectResponse> {
   const extract = deps.extract ?? extractWordEntries;
   const getFilterSettings = deps.getFilterSettings ?? getIntakeFilterSettings;
-  const filterSettings = await getFilterSettings();
+  // 开关读取失败降级为缺省全开（issue #53-3）：storage 读拒绝（后端损坏/
+  // 磁盘 I/O 错误）直接中止采集、裸异常字符串渲染进状态行，比「按缺省
+  // 开关多滤/少滤几个词」伤害更大——缺省即全开与 settings.ts 的承诺一致。
+  // 取舍与 SW 上传路径（extractWithFilters 不降级、走 upload-failed 显式
+  // 反馈）不同：采集批次驻留内存、重试成本低，且失败反馈通道只有状态行。
+  const filterSettings = await getFilterSettings().catch(() => ({
+    filterAbbreviations: true,
+    filterContractions: true,
+  } satisfies IntakeFilterSettings));
   const text = deps.collectText();
   // 两开关透传给 core；开关语义见 core intake-filter
   const { entries, filteredCount } = extract(text, {

@@ -10,19 +10,47 @@
  * push-status 冻结、无新请求、无 SW 重启」的假性回归。
  *
  * 因此 run 期间由 harness 自持断言（`caffeinate -is`），不依赖外部进程的
- * 存活；`-t 3600` 兜底：runner 被硬杀时断言最多泄漏 1 小时自动消失。
- * 非 darwin（CI/Linux）或 caffeinate 缺失时静默跳过。
+ * 存活。`-t 3600` 只是「runner 被硬杀时断言最多泄漏 1 小时自动消失」的
+ * 兜底，**不是 run 时长上限**（issue #53-1）：长 run（>1h）里 `-t` 到期后
+ * 断言静默失效、无任何告警，假回归会原样复发——故定期检查、退出即续
+ * spawn，保护线随 run 长度自动延长。非 darwin（CI/Linux）或 caffeinate
+ * 缺失时静默跳过。
  */
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 
 const GLOBAL_KEY = "__wordRadarE2eCaffeinate__";
 
-export default function globalSetup(): void {
-  if (process.platform !== "darwin") return;
-  if (spawnSync("caffeinate", ["-v"], { stdio: "ignore" }).error) return;
-  const child: ChildProcess = spawn("caffeinate", ["-is", "-t", "3600"], {
+/** 断言续期检查间隔：远小于 `-t 3600` 的 1h 泄漏兜底，长 run 中最多暴露
+ *  30 分钟无保护窗口的边缘（恰好检查点前后到期）。 */
+const RESPAWN_INTERVAL_MS = 30 * 60 * 1000;
+
+/** globalThis 上挂的守护句柄（teardown 收尾用）。 */
+interface CaffeinateGuard {
+  child: ChildProcess;
+  timer: NodeJS.Timeout;
+}
+
+function spawnCaffeinate(): ChildProcess {
+  const child = spawn("caffeinate", ["-is", "-t", "3600"], {
     stdio: "ignore",
   });
   child.on("error", () => undefined); // ENOENT 等：无防睡眠能力就裸跑
-  (globalThis as Record<string, unknown>)[GLOBAL_KEY] = child;
+  return child;
+}
+
+export default function globalSetup(): void {
+  if (process.platform !== "darwin") return;
+  if (spawnSync("caffeinate", ["-v"], { stdio: "ignore" }).error) return;
+  const guard: CaffeinateGuard = {
+    child: spawnCaffeinate(),
+    timer: undefined as unknown as NodeJS.Timeout,
+  };
+  guard.timer = setInterval(() => {
+    // 续期更新 guard.child 本体（teardown kill 的必须是最新实例）
+    if (guard.child.exitCode !== null || guard.child.signalCode !== null) {
+      guard.child = spawnCaffeinate();
+    }
+  }, RESPAWN_INTERVAL_MS);
+  guard.timer.unref(); // 不阻止 runner 进程自然退出；teardown 仍显式清理
+  (globalThis as Record<string, unknown>)[GLOBAL_KEY] = guard;
 }

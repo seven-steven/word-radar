@@ -131,6 +131,30 @@ describe("runCollection 编排", () => {
     expect("filteredCount" in response ? response.filteredCount : undefined).toBeUndefined();
   });
 
+  it("getFilterSettings 读失败（storage 拒绝）不中止采集：降级缺省全开（issue #53-3）", async () => {
+    const extract = vi.fn(() => ({ entries: [{ lemma: "run", flags: 0 }], filteredCount: 0 }));
+    const broadcast = vi.fn(async () => ({ total: 1, newCount: 1, filteredCount: 0 }));
+
+    const response = await runCollection({
+      collectText: () => "Running",
+      broadcast,
+      extract,
+      getFilterSettings: async () => {
+        throw new Error("storage backend corrupted");
+      },
+    });
+
+    // storage 后端损坏/磁盘 I/O 错误罕见但真实：采集是用户显式动作，
+    // 中止并裸渲染异常字符串比「按缺省开关过滤」伤害更大（缺省即全开，
+    // 与 settings.ts 的承诺一致）。
+    expect(extract).toHaveBeenCalledWith("Running", {
+      filterAbbreviations: true,
+      filterContractions: true,
+    });
+    expect(response).toEqual({ ok: true, total: 1, newCount: 1, filteredCount: 0 });
+    expect(broadcast).toHaveBeenCalledTimes(1);
+  });
+
   it("broadcast 抛错时不吞掉", async () => {
     const broadcast = vi.fn(async () => {
       throw new Error("broadcast boom");
