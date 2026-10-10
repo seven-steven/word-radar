@@ -117,13 +117,44 @@ describe("issue #50 pyjamas→pyjamave regression (Latin -as→-ave negative heu
     expect(lemmatizeWord("pajamas")).toBe("pajamas");
   });
 
-  it("rescues plural -as nouns misread as verbs (scan-verified wider blast radius)", () => {
-    // 2026-09-26 Norvig -as 词全量扫描：top-20000 复数排名外的 -as 复数
-    // 同样中招（动词出口先于名词出口短路 + 双冷僻放行）。
-    expect(lemmatizeWord("arenas")).toBe("arenas");
-    expect(lemmatizeWord("umbrellas")).toBe("umbrellas");
-    expect(lemmatizeWord("pizzas")).toBe("pizzas");
-    expect(lemmatizeWord("orchestras")).toBe("orchestras");
+  it("rescues plural -as nouns to their in-lexicon singulars (sanitizing heuristic, 2026-10-10 grilling)", () => {
+    // 2026-09-26 Norvig -as 词全量扫描发现误读；#50 定稿整词回退，2026-10-10
+    // grilling 改消毒式：负启发只丢弃动词侧伪输出（arenave 类拉丁式变位），
+    // 名词侧在典单数照常胜出——与 wolves→wolf 的聚合政策对齐。名词侧无在典
+    // 单数时仍整词回退（见下一用例 pyjamas）。
+    expect(lemmatizeWord("arenas")).toBe("arena");
+    expect(lemmatizeWord("umbrellas")).toBe("umbrella");
+    expect(lemmatizeWord("pizzas")).toBe("pizza");
+    expect(lemmatizeWord("orchestras")).toBe("orchestra");
+    expect(lemmatizeWord("cameras")).toBe("camera");
+    expect(lemmatizeWord("ideas")).toBe("idea");
+    expect(lemmatizeWord("areas")).toBe("area");
+  });
+
+  it("keeps -as words without an in-lexicon singular as themselves (pyjamas path)", () => {
+    // 消毒后名词侧产物（pyjama 类冷僻变体）不在典——伪变位是 POS 误判的
+    // 产物，此时名词侧输出同样不可信，保守回退原词形（#50 原语义保持）。
+    expect(lemmatizeWord("pyjamas")).toBe("pyjamas");
+    expect(lemmatizeWord("pajamas")).toBe("pajamas");
+  });
+
+  it("fills the singular candidate when toSingular no-ops on -as plurals (adversarial review finding)", () => {
+    // 对抗审查（2026-10-10）：toSingular 对 cinemas/dramas/agendas 空转
+    // （原样返回复数），名词侧候选缺位——剥 s 在典显式补位，修复面不漏。
+    expect(lemmatizeWord("cinemas")).toBe("cinema");
+    expect(lemmatizeWord("dramas")).toBe("drama");
+    expect(lemmatizeWord("agendas")).toBe("agenda");
+  });
+
+  it("keeps -as proper-noun forms as themselves (vegas: Las Vegas corpus-dominant)", () => {
+    // 对抗审查发现：单独 'Vegas'/'vegas' 不被 PASCAL_RE（需 ≥2 大写）与
+    // compromise 专名判定拦截，'Las Vegas' 短语两词都会还原成织女星词元
+    // vega——专名形例外表前置回退。
+    expect(lemmatizeWord("vegas")).toBe("vegas");
+    expect(lemmatizeWord("Vegas")).toBe("vegas");
+    const out = extractWordEntries("Las Vegas hotels");
+    expect(out.entries.map((e) => e.lemma)).toContain("vegas");
+    expect(out.entries.map((e) => e.lemma)).not.toContain("vega");
   });
 
   it("keeps legitimate -as words and the has→have path intact", () => {
@@ -138,6 +169,17 @@ describe("issue #50 pyjamas→pyjamave regression (Latin -as→-ave negative heu
     // 负启发扩大成「双冷僻一律回退原词形」（issue #50 否决的方向 A），此用例先红。
     expect(lemmatizeWord("seafarers")).toBe("seafarer");
     expect(lemmatizeWord("backpackers")).toBe("backpacker");
+  });
+
+  it("pseudo-form guard on the dual-rare pass-through (2026-10-10 grilling: CSS→cs regression)", () => {
+    // css/gps 不在词典截选（缩写词），toSingular 把「辅音串+s」误判复数剥尾 s
+    // 产出 cs/gp——双冷僻放行曾把这类「比原词形更不像词」的伪词放进词库
+    // （cs 再采一次甚至还原成单字母 c）。守卫：双冷僻放行时，输出为超短串
+    // （≤2 字符）或无元音串则回退原词形。canvases→canvase 类长形有元音的
+    // 零误杀语义不变（issue #48）。
+    expect(lemmatizeWord("css")).toBe("css");
+    expect(lemmatizeWord("gps")).toBe("gps");
+    expect(lemmatizeWord("canvases")).toBe("canvase");
   });
 });
 

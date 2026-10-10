@@ -68,6 +68,14 @@ const IRREGULAR_VES_NOUNS: Readonly<Record<string, string>> = {
 };
 
 /**
+ * -as 专名形表（对抗审查发现，2026-10-10）：语料里几乎全是专名第二词的
+ * -as 形（Las Vegas 的 vegas），还原到在典单数（vega 织女星）是伪需求——
+ * 负启发分支前置回退原词形。单独 'Vegas' 不被 PASCAL_RE（需 ≥2 大写）与
+ * compromise 专名判定拦截，上游防线对它失效。
+ */
+const AS_PROPER_NOUN_FORMS: ReadonlySet<string> = new Set(["vegas"]);
+
+/**
  * 保守后缀 fallback 规则（仅当 compromise 未识别出词性时使用）。
  * 每条 = [后缀, 剥离后是否需要额外处理]；stem 必须仍是合法英文词元。
  */
@@ -146,11 +154,16 @@ function inLexicon(word: string): boolean {
  * 词典候选政策（issue #55 / ADR-0003）：双上下文产物按显式优先序裁决。
  * 返回 null 表示两条路径都无产物，交由后缀 fallback。
  *
- * 1. -as 负启发（issue #50）前置：原词 -as 而动词输出 -ave 是 compromise
- *    的拉丁式伪变位（pyjamave/arenave），伪输出不得参与词典裁决，直接回退
- *    原词形。真实英语变位只有 -ave→-aves 与 has→have，后者由
- *    IRREGULAR_VERBS 前置拦截，故此规则零误伤。
- * 2. 词典内词元：动词+名词双上下文的输出中，词典词优先于一切拼接；与原词
+ * 1. -as 负启发（issue #50，消毒式）前置：原词 -as 而动词输出 -ave 是
+ *    compromise 的拉丁式伪变位（pyjamave/arenave），伪输出不得参与词典裁决——
+ *    只消毒动词侧：名词侧在典单数（cameras→camera）照常胜出，无在典产物则
+ *    回退原词形。真实英语变位只有 -ave→-aves 与 has→have，后者由
+ *    IRREGULAR_VERBS 前置拦截，故此规则零误伤。名词侧候选带剥 s 补位
+ *    （toSingular 对 cinemas/dramas/agendas 空转时用「剥 s 在典」补）；
+ *    专名形例外表（AS_PROPER_NOUN_FORMS，vegas）前置回退。
+ * 2. 词典内词元：动词+名词双上下文的输出中，词典词优先于一切拼接；词元
+ *    统一过 realLexeme 判据（在典且含元音——无元音串是在典词频表缩写噪声
+ *    cs/gp/xs，css→cs 类剥尾 s 伪还原由此拒绝）；与原词
  *    形相同的输出视为「无还原」、不作候选（否则 walked 会以词典内词形身份
  *    劫走 walked→walk 的动词还原）。动词词元与名词词元都命中词典的平局
  *    判给名词（lives→life、leaves→leaf）。
@@ -160,7 +173,8 @@ function inLexicon(word: string): boolean {
  *    原词形都排在其前——wolfe/gif 类词典噪声不再有穿透通道。
  * 5. 双冷僻（输出与原词形都不在典，截选外冷僻词）→ 放行名词输出，其次
  *    动词输出（issue #48 的「零误杀」：不丢弃、保持还原输出；名词优先是
- *    平局政策的自然延伸）。
+ *    平局政策的自然延伸）——但输出为超短串/无元音串的伪形（cs/gp 类
+ *    toSingular 剥尾 s 伪产物）时回退原词形。
  */
 function chooseLexicalLemma(
   verbOut: string | null,
@@ -168,11 +182,40 @@ function chooseLexicalLemma(
   original: string,
 ): string | null {
   if (verbOut === null && nounOut === null) return null;
+  // 词元合法性统一判据：在典且含元音——无元音串的「在典」词元是词频表缩写
+  // 噪声（cs/gp/xs/c 类，Norvig 词频表混入的技术缩写），不是真词词元；
+  // css→cs、cs→c 的剥尾 s 伪还原由此拒绝。ly/dy 含 y 不属此类（y 算元音），
+  // 它们的拦截靠 IRREGULAR_VERBS 表前置。2 字符真词（it/by/my）全含元音，
+  // 不受此判据影响（its→it 保持）。
+  const realLexeme = (out: string): boolean => inLexicon(out) && /[aeiouy]/.test(out);
+  // 1. -as 负启发（issue #50，2026-10-10 grilling 改消毒式）：原词 -as 而动词
+  //    输出 -ave 是 compromise 的拉丁式伪变位（pyjamave/arenave），伪输出不得
+  //    参与词典裁决——但只消毒动词侧，不回退整词：名词侧在典单数
+  //    （cameras→camera）是词典证据、照常胜出，与 wolves→wolf 的聚合政策对齐；
+  //    名词侧无在典产物时保守回退原词形（pyjamas→pyjamas，#50 原语义——
+  //    伪变位是 POS 误判产物，此时名词侧输出同样不可信）。真实英语变位只有
+  //    -ave→-aves 与 has→have，后者由 IRREGULAR_VERBS 前置拦截，零误伤。
   if (/as$/.test(original) && verbOut !== null && /ave$/.test(verbOut)) {
-    return original;
+    // 专名对例外：小写 vegas 语料几乎全是 Las Vegas 专名第二词（单独 'Vegas'
+    // 不被 PASCAL_RE/专名判定拦截），还原成织女星词元 vega 属伪需求。
+    if (AS_PROPER_NOUN_FORMS.has(original)) return original;
+    // 名词侧在典单数候选：toSingular 对部分 -as 复数空转（cinemas/dramas/
+    // agendas 原样返回，对抗审查发现），nounOut 缺位时用「剥 s 在典」显式
+    // 补位（与 realLexeme 同判据，词元须含元音）。
+    const singular =
+      nounOut !== null && nounOut !== original && realLexeme(nounOut)
+        ? nounOut
+        : realLexeme(original.slice(0, -1))
+          ? original.slice(0, -1)
+          : null;
+    return singular ?? original;
   }
-  const nounLexeme = nounOut !== null && nounOut !== original && inLexicon(nounOut) ? nounOut : null;
-  const verbLexeme = verbOut !== null && verbOut !== original && inLexicon(verbOut) ? verbOut : null;
+  // 2. 词典内词元：动词+名词双上下文的输出中，词典词优先于一切拼接；与原词
+  //    形相同的输出视为「无还原」、不作候选（否则 walked 会以词典内词形身份
+  //    劫走 walked→walk 的动词还原）。动词词元与名词词元都命中词典的平局
+  //    判给名词（lives→life、leaves→leaf）。
+  const nounLexeme = nounOut !== null && nounOut !== original && realLexeme(nounOut) ? nounOut : null;
+  const verbLexeme = verbOut !== null && verbOut !== original && realLexeme(verbOut) ? verbOut : null;
   if (nounLexeme !== null) return nounLexeme;
   if (verbLexeme !== null) return verbLexeme;
   if (inLexicon(original)) return original;
@@ -186,8 +229,16 @@ function chooseLexicalLemma(
     ].find((c) => c !== out && inLexicon(c));
     if (rescued !== undefined) return rescued;
   }
-  // 5. 双冷僻放行（名词优先；双输出皆无的入口在函数开头已分流到 fallback）。
-  return nounOut ?? verbOut;
+  // 5. 双冷僻放行（名词优先；双输出皆无的入口在函数开头已分流到 fallback），
+  //    加伪形守卫（2026-10-10 grilling）：超短串（≤2 字符）或无元音串比原词形
+  //    更不像词（css/gps 的 toSingular 剥尾 s 伪产物 cs/gp，cs 再还原甚至成单
+  //    字母 c）——这类输出回退原词形；canvases→canvase 类长形有元音的放行
+  //    语义不变（issue #48 零误杀）。
+  const pseudoForm = (out: string): boolean => out.length <= 2 || !/[aeiouy]/.test(out);
+  const passable = [nounOut, verbOut].filter(
+    (out): out is string => out !== null && !pseudoForm(out),
+  );
+  return passable[0] ?? original;
 }
 
 /**
