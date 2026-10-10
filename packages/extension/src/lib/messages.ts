@@ -169,16 +169,17 @@ export interface WordsCollectedMessage {
 /**
  * 确认页预览：新词 = 与本地词库的 lemma diff（零网络请求）。
  * SW 收到 WORDS_COLLECTED 后应答此结构；content 透传给 popup。
- * filteredCount（issue #43，可选）：提取管线拦截数——网页/上传采集有值，
- * IMPORT_CSV 不经提取管线、天然缺省（popup 侧缺省或 0 都不渲染过滤行）。
+ * filteredCount（issue #43）：提取管线拦截数——网页/上传采集携带真实统计，
+ * IMPORT_CSV 不经提取管线、恒为 0（popup 对 0 不渲染过滤行；字段必填，
+ * 「可选三态」已收敛为单一 number，issue #58-6b）。
  */
 export interface BatchPreview {
   /** 本次采集词条总数。 */
   total: number;
   /** 新词数（本地词库没有的 lemma）。 */
   newCount: number;
-  /** 收词过滤拦截数（提取通道携带；CSV 导入缺省）。 */
-  filteredCount?: number;
+  /** 收词过滤拦截数（≥0；CSV 导入不经提取管线，恒为 0）。 */
+  filteredCount: number;
 }
 
 /** popup → background：确认待确认批次（合并入词库 + 触发一轮推送全部待推）。 */
@@ -355,9 +356,9 @@ export function isBatchPreview(value: unknown): value is BatchPreview {
     isObject(value) &&
     typeof value.total === "number" &&
     typeof value.newCount === "number" &&
-    // 可选字段：缺省合法；存在时必须是非负 number（畸形值按整体拒绝）
-    (value.filteredCount === undefined ||
-      (typeof value.filteredCount === "number" && value.filteredCount >= 0))
+    // filteredCount 必填（issue #58-6b）：非负 number，缺省即畸形按整体拒绝
+    typeof value.filteredCount === "number" &&
+    value.filteredCount >= 0
   );
 }
 

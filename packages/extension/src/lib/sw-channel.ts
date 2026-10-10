@@ -94,7 +94,8 @@ export interface SwChannel {
   exportCsv(): Promise<ExportCsvOutcome>;
   /**
    * T11 导入收窄（review S-3：导入同过确认闸门）：
-   * - SW 返回 BatchPreview（解析成功，批次已驻留）→ `{ok:true,total,newCount}`
+   * - SW 返回 BatchPreview（解析成功，批次已驻留）→ `{ok:true,total,newCount,filteredCount}`
+   *   （filteredCount 必填化后恒透传；CSV 导入侧 SW 恒报 0，issue #58-6b）
    * - SW 返回 `{ok:false,error}`（坏 CSV：含文件名 + 行号）→ 原样透传
    * - 任何其他应答 / 抛错 → `{ok:false,"import-unavailable"}`
    */
@@ -183,7 +184,13 @@ export const chromeSwChannel: SwChannel = {
     try {
       const raw: unknown = await chrome.runtime.sendMessage(message);
       if (isBatchPreview(raw)) {
-        return { ok: true, total: raw.total, newCount: raw.newCount };
+        // filteredCount 必填化后恒透传（CSV 导入侧 SW 恒报 0，issue #58-6b）
+        return {
+          ok: true,
+          total: raw.total,
+          newCount: raw.newCount,
+          filteredCount: raw.filteredCount,
+        };
       }
       if (
         typeof raw === "object" &&
@@ -243,7 +250,7 @@ export const chromeSwChannel: SwChannel = {
 /**
  * 上传两通道（UPLOAD_FILE / UPLOAD_TEXT）的应答同构，收窄逻辑抽成一份
  * （code-review Simplify）：
- * - SW 返回 BatchPreview（提取成功，批次已驻留）→ `{ok:true,total,newCount}`
+ * - SW 返回 BatchPreview（提取成功，批次已驻留）→ `{ok:true,total,newCount,filteredCount}`
  * - SW 返回 `{ok:false,error}`（任一文件后缀非法等）→ 原样透传
  * - 任何其他应答 / 抛错 → `{ok:false}`（归一 error "upload-unavailable"，
  *   两条上传通道的失败反馈同文案）
@@ -254,8 +261,8 @@ async function narrowUploadOutcome(
   try {
     const raw = await send();
     if (isBatchPreview(raw)) {
-      // filteredCount（issue #43）：可选透传——SW 带则带、缺省不带
-      // （CSV 导入不经本收窄器，importCsv 自身不带该字段）
+      // filteredCount（issue #43）：必填化后恒透传（issue #58-6b；CSV 导入
+      // 不经本收窄器，importCsv 自行透传、SW 侧恒报 0）
       return {
         ok: true,
         total: raw.total,

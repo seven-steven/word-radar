@@ -57,7 +57,7 @@ export async function runCollection(deps: RunCollectionDeps): Promise<CollectRes
   if (!isBatchPreview(ack)) {
     return { ok: false, error: t("errorRecollectNeeded") };
   }
-  // filteredCount 是提取发生地的统计：SW 只透传（BatchPreview 回程原样带回），
-  // 缺省（undefined）时保持缺省，popup 对缺省与 0 都不渲染过滤行
+  // filteredCount 是提取发生地的统计：SW 只透传（BatchPreview 必填化后回程
+  // 恒为 number，issue #58-6b），popup 对 0 不渲染过滤行
   return { ok: true, total: entries.length, newCount: ack.newCount, filteredCount: ack.filteredCount };
 }

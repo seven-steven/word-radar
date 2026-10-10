@@ -81,14 +81,17 @@ export function createConfirmCard(
       );
     }
     if (dom.filtered) {
-      // >0 才渲染：过滤数为 0 时这行是纯噪音
+      // >0 才渲染：过滤数为 0 时这行是纯噪音。hidden 是唯一可见性开关——
+      // 隐藏分支不清文本（残留旧值不可见，行为等价；避免 textContent+hidden
+      // 双重表达「不可见」，issue #58-6c）
       const filtered = snapshot.filteredCount ?? 0;
-      dom.filtered.textContent = filtered > 0 ? texts.filtered(filtered) : "";
       dom.filtered.hidden = filtered <= 0;
+      if (filtered > 0) dom.filtered.textContent = texts.filtered(filtered);
     }
     if (dom.meta) {
-      dom.meta.textContent = snapshot.meta ?? "";
+      // 同上：hidden 唯一开关，缺省分支不清文本
       dom.meta.hidden = !snapshot.meta;
+      if (snapshot.meta) dom.meta.textContent = snapshot.meta;
     }
     setRevealOpen(dom.section, true);
     if (dom.pushButton) {

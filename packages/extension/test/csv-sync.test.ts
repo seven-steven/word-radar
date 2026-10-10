@@ -112,10 +112,10 @@ describe("CSV 导入（IMPORT_CSV，review S-3 同过确认闸门）", () => {
       type: IMPORT_CSV,
       csvText: "lemma,flags\nrun,0\nnewword,0\n",
       fileName: "in.csv",
-    })) as { total: number; newCount: number };
+    })) as { total: number; newCount: number; filteredCount: number };
 
     // 只驻留批次：预览新词数 = 与词库的 lemma diff（run 已在库，newword 不在）
-    expect(preview).toEqual({ total: 2, newCount: 1 });
+    expect(preview).toEqual({ total: 2, newCount: 1, filteredCount: 0 });
     // 确认前不落库
     expect(await repository.getAll()).toEqual([{ lemma: "run", flags: 1 }]);
 
@@ -183,15 +183,15 @@ describe("CSV 导入（IMPORT_CSV，review S-3 同过确认闸门）", () => {
       type: IMPORT_CSV,
       csvText: "lemma,flags\n",
       fileName: "empty.csv",
-    })) as { total: number; newCount: number };
+    })) as { total: number; newCount: number; filteredCount: number };
     const emptyText = (await sendMessage(listener, {
       type: IMPORT_CSV,
       csvText: "",
       fileName: "empty.csv",
-    })) as { total: number; newCount: number };
+    })) as { total: number; newCount: number; filteredCount: number };
 
-    expect(headerOnly).toEqual({ total: 0, newCount: 0 });
-    expect(emptyText).toEqual({ total: 0, newCount: 0 });
+    expect(headerOnly).toEqual({ total: 0, newCount: 0, filteredCount: 0 });
+    expect(emptyText).toEqual({ total: 0, newCount: 0, filteredCount: 0 });
     // 确认空批次后词库仍不变
     await sendMessage(listener, { type: CONFIRM_COLLECTED });
     expect(await repository.getAll()).toEqual([{ lemma: "run", flags: 0 }]);
@@ -221,8 +221,8 @@ describe("CSV 导入（IMPORT_CSV，review S-3 同过确认闸门）", () => {
       type: IMPORT_CSV,
       csvText: exported.csv,
       fileName: "backup.csv",
-    })) as { total: number; newCount: number };
-    expect(preview).toEqual({ total: 3, newCount: 3 }); // 库已清空，全部为新词
+    })) as { total: number; newCount: number; filteredCount: number };
+    expect(preview).toEqual({ total: 3, newCount: 3, filteredCount: 0 }); // 库已清空，全部为新词
 
     const counts = (await sendMessage(listener, { type: CONFIRM_COLLECTED })) as {
       total: number;

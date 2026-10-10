@@ -112,16 +112,17 @@ describe("isWordsCollectedMessage", () => {
   });
 });
 
-describe("isBatchPreview（含可选 filteredCount）", () => {
-  it("接受缺省与合法 filteredCount", () => {
-    expect(isBatchPreview({ total: 3, newCount: 2 })).toBe(true); // CSV 导入豁免
+describe("isBatchPreview（filteredCount 必填，issue #58-6b）", () => {
+  it("接受合法 filteredCount（含 CSV 导入的恒 0）", () => {
+    expect(isBatchPreview({ total: 3, newCount: 2, filteredCount: 0 })).toBe(true); // CSV 导入恒 0
     expect(isBatchPreview({ total: 3, newCount: 2, filteredCount: 1 })).toBe(true);
     expect(isBatchPreview({ total: 0, newCount: 0, filteredCount: 0 })).toBe(true);
   });
 
-  it("拒绝畸形形状：缺 total/newCount 与非法 filteredCount", () => {
-    expect(isBatchPreview({ total: "3", newCount: 2 })).toBe(false);
-    expect(isBatchPreview({ total: 3, newCount: null })).toBe(false);
+  it("拒绝畸形形状：缺 total/newCount/filteredCount 与非法 filteredCount", () => {
+    expect(isBatchPreview({ total: "3", newCount: 2, filteredCount: 0 })).toBe(false);
+    expect(isBatchPreview({ total: 3, newCount: null, filteredCount: 0 })).toBe(false);
+    expect(isBatchPreview({ total: 3, newCount: 2 })).toBe(false); // 缺 filteredCount：必填，缺省即畸形
     expect(isBatchPreview({ total: 3, newCount: 2, filteredCount: -1 })).toBe(false);
     expect(isBatchPreview({ total: 3, newCount: 2, filteredCount: "1" })).toBe(false);
     expect(isBatchPreview(null)).toBe(false);
@@ -141,16 +142,17 @@ describe("isGetCountsMessage", () => {
 });
 
 describe("isCollectResponse（确认页预览）", () => {
-  it("接受成功（total + newCount）与失败两种形态", () => {
-    expect(isCollectResponse({ ok: true, total: 3, newCount: 2 })).toBe(true);
-    expect(isCollectResponse({ ok: true, total: 0, newCount: 0 })).toBe(true);
+  it("接受成功（total + newCount + filteredCount）与失败两种形态", () => {
+    expect(isCollectResponse({ ok: true, total: 3, newCount: 2, filteredCount: 1 })).toBe(true);
+    expect(isCollectResponse({ ok: true, total: 0, newCount: 0, filteredCount: 0 })).toBe(true);
     expect(isCollectResponse({ ok: false, error: "boom" })).toBe(true);
   });
 
   it("拒绝畸形应答", () => {
     expect(isCollectResponse({ ok: true })).toBe(false);
-    expect(isCollectResponse({ ok: true, total: "3", newCount: 0 })).toBe(false);
-    expect(isCollectResponse({ ok: true, total: 3 })).toBe(false); // 缺 newCount
+    expect(isCollectResponse({ ok: true, total: "3", newCount: 0, filteredCount: 0 })).toBe(false);
+    expect(isCollectResponse({ ok: true, total: 3, filteredCount: 0 })).toBe(false); // 缺 newCount
+    expect(isCollectResponse({ ok: true, total: 3, newCount: 2 })).toBe(false); // 缺 filteredCount（必填化）
     expect(isCollectResponse({ ok: false })).toBe(false);
     expect(isCollectResponse(null)).toBe(false);
     expect(isCollectResponse("ok")).toBe(false);

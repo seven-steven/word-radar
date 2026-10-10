@@ -5,7 +5,7 @@ import { COLLECT_WORDS } from "../src/lib/messages.js";
 function fakeGateway(overrides: Partial<TabsGateway> = {}): TabsGateway {
   return {
     queryActiveTabId: vi.fn(async () => 42),
-    sendToTab: vi.fn(async () => ({ ok: true, total: 5, newCount: 2 })),
+    sendToTab: vi.fn(async () => ({ ok: true, total: 5, newCount: 2, filteredCount: 0 })),
     injectIntoTab: vi.fn(async () => undefined),
     openUrl: vi.fn(async () => undefined),
     ...overrides,
@@ -21,7 +21,7 @@ describe("requestCollection（popup 侧）", () => {
     });
     gateway.sendToTab = vi.fn(async () => {
       order.push("send");
-      return { ok: true, total: 5, newCount: 2 };
+      return { ok: true, total: 5, newCount: 2, filteredCount: 0 };
     });
 
     const outcome = await requestCollection(gateway);
@@ -30,7 +30,7 @@ describe("requestCollection（popup 侧）", () => {
     expect(gateway.queryActiveTabId).toHaveBeenCalledTimes(1);
     expect(gateway.injectIntoTab).toHaveBeenCalledWith(42);
     expect(gateway.sendToTab).toHaveBeenCalledWith(42, { type: COLLECT_WORDS });
-    expect(outcome).toEqual({ ok: true, total: 5, newCount: 2 });
+    expect(outcome).toEqual({ ok: true, total: 5, newCount: 2, filteredCount: 0 });
   });
 
   it("content 应答带 filteredCount 时原样透传（issue #43）", async () => {

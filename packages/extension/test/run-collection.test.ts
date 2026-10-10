@@ -122,13 +122,12 @@ describe("runCollection 编排", () => {
     expect(response).toEqual({ ok: false, error: "Please collect again" });
   });
 
-  it("SW 应答的 filteredCount 缺省时响应保持缺省（popup 不渲染过滤行）", async () => {
+  it("SW 应答缺 filteredCount（畸形）归入请重新采集（filteredCount 必填，issue #58-6b）", async () => {
     const broadcast = vi.fn(async () => ({ total: 1, newCount: 1 })); // 无 filteredCount
 
     const response = await runCollection({ collectText: () => "run", broadcast });
 
-    expect(response).toEqual({ ok: true, total: 1, newCount: 1 });
-    expect("filteredCount" in response ? response.filteredCount : undefined).toBeUndefined();
+    expect(response).toEqual({ ok: false, error: "Please collect again" });
   });
 
   it("getFilterSettings 读失败（storage 拒绝）不中止采集：降级缺省全开（issue #53-3）", async () => {

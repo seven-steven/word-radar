@@ -439,7 +439,7 @@ describe("createBackgroundListener T11 CSV 导入/导出", () => {
     expect(sendResponse).toHaveBeenCalledWith({ ok: false, error: "export-failed" });
   });
 
-  it("IMPORT_CSV：解析成功只驻留待确认批次（countNew 算 diff），不合并、不推送，应答 {total,newCount}；持有通道", async () => {
+  it("IMPORT_CSV：解析成功只驻留待确认批次（countNew 算 diff），不合并、不推送，应答 {total,newCount,filteredCount:0}；持有通道", async () => {
     const repository = fakeRepository();
     repository.countNew = vi.fn(async () => 1);
     const push = fakePushCoordinator();
@@ -461,7 +461,7 @@ describe("createBackgroundListener T11 CSV 导入/导出", () => {
     ]);
     expect(repository.mergeCollected).not.toHaveBeenCalled();
     expect(push.start).not.toHaveBeenCalled();
-    expect(sendResponse).toHaveBeenCalledWith({ total: 2, newCount: 1 });
+    expect(sendResponse).toHaveBeenCalledWith({ total: 2, newCount: 1, filteredCount: 0 });
   });
 
   it("IMPORT_CSV 坏 CSV：应答 {ok:false} 且错误含文件名与行号；不产生任何写入", async () => {
@@ -493,7 +493,7 @@ describe("createBackgroundListener T11 CSV 导入/导出", () => {
     expect(push.start).not.toHaveBeenCalled();
   });
 
-  it("IMPORT_CSV 空 CSV（仅表头）：应答 {total:0,newCount:0}，仍只驻留不合并", async () => {
+  it("IMPORT_CSV 空 CSV（仅表头）：应答 {total:0,newCount:0,filteredCount:0}，仍只驻留不合并", async () => {
     const repository = fakeRepository();
     const push = fakePushCoordinator();
     const listener = createBackgroundListener({ repository, pushCoordinator: push });
@@ -507,7 +507,7 @@ describe("createBackgroundListener T11 CSV 导入/导出", () => {
 
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
     expect(repository.mergeCollected).not.toHaveBeenCalled();
-    expect(sendResponse).toHaveBeenCalledWith({ total: 0, newCount: 0 });
+    expect(sendResponse).toHaveBeenCalledWith({ total: 0, newCount: 0, filteredCount: 0 });
   });
 
   it("IMPORT_CSV 仓库查询失败（countNew 抛错）时应答 {ok:false,error}", async () => {

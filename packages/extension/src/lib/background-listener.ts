@@ -449,7 +449,8 @@ async function handleImportCsv(
     return { ok: false, error: `${fileName}: ${detail}` };
   }
   const newCount = await repository.countNew(entries);
-  return { entries, preview: { total: entries.length, newCount } };
+  // CSV 不经提取管线、无收词过滤：filteredCount 恒为 0（BatchPreview 已必填，issue #58-6b）
+  return { entries, preview: { total: entries.length, newCount, filteredCount: 0 } };
 }
 
 /**

@@ -204,12 +204,12 @@ describe("chromeSwChannel.exportCsv（原 fetchExportCsv 语义迁移）", () =>
 });
 
 describe("chromeSwChannel.importCsv（原 importCsv 语义迁移）", () => {
-  it("发 IMPORT_CSV（带文本与文件名），BatchPreview 包成 {ok:true,total,newCount}", async () => {
-    resolveWith({ total: 8, newCount: 5 });
+  it("发 IMPORT_CSV（带文本与文件名），BatchPreview 包成 {ok:true,...}，filteredCount 透传（CSV 导入侧 SW 恒报 0）", async () => {
+    resolveWith({ total: 8, newCount: 5, filteredCount: 0 });
 
     await expect(
       chromeSwChannel.importCsv("lemma,flags\nrun,0\n", "words.csv"),
-    ).resolves.toEqual({ ok: true, total: 8, newCount: 5 });
+    ).resolves.toEqual({ ok: true, total: 8, newCount: 5, filteredCount: 0 });
     expect(sendMessage).toHaveBeenCalledWith({
       type: IMPORT_CSV,
       csvText: "lemma,flags\nrun,0\n",
@@ -217,12 +217,12 @@ describe("chromeSwChannel.importCsv（原 importCsv 语义迁移）", () => {
     });
   });
 
-  it("CSV 豁免（issue #43）：SW 应答带 filteredCount 也不透传（导入不经提取管线）", async () => {
+  it("CSV 导入不再特判豁免（issue #58-6b 必填化）：SW 报什么 filteredCount 就透传什么", async () => {
     resolveWith({ total: 8, newCount: 5, filteredCount: 9 });
 
     await expect(
       chromeSwChannel.importCsv("lemma,flags\nrun,0\n", "words.csv"),
-    ).resolves.toEqual({ ok: true, total: 8, newCount: 5 });
+    ).resolves.toEqual({ ok: true, total: 8, newCount: 5, filteredCount: 9 });
   });
 
   it("{ok:false,error}（坏 CSV）原样透传", async () => {
@@ -266,11 +266,11 @@ describe("chromeSwChannel.uploadFile（原 uploadFile 语义迁移）", () => {
     expect(sendMessage).toHaveBeenCalledWith({ type: UPLOAD_FILE, files });
   });
 
-  it("SW 应答缺 filteredCount 时 outcome 保持缺省", async () => {
+  it("SW 应答缺 filteredCount（畸形）降级 upload-unavailable（filteredCount 必填，issue #58-6b）", async () => {
     resolveWith({ total: 4, newCount: 2 });
 
     await expect(chromeSwChannel.uploadFile([{ name: "a.txt", text: "x" }]))
-      .resolves.toEqual({ ok: true, total: 4, newCount: 2 });
+      .resolves.toEqual({ ok: false, error: "upload-unavailable" });
   });
 
   it("{ok:false,error} 原样透传；畸形应答 / 抛错归一为 upload-unavailable", async () => {
@@ -307,13 +307,12 @@ describe("chromeSwChannel.uploadText（原 uploadPastedText 语义迁移）", ()
     });
   });
 
-  it("SW 应答缺 filteredCount 时 outcome 保持缺省", async () => {
+  it("SW 应答缺 filteredCount（畸形）降级 upload-unavailable（filteredCount 必填，issue #58-6b）", async () => {
     resolveWith({ total: 5, newCount: 3 });
 
     await expect(chromeSwChannel.uploadText("run and jump")).resolves.toEqual({
-      ok: true,
-      total: 5,
-      newCount: 3,
+      ok: false,
+      error: "upload-unavailable",
     });
   });
 

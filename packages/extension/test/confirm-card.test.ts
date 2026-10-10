@@ -5,7 +5,8 @@
  * 后的可测矩阵。
  *
  * 覆盖行为合同（逐字保持自 popup 原实现）：
- * - render：summary/filtered(>0 与 =0)/meta 的文本与 hidden、reveal 开、
+ * - render：summary/filtered(>0 与 =0)/meta 的文本与 hidden（hidden 唯一
+ *   可见性开关，issue #58-6c：隐藏分支不清文本）、reveal 开、
  *   pushButton 聚焦并解禁、快照记录、onRendered 联动。
  * - hide：reveal 关、卡内焦点回收至 focusReturnTarget（卡外焦点不抢）、
  *   onHidden 联动。
@@ -97,20 +98,26 @@ describe("confirm-card module（#54 Wave E）", () => {
     expect(hooks.onHidden).not.toHaveBeenCalled();
   });
 
-  it("render：filteredCount=0 → filtered 行隐藏且文本清空（>0 才渲染）", () => {
+  it("render：filteredCount=0 → filtered 行隐藏（hidden 唯一开关，>0 才写文本）", () => {
     const card = createConfirmCard(dom, makeTexts(), hooks);
     card.render({ sourceKey: "sourceImport", total: 7, newCount: 2, filteredCount: 0 });
 
-    expect(dom.filtered?.textContent).toBe("");
     expect(dom.filtered?.hidden).toBe(true);
   });
 
-  it("render：缺省 filteredCount（CSV 导入）同 =0 隐藏；缺省 meta → meta 行隐藏", () => {
+  it("render：重渲 filtered>0 → filtered=0，行隐藏且残留旧文本不可见（issue #58-6c）", () => {
+    const card = createConfirmCard(dom, makeTexts(), hooks);
+    card.render({ ...COLLECT_CARD }); // filteredCount: 4，文本已写入
+    card.render({ sourceKey: "sourceImport", total: 7, newCount: 2, filteredCount: 0 });
+
+    expect(dom.filtered?.hidden).toBe(true);
+  });
+
+  it("render：缺省 filteredCount（CSV 导入快照）同 =0 隐藏；缺省 meta → meta 行隐藏", () => {
     const card = createConfirmCard(dom, makeTexts(), hooks);
     card.render({ sourceKey: "sourceImport", total: 7, newCount: 2 });
 
     expect(dom.filtered?.hidden).toBe(true);
-    expect(dom.meta?.textContent).toBe("");
     expect(dom.meta?.hidden).toBe(true);
   });
 
