@@ -21,7 +21,7 @@
 
 1. 作为英语学习者,我想在阅读英文网页时一键提取全文生词,以便不用手动逐个查词录入。
 2. 作为英语学习者,我想只提取网页正文(排除导航/广告/代码),以便得到的词都是有学习价值的真实词汇。
-2a. 作为英语学习者,我想采集时自动拦掉缩略/截短词(md、doc、stat)与缩合形式(you've、aren't)——它们不是值得背的标准词形,被拦的只在摘要里计数;两类拦截我可以分别关闭,高频简单词(a、the)不受影响(入一次库、背一次即无害)。
+   2a. 作为英语学习者,我想采集时自动拦掉缩略/截短词(md、doc、stat)与缩合形式(you've、aren't)——它们不是值得背的标准词形,被拦的只在摘要里计数;两类拦截我可以分别关闭,高频简单词(a、the)不受影响(入一次库、背一次即无害)。
 3. 作为英语学习者,我想选中网页上的一段文字后只提取这段的生词,以便针对特定段落精准收集。
 4. 作为英语学习者,我想提取出的词自动按词形还原去重(running/runs/ran 算作 run),以便同一词的不同变形不会重复出现。
 5. 作为不背单词用户,我想提取出的词自动添加到我的不背单词生词本,以便直接在不背单词 APP 里背诵。
@@ -31,11 +31,11 @@
 9. 作为不背单词用户,我想推送失败的词保留为待推状态、之后能重试,以便网络抖动不会丢词。
 10. 作为用户,我想在扩展弹窗里看到「本次共计采集 total 个单词,其中新词 x 个」,并经我确认后才入库推送,以便误采集不污染词库、推送的词都在我知情之下。
 11. 作为用户,我想在扩展弹窗里实时看到推送进度(已推送/待推/词库总词数、成功/已存在/失败计数),推送在后台继续不因关闭弹窗而中断,以便随时了解状态。
-11a. 作为用户,我想在扩展弹窗的多模态上传画布上传文件采集生词(支持点击唤起文件选择器、拖放文件/文件夹、粘贴文本/文件三种输入手势;拖放文件夹递归展开,一次上传操作的全部文件整批算一次采集、同过确认闸门;后缀白名单 17 项,白名单外文件只计数摘要反馈;未确认时再次上传按覆盖语义处理),以便批量处理本地段落文本与字幕等材料。
-11b. 作为用户,我想在推送出错时能从弹窗一键导出错误日志,以便反馈问题排查。
-11c. 作为用户,我想在扩展弹窗里手动触发「重新推送待推词」,以便登录后或网络恢复后继续。
-11d. 作为用户,我想点工具栏图标只打开弹窗、不自动采集,对当前页的采集由弹窗内「采集」按钮显式触发,以便我掌控采集时机、避免误采集。
-11e. 作为用户,我想通过右键菜单「采集当前页」或「上传文件采集生词」直达对应采集动作(「采集当前页」仅 http/https 页面可用,「上传文件」不限页面),以便不用先进弹窗再找入口。
+    11a. 作为用户,我想在扩展弹窗的多模态上传画布上传文件采集生词(支持点击唤起文件选择器、拖放文件/文件夹、粘贴文本/文件三种输入手势;拖放文件夹递归展开,一次上传操作的全部文件整批算一次采集、同过确认闸门;后缀白名单 17 项,白名单外文件只计数摘要反馈;未确认时再次上传按覆盖语义处理),以便批量处理本地段落文本与字幕等材料。
+    11b. 作为用户,我想在推送出错时能从弹窗一键导出错误日志,以便反馈问题排查。
+    11c. 作为用户,我想在扩展弹窗里手动触发「重新推送待推词」,以便登录后或网络恢复后继续。
+    11d. 作为用户,我想点工具栏图标只打开弹窗、不自动采集,对当前页的采集由弹窗内「采集」按钮显式触发,以便我掌控采集时机、避免误采集。
+    11e. 作为用户,我想通过右键菜单「采集当前页」或「上传文件采集生词」直达对应采集动作(「采集当前页」仅 http/https 页面可用,「上传文件」不限页面),以便不用先进弹窗再找入口。
 12. 作为用户,我想把扩展里的词库导出成 CSV 文件,以便备份或交给 CLI 处理。
 13. 作为用户,我想把 CSV 文件导入扩展的词库,以便把 CLI 清洗出的词纳入推送流程。
 14. 作为用户,我想导入时已有的推送状态不丢失(同词合并、flags 取或),以便重复导入不会把已推词变回待推。
@@ -80,9 +80,10 @@ run,1
 
 - Unicode NFKC 规范化(弯引号→`'`、Unicode 连字符→`-`)。
 - 分词:识别英文词(含内部 `'`/`-`,如 well-known;含撇号形式的去留由所有格剥离与收词过滤两步决定);同时保留 URL/email/路径/代码标识符候选,交给形态校验(`isEnglishWord`)拒绝(避免把 https/example/com 当词)。
-- 形态校验:排除 URL、email、路径、纯数字、`snake_case`、`camelCase`、`PascalCase`、含 `$`、含数字的标识符;用 compromise 的 `#ProperNoun` 默认排除专名(可开关)。
-- 所有格剥离:词尾 `'s` 剥除后按普通词条继续(dog's→dog、serendipity's→serendipity)。属归一化不属收词过滤,不受过滤开关控制,永远执行。
-- 词形还原:用 **compromise**(`verbs().toInfinitive()` / `nouns().toSingular()`),配不规则动词表 + 保守后缀 fallback;产出统一过词典级守门 finalize(Norvig top-20000 静态词典,`scripts/build-lexicon.mjs` 构建):畸形 lemma 回退原词形(this→this、active→active),-f/-fe 拼接形态须本身过词典(knives→knife 保留),截选外冷僻词(词形与还原输出双双不在典)保持还原输出零行为变化(issue #48),唯一例外是 -as→-ave 拉丁式伪变位负启发——原词 -as 结尾而输出 -ave 结尾(compromise 误判动词三单的伪词,pyjamas→pyjamave、arenas→arenave)回退原词形(issue #50)。
+- 形态校验:排除 URL、email、路径、纯数字、`snake_case`、`camelCase`、**混合大小写的 PascalCase**(GitHub、XMLHttpRequest;纯全大写 LONDON/FOX 放行,交给大小写折叠,issue #56)、含 `$`、含数字的标识符;用 compromise 的 `#ProperNoun` 默认排除专名(可开关)。
+- 所有格剥离:词尾 `'s` 剥除后按普通词条继续(dog's→dog、serendipity's→serendipity),大小写不敏感(dog'S→dog,issue #56——剥离是无条件归一化,大写 S 不得把词条挤进缩合形式误计数)。属归一化不属收词过滤,不受过滤开关控制,永远执行。
+- 大小写折叠(2026-10-10 grilling 定稿,ADR-0003 关联决策):全大写词形过完**原始大小写**的专名检查(LONDON 仍被排除)与缩略词黑名单预查(FBI/NASA/BBC 计数拦截,先于专名排除——compromise 同样把它们判 #ProperNoun)后,按小写形继续管线(THE→the、FOX→fox)。属归一化不属收词过滤;折叠点必须在专名排除之后,先折叠会让 LONDON→london 逃过排除。
+- 词形还原:用 **compromise**(`he X` 动词上下文 `toInfinitive()` + `the X` 名词上下文 `toSingular()` **双路径并发收集**,不再让「动词先跑、命中即返回」的代码顺序决定结果,issue #55/ADR-0003),配不规则动词表 + 不规则 f/fe 复数表(toSingular 双 POS 撞形失误的显式修正,lives→life)+ 保守后缀 fallback;产出统一过词典候选政策(Norvig top-20000 静态词典,`scripts/build-lexicon.mjs` 构建)按显式优先序裁决:-as→-ave 拉丁式伪变位负启发前置回退原词形(pyjamas→pyjamave、arenas→arenave,issue #50);**词典内词元优先于一切拼接**、动词/名词词元都在词典的平局判给名词(leaves→leaf、halves→half;与原词形相同的输出视为无还原、不作候选,防 walked 劫走 walked→walk);原词形在词典优先于拼接(this→this);-f/-fe 拼接救援(knives→knife)降为无词典命中时的兜底(wolfe/gif 类词典噪声不再有穿透通道);双冷僻(输出与原词形都不在典)放行名词输出(issue #48 零误杀,serendipity→serendipity、seafarers→seafarer)。
 - 去重:按 lemma 聚合(小写),合并后只保留 lemma 一行。
 - 收词过滤(2026-09-07 grilling 定稿,详见 ADR-0002):词形还原后按小写 lemma 匹配内置**缩略词黑名单**(缩写/截短/initialism,命中即丢,如 md、doc、stat);剥离 `'s` 后仍含撇号的**缩合形式**(you've、aren't、o'clock)丢弃。被过滤词条不进待确认批次,采集摘要报「已过滤 N 个」,不展开明细、不提供捞回。**高频简单词(a、the)明确不过滤**——一次性入库、推送一次即永为非新词,不为它建词频机制。「过滤缩略词」「过滤缩合形式」两个开关默认全开、用户可各自关闭(popup 设置区,存 chrome.storage.local);黑名单内容内置、不可增删,避免误删内置条目导致过滤静默退化。网页采集、上传文件、CLI extract 全走同一条 core 提取管线,统一生效;CSV 导入不经提取管线,天然豁免;CLI 第一版不带开关参数,恒默认全开(CSV 可手动编辑是天然后门)。黑名单数据在构建期生成:Wiktionary clipping/abbreviation/initialism 标签词条提取(定义行纯度过滤) + 高频守卫(手工闭类功能词表 + Norvig top-5000 及其词形还原形,验收正向词 md/doc/stat 豁免守卫,issue #49 提界) + 手工 initialism 种子表(md 的英文词条是埃及语转写,标签通道抓不到它);**不做**无元音短串盲启发式(会误杀 my/by/why 这类无元音简单词)。验收线:md/doc/stat/you've/aren't 命中,serendipity/serendipity's/dog's/monorepo 放行。
 - 公开 API:`extractWordEntries(text, options) → { entries: {lemma, flags:0}[], filteredCount: number }`(返回对象:词条数组 + filteredCount 为收词过滤拦截数;options 增补 `filterAbbreviations`/`filterContractions`,默认 true)、`mergeWordEntries(...)`(lemma 合并、flags 按位 OR)、CSV `parse`/`stringify`。
@@ -101,7 +102,7 @@ run,1
 
 ### 扩展行为
 
-- Content script:提取优先级 = 非空选区 → `<article>` → `<main>` → `<body>` 兜底;TreeWalker 收集可见文本,排除 script/style/nav/header/footer/aside/form/pre/code 等 + hidden/aria-hidden/CSS 隐藏。提取后发 `{type:"WORDS_COLLECTED", entries}` 消息;**不写 DB、不发 HTTP**。
+- Content script:提取优先级 = 非空选区 → `<article>` → `<main>` → `<body>` 兜底;TreeWalker 收集可见文本,排除 script/style/nav/header/footer/aside/form/pre/code 等 + hidden/aria-hidden/CSS 隐藏。提取后发 `{type:"WORDS_COLLECTED", entries, filteredCount}` 消息(filteredCount 为提取地统计的收词过滤拦截数,必填);**不写 DB、不发 HTTP**。
 - Service worker:**独占 IndexedDB 写入 + 推送调度 + 所有 HTTP**。收到确认后的批次才合并入库,入库后非阻塞触发推送。
 - 采集确认闸门(2026-08-23 定稿):采集结果驻留内存、**不持久化**,再次采集需重新触发(选区不可重放,退化为全文,接受;2026-09-06 修订:popup 启动不再自动采集,见「采集入口」);确认页展示「本次共计采集 total 个单词,其中新词 x 个」,新词 = 与本地词库的 lemma diff,**零网络请求**;确认 = 合并入库 + 触发一轮「推送词库全部待推」;取消 = 什么都不发生。确认即推送是唯一路径,**无自动推送开关**。新采集的待推与存量待推(如登录恢复时的遗留待推)语义上不区分,同属一个待推池、同一轮推送。
 - 「确认即推送是唯一路径」的精确含义(review 定稿):指**采集/导入 → 推送**这条主路径——批次只有经过用户确认才合并入库并触发推送;登录恢复(checkLogin 成功)触发存量待推重推是**允许的恢复路径**,不算自动推送开关。
@@ -112,7 +113,7 @@ run,1
 - 上传后缀白名单 17 项:txt, md, markdown, csv, log, text, json, srt, vtt, lrc, org, rst, adoc, ass, ssa, html, xml。html/xml 经 DOMParser→innerText 预处理(与网页采集同质的文本获取层),其余 readAsText 直读(实现修订:不取 innerText——detached 文档上它退化为 textContent 会漏进 script/style 源码;改与网页采集同源的 DOMParser→TreeWalker collectVisibleText,commit 72f7809);rtf 明确排除(控制字如 `\par` 是合法词形,会系统性混入、去重无法解决);MIME 兜底沿用现状机制。
 - 整批 = 一次采集(2026-09-06 定稿):一次上传操作的全部文件(含文件夹递归展开)= 一个「上传采集目标」= 单一待确认批次,全部走同一 core 提取管线、同过确认闸门;确认一次放行全部(确认即入库 + 触发一轮推送,模型不变)。拖入文件夹 = 递归全树收集白名单文件 + 双上限:文件数与总字节(量级 200 个 / 20MB,实现期可调);超限不静默截断,向用户反馈(拒绝整批或用户确认)。非白名单文件计数摘要反馈(如「已收录 N 个文件,忽略 M 个(.jpg .pdf)」),只报后缀类别、不展开文件名。
 - 覆盖语义(2026-09-06 定稿):待确认批次单驻留,网页批次与上传批次同为单驻留;未确认时再次拖放/粘贴 = 覆盖旧上传批次,画布提示替换文案;若当前驻留的是网页采集批次,覆盖前弹提示「上传将丢弃网页采集批次」。
-- 推送协调器:顺序 = checkLogin → listPending → 逐词串行(checkExists→lookup→addWord);并发 1、词间 ~400ms;单请求最多 3 次重试(0/800ms/2000ms),4xx 不重试;401/403/check-login 失败立即暂停并保留 pending;远端已存在也标记已推;同一时刻只跑一个推送循环,运行中的轮收到新 start 请求时(BUSY 去重,对外仍返回同一 promise)转为补轮标记,轮以 completed 收尾后自动补一轮推走期间新入池的词——「确认即推送」不被 BUSY 去重滞留;paused/异常收尾不补轮,pause 语义优先,滞留词由登录恢复/冷启动恢复路径兜底(issue #47)。推送跑在 SW,**popup 关闭不中断**。
+- 推送协调器:顺序 = checkLogin → listPending → 逐词串行(checkExists→lookup→addWord);并发 1、词间 ~400ms;单请求最多 3 次重试(0/800ms/2000ms),4xx 不重试;401/403/check-login 失败立即暂停并保留 pending;远端已存在也标记已推;同一时刻只跑一个推送循环,确认路径(确认合并/导入)运行中收到新 start 请求时(BUSY 去重,对外仍返回同一 promise)转为补轮标记,轮以 completed 收尾后**延迟一个可观测窗口(~600ms ≥ 弹窗 500ms 轮询间隔)**自动补一轮推走期间新入池的词——轮 A 的「推送完成 成功 N」回执先可被弹窗轮询观察到,再进轮 B 的 running 重置(issue #57);登录恢复/冷启动两个恢复入口 BUSY 期不置补轮标记(login-recovery 走 startIfIdle、查池非空且空闲才起轮)——补轮标记只属于真实改动待推池的调用方,BUSY 期弹窗 boot 不再空转出 0/0/0 回执(#36 语义);paused/异常收尾不补轮,pause 语义优先,滞留词由登录恢复/冷启动恢复路径兜底(issue #47)。推送跑在 SW,**popup 关闭不中断**。
 - 推送进度实时展示:popup 订阅推送状态实时刷新,只展示汇总计数(已推送/待推/词库总词数/成功/已存在/失败),不逐词标注;失败由后台重试 + 保留待推 +「重试待推词」按钮兜底。错误日志存 `chrome.storage.local` 环形缓冲(最近 ~200 条),popup 提供导出。
 - badge 状态字(2026-08-23 grilling 修订,覆盖旧规则):推送期间 `x/y` 数字进度(蓝);推送完成 `✓`(绿);待确认批次 `?`(灰);**`!`(红)= 推送 paused**(auth 失败或顶层异常,**任何让自动推送停下来等用户的 pause 都算异常**),由下一轮推送结果自然清除(登录恢复触发重推 / SW 冷启动自动恢复),无专门清除逻辑。**未登录本身不亮 badge**(checkLogin 失败不再独立置 `!`,`loggedOut` badge 规则删除)——未登录只在导致推送 pause 时才通过 `!` 表达。**单词级失败(3 次重试耗尽)不亮 badge**,失败词留待推、下轮(冷启动自动恢复)重试。零新权限。
 - 登录引导:popup 提示(2026-08-23 修订:action badge 不再承担登录引导——未登录不亮 badge,登录失效经推送 pause 的 `!` 间接表达),提供「打开不背单词」按钮(打开 `https://bbdc.cn/`,不固化深层 login URL)。第一版不申请 notifications 权限。
@@ -154,7 +155,7 @@ run,1
 
 **v1.1 增补(2026-09-06 to-spec 定稿,上传画布/右键菜单/显式采集入口):**
 
-- 接缝沿用现有两个、零新增:e2e(Playwright + Chromium 加载扩展,test/e2e/*.spec.ts;上文「端到端 = 手工」写作时 e2e 尚未自动化,现已有 popup/collect/push 等 spec 先例)与 SW 消息层集成(createBackgroundListener 依赖注入工厂,node 侧 mock chrome.*,先例 background-listener.test)。
+- 接缝沿用现有两个、零新增:e2e(Playwright + Chromium 加载扩展,test/e2e/_.spec.ts;上文「端到端 = 手工」写作时 e2e 尚未自动化,现已有 popup/collect/push 等 spec 先例)与 SW 消息层集成(createBackgroundListener 依赖注入工厂,node 侧 mock chrome._,先例 background-listener.test)。
 - e2e 覆盖(只断言用户可见行为):三种输入手势(拖放含目录、粘贴文本/文件、点击唤起选择器)→ 白名单过滤与计数摘要 → 双上限反馈 → 待确认批次呈现(总计/新词计数语义与网页采集一致)→ 覆盖语义(再次上传替换提示、覆盖网页批次前提示)→ 确认/取消;html/xml 经 DOMParser 预处理后的提取效果(不在 node 侧 mock DOM);popup 打开默认态(不自动采集)。
 - SW 集成覆盖:多文件上传协议(含目录展开后的文件批)、批次单驻留与覆盖、contextMenus.onClicked 两菜单项 → 唤起标记写入与 openPopup 调用(mock chrome.action.openPopup)。
 - 右键菜单链路不进 e2e:扩展右键项在浏览器原生菜单中,Playwright 无法点击,该链路由 SW 集成接缝覆盖。
