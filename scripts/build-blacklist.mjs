@@ -52,13 +52,18 @@ import { resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { loadCoreLemmatizer } from "./lib/load-core-lemmatizer.mjs";
+import {
+  apiGet,
+  sleep,
+  purityVerdict,
+  fetchWikitexts,
+} from "./lib/wikitext.mjs";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const REPO_ROOT = resolve(__dirname, "..");
 const OUT_PATH = resolve(REPO_ROOT, "packages/core/src/blacklist.ts");
 const FIXTURE_PATH = resolve(REPO_ROOT, "packages/core/test/fixtures/top-words-1000.txt");
 
-const API = "https://en.wiktionary.org/w/api.php";
 const HEADERS = {
   "User-Agent":
     "word-radar-build-blacklist/2.0 (repository: seven-steven/word-radar; build-time fetch, not runtime)",
@@ -76,13 +81,11 @@ const NORVIG_URL = "https://www.norvig.com/ngrams/count_1w.txt"; // word<TAB>cou
 const GUARD_TOP_DEFAULT = 5000; // ≥1000 覆盖 fixture；5000 构造性覆盖 fox@3222（issue #49）及 cat/pass 类常用真词
 const GUARD_TOP_MAX = 5000;
 const FIXTURE_TOP = 1000;
-const WIKITEXT_BATCH = 50; // MediaWiki 非机器人 titles 上限
 const CORE_SRC_DIR = resolve(REPO_ROOT, "packages/core/src");
-// 纯度阈值：整页（==English== 全部顶层定义行）首模板属缩略族的占比 ≥ 1/5。
-// 1/5 由争议页实证夹逼（2026-09-09 全量缓存验证）：fbi 整页 1/5（真 initialism，须救）
-// 与 progressive 整页 1/12（真词页被一个 clip-of 脚注义带进类目，须杀）之间；
-// doc 1/4、stat 1/3 稳过，invest 0、substitute 1/10 稳杀。整数判定 5*abbrev >= total。
-const PURITY_THRESHOLD_NUM = 5;
+// 纯度阈值与判定链（WIKITEXT_BATCH / PURITY_THRESHOLD_NUM / purityVerdict /
+// fetchWikitexts 等）自 issue #51 修复起收在 ./lib/wikitext.mjs 单一事实源，
+// 词条级 patch 脚本（scripts/patch-blacklist-lowercase-veto.mjs）共用，
+// 两处不得分叉。阈值取值的实证夹逼见 lib 内注释。
 
 // `--resume`：断点续跑。类目成员 / 词条 wikitext / Norvig 原文缓存到 /tmp，
 // 抓取中断后重跑可跳过已完成部分。默认（不带 flag）永远实时抓取。
@@ -97,36 +100,7 @@ const CACHE_WIKITEXT = resolve(CACHE_DIR, "word-radar-blacklist-wikitext-cache.j
 const CACHE_NORVIG = resolve(CACHE_DIR, "word-radar-blacklist-norvig.txt");
 
 /**
- * 定义行首模板的缩略族白名单（Wiktionary 模板名，小写，含长短变体）。
- * 2026-09-09 对全部缓存页定义行首模板做频次统计得出的完整族谱：
- * initialism of(13.5k) / init of(12k) / abbreviation of(3.9k) / acronym of(2.3k) /
- * abbr of(1.6k) / clipping of(1.2k) / clip of / abbrev of / sylabbr of /
- * short for / pseudo-acronym of / clipped compound of 及裸模板变体。
- * whitespace 归一后匹配（存在 "init  of" 双空格变体）。
- */
-const ABBREV_TEMPLATES = new Set([
-  "initialism of", "init of", "abbreviation of", "abbrev of", "abbr of",
-  "acronym of", "acro of", "clipping of", "clip of", "short for",
-  "sylabbr of", "syllabic abbreviation of", "pseudo-acronym of",
-  "clipcomp of", "clipped compound of",
-  "initialism", "init", "abbreviation", "abbrev", "abbr", "acronym", "acro",
-  "clipping", "clip", "sylabbr",
-]);
-
-/**
- * 定义行里纯修饰性前导模板：不参与「首模板」判定（否则 {{lb|en|informal}}
- * {{initialism of|...}} 会被误判为非缩略定义）。整行全是修饰模板时按非缩略计。
- */
-const MASK_TEMPLATES = new Set([
-  "lb", "lbl", "label", "cln",
-  "q", "qual", "qualifier", "i", "italic",
-  "senseid", "defdate",
-  "n-g", "non-gloss", "gloss", "gl", "gg", "glossary",
-  "l", "link", "m", "mention", "lang", "lbx",
-]);
-
-/**
- * 纯度判据的实证教训（2026-09-09，落档防回退）：
+ * 纯度判据的实证教训（2026-09-09 落档防回退，2026-10-10 增补 v3）：
  * 1. 「首 POS 块占比」判据必杀 doc——现代 Wiktionary 把 POS 嵌在编号词源下
  *    （===Etymology 1=== → ====Noun====），且 doc 首名词块仅一条无模板释义
  *    （{{lb|en|informal}} A doctor），首块无任何缩略模板可数；
@@ -139,6 +113,12 @@ const MASK_TEMPLATES = new Set([
  *    war←WAR 同构）。v2.1 引入小写真词页一票否决：小写页存在且未过线时
  *    变体页不得担保；无小写页的真缩写（NASA/FBI）与小写页自证者（doc/stat）
  *    均不受影响。实测救回 244 个守卫外日常词，验收线零损伤。
+ * 5. v3（issue #51，2026-10-10）：小写自证不再依赖「类目来源恰好含小写页」
+ *    的偶然性——sad 类真词只有全大写变体页（SAD）入类目，v2.1 否决不可达，
+ *    187+ 个守卫外日常词（分桶报告：sad/silent/egg/wash/juice…）静默误杀。
+ *    修复：对纯度通过词主动拉取其小写词条页，仅 reason==="mixed"（词条
+ *    真实存在且混合词义）构成否决；redirect/no-english 不算（FBI/NASA 类
+ *    真缩写的小写形通常 redirect 到大写页，零误伤）。
  */
 
 /**
@@ -227,36 +207,7 @@ function assert(condition, message) {
   }
 }
 
-function sleep(ms) {
-  return new Promise((r) => setTimeout(r, ms));
-}
-
-async function apiGet(params, { attempts = 8 } = {}) {
-  const url = new URL(API);
-  for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
-  let lastError;
-  for (let i = 0; i < attempts; i++) {
-    try {
-      const res = await fetch(url, { headers: HEADERS, signal: AbortSignal.timeout(60_000) });
-      if (res.status === 429 || res.status >= 500) {
-        // Wikimedia 对共享出口 IP 间歇性 429：尊重 Retry-After，加随机抖动拉长退避
-        const retryAfter = Number(res.headers.get("retry-after")) || 0;
-        throw Object.assign(new Error(`HTTP ${res.status}`), { rateLimited: res.status === 429, retryAfter });
-      }
-      if (!res.ok) throw new Error(`HTTP ${res.status} for ${url.pathname}${url.search}`);
-      return await res.json();
-    } catch (err) {
-      lastError = err;
-      const limited = err.rateLimited;
-      const backoff = limited
-        ? Math.max(3000, err.retryAfter * 1000) + Math.floor(Math.random() * 2000)
-        : 2000 * 2 ** i;
-      console.error(`build-blacklist: 请求失败（${err instanceof Error ? err.message : err}），${backoff}ms 后重试`);
-      await sleep(backoff);
-    }
-  }
-  throw lastError;
-}
+// sleep / apiGet 自 ./lib/wikitext.mjs 共享导入（issue #51 修复抽出）。
 
 /** 大文件下载（Norvig 词料），复用退避策略。 */
 async function downloadText(url) {
@@ -331,140 +282,7 @@ function normalizeTitle(title) {
   return /^[a-z]+$/.test(lowered) ? lowered : null;
 }
 
-// ---------- 层1：定义行纯度过滤 ----------
-
-/** 解析 wikitext 标题行：返回 { level, name } 或 null。 */
-function parseHeading(line) {
-  const m = /^(={2,6})([^=].*?)\1\s*$/.exec(line);
-  if (!m) return null;
-  return { level: m[1].length, name: m[2].trim() };
-}
-
-/** 取 ==English== 段落原文（到下一个 L2 标题为止）。 */
-function extractEnglishSection(wikitext) {
-  const lines = wikitext.split("\n");
-  let start = -1;
-  for (let i = 0; i < lines.length; i++) {
-    const h = parseHeading(lines[i]);
-    if (h && h.level === 2) {
-      if (h.name.toLowerCase() === "english") {
-        start = i + 1;
-        break;
-      }
-      if (start >= 0) break; // English 已过（理论上不会：Translingual 在前）
-    }
-  }
-  if (start < 0) return null;
-  const out = [];
-  for (let i = start; i < lines.length; i++) {
-    const h = parseHeading(lines[i]);
-    if (h && h.level <= 2) break;
-    out.push(lines[i]);
-  }
-  return out.join("\n");
-}
-
-/**
- * 统计英文段全部顶层定义行：总行数与「首模板属缩略族」的行数。
- * 首模板判定跳过纯修饰模板（MASK_TEMPLATES）；整行皆修饰按非缩略计（保守）。
- */
-function analyzeEnglishDefinitions(englishSection) {
-  let defCount = 0;
-  let abbrevCount = 0;
-  for (const line of englishSection.split("\n")) {
-    if (!/^#(?![*:=])/.test(line)) continue; // 顶层定义行（排除 ## 嵌套 / #: 例句 / #* 引文）
-    defCount++;
-    let head;
-    for (const m of line.matchAll(/\{\{\s*([^{}|]+)/g)) {
-      const name = m[1].trim().toLowerCase().replace(/\s+/g, " ");
-      if (MASK_TEMPLATES.has(name)) continue;
-      head = name;
-      break;
-    }
-    if (head !== undefined && ABBREV_TEMPLATES.has(head)) abbrevCount++;
-  }
-  return { defCount, abbrevCount };
-}
-
-/**
- * 词条页纯度判定：整页定义行缩略族占比 ≥ 1/5（整数判定 5*abbrev >= total）
- * 才是「真缩略页」。无定义行的页丢弃（保守）。
- */
-function purityVerdict(wikitext) {
-  if (!wikitext) return { pass: false, defCount: 0, abbrevCount: 0, reason: "no-content" };
-  if (/^#redirect/i.test(wikitext.trim())) {
-    return { pass: false, defCount: 0, abbrevCount: 0, reason: "redirect" };
-  }
-  const section = extractEnglishSection(wikitext);
-  if (section === null) return { pass: false, defCount: 0, abbrevCount: 0, reason: "no-english" };
-  const { defCount, abbrevCount } = analyzeEnglishDefinitions(section);
-  if (defCount === 0) return { pass: false, defCount, abbrevCount, reason: "no-defs" };
-  const pass = PURITY_THRESHOLD_NUM * abbrevCount >= defCount;
-  return {
-    pass,
-    defCount,
-    abbrevCount,
-    reason: pass ? "pure" : "mixed",
-  };
-}
-
-/**
- * 批量抓词条 wikitext（50 标题/请求），结果以 JSONL 增量缓存到 /tmp。
- * @param {string[]} titles
- * @returns {Promise<Map<string, string | null>>}
- */
-async function fetchWikitexts(titles) {
-  const cache = new Map();
-  if (RESUME && existsSync(CACHE_WIKITEXT)) {
-    for (const line of readFileSync(CACHE_WIKITEXT, "utf8").split("\n")) {
-      if (!line) continue;
-      try {
-        const rec = JSON.parse(line);
-        cache.set(rec.t, rec.w);
-      } catch {
-        // 尾部半行（中断残迹）：忽略
-      }
-    }
-  }
-  const pending = titles.filter((t) => !cache.has(t));
-  console.error(
-    `build-blacklist: wikitext — 共 ${titles.length} 页，缓存命中 ${titles.length - pending.length}，待抓 ${pending.length}`,
-  );
-  for (let i = 0; i < pending.length; i += WIKITEXT_BATCH) {
-    const batch = pending.slice(i, i + WIKITEXT_BATCH);
-    const data = await apiGet({
-      action: "query",
-      titles: batch.join("|"),
-      prop: "revisions",
-      rvprop: "content",
-      rvslots: "main",
-      format: "json",
-      formatversion: "2",
-    });
-    const received = new Map();
-    for (const page of data.query?.pages ?? []) {
-      let content = null;
-      if (!page.missing && page.revisions?.[0]?.slots?.main?.content != null) {
-        content = page.revisions[0].slots.main.content;
-      }
-      received.set(page.title, content);
-    }
-    const lines = [];
-    for (const title of batch) {
-      // 规范化标题差异（API 可能返回规范化后标题）：按收到的键回填，缺的按 null 记
-      const content = received.get(title) ?? null;
-      cache.set(title, content);
-      lines.push(JSON.stringify({ t: title, w: content }));
-    }
-    appendFileSync(CACHE_WIKITEXT, lines.join("\n") + "\n", "utf8");
-    const done = Math.min(i + WIKITEXT_BATCH, pending.length);
-    if (done % 2000 < WIKITEXT_BATCH || done === pending.length) {
-      console.error(`build-blacklist: wikitext 进度 ${done}/${pending.length}`);
-    }
-    await sleep(150);
-  }
-  return cache;
-}
+// ---------- 层1：定义行纯度过滤（判定链在 ./lib/wikitext.mjs） ----------
 
 // ---------- 层2：Norvig 高频守卫 ----------
 
@@ -623,22 +441,30 @@ async function main() {
     if (seedSet.has(word)) continue; // 种子豁免纯度过滤
     for (const t of titles) purityTitles.add(t);
   }
-  const wikitexts = await fetchWikitexts([...purityTitles].sort());
+  const wikitexts = await fetchWikitexts([...purityTitles].sort(), {
+    apiGet,
+    cacheFile: CACHE_WIKITEXT,
+    resume: RESUME,
+    logPrefix: "build-blacklist",
+  });
 
   const pure = new Set();
   const titleReasons = new Map();
   let vetoCount = 0;
+  const needLowerProbe = new Set(); // v3：类目来源无小写自证页的纯度幸存词
   for (const [word, titles] of wordTitles) {
     if (seedSet.has(word)) continue; // 种子不走纯度判定，最后单独合并
     let anyPass = false;
     let lowerPass = false;
     let lowerFail = false;
+    let hasLowerSource = false;
     for (const t of titles) {
       const verdict = purityVerdict(wikitexts.get(t) ?? null);
       titleReasons.set(t, verdict.reason);
       if (verdict.pass) anyPass = true;
       // 小写来源标题（=== 归一化词本身）= 词自身的权威词条页
       if (t === word) {
+        hasLowerSource = true;
         if (verdict.pass) lowerPass = true;
         else lowerFail = true;
       }
@@ -649,8 +475,40 @@ async function main() {
     // 词无小写来源页（NASA/FBI 类真缩写）或小写页自身通过（doc/stat）则不触发。
     const pass = anyPass && (lowerPass || !lowerFail);
     if (anyPass && !pass) vetoCount++;
-    if (pass) pure.add(word);
+    if (pass) {
+      pure.add(word);
+      // v3（issue #51）：v2.1 的否决只对「类目来源恰好含小写页」生效——sad 类
+      // 真词只有全大写变体页（SAD）入类目，否决不可达。幸存且无小写来源页的
+      // 词补一次主动小写词条页探测（下方批量拉取）。
+      if (!hasLowerSource) needLowerProbe.add(word);
+    }
   }
+
+  // v3 小写页主动否决（issue #51 修复）：对无小写自证来源的幸存词拉取其
+  // 小写词条页——reason==="mixed"（词条真实存在且混合词义）= 真词页证据，
+  // 否决出榜；redirect / no-english / no-defs / pure 不构成否决（FBI/NASA
+  // 类真缩写的小写形通常 redirect 到大写页，doc/stat 型小写页自证通过）。
+  if (needLowerProbe.size > 0) {
+    const probeTexts = await fetchWikitexts([...needLowerProbe].sort(), {
+      apiGet,
+      cacheFile: CACHE_WIKITEXT,
+      resume: RESUME,
+      logPrefix: "build-blacklist:lower-probe",
+    });
+    let v3Veto = 0;
+    for (const word of needLowerProbe) {
+      const verdict = purityVerdict(probeTexts.get(word) ?? null);
+      if (verdict.reason === "mixed") {
+        pure.delete(word);
+        v3Veto++;
+        titleReasons.set(word, `${verdict.reason}(v3-probe)`);
+      }
+    }
+    console.error(
+      `build-blacklist: v3 小写页主动否决 — 探测 ${needLowerProbe.size} 词，否决 ${v3Veto}（守卫层与豁免词随后仍会再筛）`,
+    );
+  }
+
   const pureCountAfterPurity = pure.size;
   const purityReasonTally = {};
   for (const r of titleReasons.values()) purityReasonTally[r] = (purityReasonTally[r] ?? 0) + 1;

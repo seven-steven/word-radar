@@ -59,11 +59,23 @@
 - 分派侧批次词表手工切分错位：批 4 少发 21 词（经补判）、批 5 实发 81 词（与批 4 尾部重叠 21）、批 6 实发 130 词（头部接住批 5 缺段）、批 3 实发 85 词。聚合断言验证六批并集恰好 570/570 零缺口零多词，批次重叠由 21 词双盲重判零冲突兜底。
 - agent 消息截断 2 起，改为文件落盘回收（bucket-*.json）。
 
-## 待人工事项
+## 待人工事项 → 处置记录（2026-10-10）
 
-1. **存疑 21 词**：cal pee turbo ted je ist das sox fg ooo aj dod nat jm ver rn cg benz nam una til（其中 cal/pee 为判据边界词，随「修 or 接受」产品决策同场裁决）
-2. **抽检 20 词**：true-clip 抽 tf/sim/sync/rj/mf/val/cz/isp/seq/rh；false-kill 抽 span/mud/calm/mesa/dam/gi/wit/tar/hugo/mae
-3. **「修 or 接受」产品决策**：核心输入=32.8% 用户可见误杀 + 55.4% 有效拦截。若修，现成靶子：纯度否决只认小写自证类目页（`build-blacklist.mjs` `t === word` 分支），经全大写变体页入榜且类目不含小写页时否决失活——词条级修复路径可根治 sad 类误杀。
+1. **存疑 21 词**：已裁决（49-agent 多源核查 + 分歧仲裁，Wiktionary 全页词源级证据）——false-kill 12（turbo/ted/ist/das/sox/ooo/dod/nat/benz/una/til/fg；til 翻案：ME til ← OE 是古英语独立存活词形，非 until 截短）、true-clip 6（je/aj/jm/ver/rn/cg）、unsure 3（cal/nam/pee——判据边界簇，随词汇化家族留观）。三桶终态 **344/223/3**。
+2. **抽检 20 词**：第三轮多源核查错分 **1/20**（sim 被推翻为 false-kill——现代常用名词义已词汇化；机器两轮 true-clip 的「现代义全标 clipping」依据成立但判据边界裁决反向）。
+3. **「修 or 接受」**：用户拍板**修**（2026-10-10）。数字刷新：用户可见真误杀 198/570=34.7%、拦截:误杀≈1.58:1。
+
+### 修复执行（v3 小写词条页主动否决）
+
+- 机制：v2.1 小写自证否决只对「类目来源恰好含小写页」生效——sad 类真词只有全大写变体页（SAD）入类目，否决不可达。v3 对纯度幸存词主动拉取小写词条页，`reason==="mixed"`（词条真实存在且混合词义）即否决；redirect / no-english / no-defs / pure 不构成否决（FBI 类零误伤）。`alt case` / `alternative form of`（大小写/异写变体页，如 rpm→RPM、img→IMG）计入缩略族模板防过杀。
+- 落地：生成器（build-blacklist.mjs 层1）+ 词条级 patch（scripts/patch-blacklist-lowercase-veto.mjs，对已提交产物执行，避免 2.5h 类目重爬与上游漂移噪音）；纯度判定链抽至 scripts/lib/wikitext.mjs 单一事实源。
+- 结果：**16190 → 14667 词**（剔除 1523）。分桶报告的误杀代表词（sad/silent/egg/wash/juice/steam/eve/til/fg/das…）全部出榜（blacklist-data.test 哨兵钉死）；真缩写代表（fbi/ssl/rpm/img/dns/gpu/ssd）留存钉死。
+
+### 出榜口径明示（判据字面的自然推论，产品语义变化）
+
+- **词汇化网络/技术缩写出榜**：asap/aka/lol/afk/afaik/imo/omg/atm/cpu/usb/pdf/nato/ai/io——小写词条页已有非缩略词性用法（mixed），按「有独立非缩略词义即不算缩略语」判据字面出榜；大写形态（NASA/CPU 类）由专名排除兜底。
+- **模板盲点出榜**：hrs（{{plural of|en|hr}}——模板目标身份不可判定）、tvs（lemma→tv 死条目，无损失）。
+- **留榜的词汇化边界家族（grilling 后备）**：sim/sync（小写页全义标 clipping → pure）、turbo（小写页半缩略占比过线）、doc/stat/cal/pee——「截短已词汇化」的判据分歧未由 v3 裁决，留观。
 
 ## 复现
 

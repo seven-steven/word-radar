@@ -61,6 +61,29 @@ describe("ABBREVIATION_BLACKLIST data", () => {
     expect(ABBREVIATION_BLACKLIST.size).toBeGreaterThanOrEqual(1000);
   });
 
+  it("v3 lowercase-page veto removed everyday-word false kills (issue #51 修复回归守卫)", () => {
+    // sad 类真词只有全大写缩写变体页（SAD）入类目，v2.1 小写否决不可达而
+    // 静默误杀；v3（2026-10-10）主动拉小写词条页，reason==="mixed"（词条
+    // 真实存在且混合词义）即否决。样本取自分桶报告误杀榜（含终裁翻案词
+    // til/fg/das——til 是古英语独立存活词形而非 until 截短）。
+    for (const word of ["sad", "silent", "egg", "wash", "juice", "steam", "eve", "til", "fg", "das"]) {
+      expect(ABBREVIATION_BLACKLIST.has(word), `everyday false-kill survived: "${word}"`).toBe(false);
+    }
+    // 真缩写留存：小写形无独立词条（redirect / no-english）或大小写变体页
+    // （alt case / alternative form of 指向大写缩写词条——身份传递）不构成
+    // 否决。不钉的已知出榜项（判据 proxy 粗糙面，大写形态由专名排除兜底）：
+    // nato（小写页含口语化行）、asap/aka（词汇化）、hrs（plural of 模板
+    // 目标身份不可判定）、tvs（lemma→tv 死条目，剔除无损失）。
+    for (const word of ["fbi", "ssl", "rpm", "img", "dns", "gpu", "ssd"]) {
+      expect(ABBREVIATION_BLACKLIST.has(word), `true abbreviation lost: "${word}"`).toBe(true);
+    }
+    // 词汇化边界家族留榜（纯度线射程外，判据分歧留 grilling）：
+    // sim/sync 小写页全义标 clipping（pure）；turbo 小写页半缩略（占比过线）
+    for (const word of ["sim", "sync", "turbo"]) {
+      expect(ABBREVIATION_BLACKLIST.has(word), `lexicalized clip unexpectedly removed: "${word}"`).toBe(true);
+    }
+  });
+
   it("keeps every Norvig top-1000 word unfiltered by the abbreviation blacklist (anti high-frequency false kill tripwire)", () => {
     const fixtureWords = readFileSync(
       fileURLToPath(new URL("./fixtures/top-words-1000.txt", import.meta.url)),
