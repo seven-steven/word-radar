@@ -155,7 +155,7 @@ run,1
 
 **v1.1 增补(2026-09-06 to-spec 定稿,上传画布/右键菜单/显式采集入口):**
 
-- 接缝沿用现有两个、零新增:e2e(Playwright + Chromium 加载扩展,test/e2e/_.spec.ts;上文「端到端 = 手工」写作时 e2e 尚未自动化,现已有 popup/collect/push 等 spec 先例)与 SW 消息层集成(createBackgroundListener 依赖注入工厂,node 侧 mock chrome._,先例 background-listener.test)。
+- 接缝沿用现有两个、零新增:e2e(Playwright + Chromium 加载扩展,`test/e2e/*.spec.ts`;上文「端到端 = 手工」写作时 e2e 尚未自动化,现已有 popup/collect/push 等 spec 先例)与 SW 消息层集成(createBackgroundListener 依赖注入工厂,node 侧 mock `chrome.*`,先例 background-listener.test)。
 - e2e 覆盖(只断言用户可见行为):三种输入手势(拖放含目录、粘贴文本/文件、点击唤起选择器)→ 白名单过滤与计数摘要 → 双上限反馈 → 待确认批次呈现(总计/新词计数语义与网页采集一致)→ 覆盖语义(再次上传替换提示、覆盖网页批次前提示)→ 确认/取消;html/xml 经 DOMParser 预处理后的提取效果(不在 node 侧 mock DOM);popup 打开默认态(不自动采集)。
 - SW 集成覆盖:多文件上传协议(含目录展开后的文件批)、批次单驻留与覆盖、contextMenus.onClicked 两菜单项 → 唤起标记写入与 openPopup 调用(mock chrome.action.openPopup)。
 - 右键菜单链路不进 e2e:扩展右键项在浏览器原生菜单中,Playwright 无法点击,该链路由 SW 集成接缝覆盖。

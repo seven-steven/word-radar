@@ -11,13 +11,16 @@ const EMAIL_RE = /^[^@\s]+@[^@\s]+$/;
 const PATH_RE = /\//;
 /** snake_case：含 `_`。 */
 const SNAKE_RE = /_/;
+/** 含撇号：O'Henry、D'Angelo——不走 Pascal 判据，去留由缩合判据决定。 */
+const APOSTROPHE_RE = /'/;
 /** camelCase：小写后紧跟大写。 */
 const CAMEL_RE = /[a-z][A-Z]/;
-/**
- * PascalCase（混合大小写形态）：首字母大写、后续仍出现大写、且含小写
+/** PascalCase（混合大小写形态）：首字母大写、后续仍出现大写、且含小写
  * （GitHub、XMLHttpRequest、App 组件名）。纯全大写（LONDON、FOX）不在此列
  * ——放行后由提取管线的大小写折叠按小写形继续采集（issue #56，ADR-0003
- * 关联决策；App.tsx 类含路径/数字的仍被上游判据挡掉）。
+ * 关联决策；App.tsx 类含路径/数字的仍被上游判据挡掉）。含撇号的词形
+ * （O'Henry、D'Angelo）不走本判据——撇号词的去留由所有格剥离与收词过滤
+ * 两步决定（spec 明文），不得在形态层零反馈吞掉。
  */
 const PASCAL_RE = /^[A-Z](?=.*[A-Z])(?=.*[a-z])/;
 /** 含 `$`（模板变量、jQuery 等）。 */
@@ -37,7 +40,7 @@ export function isEnglishWord(token: string): boolean {
   if (PATH_RE.test(token)) return false;
   if (SNAKE_RE.test(token)) return false;
   if (CAMEL_RE.test(token)) return false;
-  if (PASCAL_RE.test(token)) return false;
+  if (!APOSTROPHE_RE.test(token) && PASCAL_RE.test(token)) return false;
   if (DOLLAR_RE.test(token)) return false;
   if (DIGIT_RE.test(token)) return false;
   return WORD_RE.test(token);

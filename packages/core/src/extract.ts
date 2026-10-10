@@ -131,8 +131,9 @@ export function extractWordEntries(
     if (!isEnglishWord(token)) continue;
     // 大小写折叠：全大写词先给缩略词黑名单预查机会（BBC 计数拦截），
     // 再过原始大小写的专名检查（LONDON 仍被排除），之后按小写形继续管线。
-    const folded = isAllCaps(token) ? token.toLowerCase() : token;
-    if (folded !== token && intake.rejectsAbbreviation(folded)) continue;
+    const isCaps = isAllCaps(token);
+    const folded = isCaps ? token.toLowerCase() : token;
+    if (isCaps && intake.rejectsAbbreviation(folded)) continue;
     if (excludeProperNouns && isProperNoun(token)) continue;
     if (intake.rejectsContraction(folded)) continue;
     const lemma = lemmatizeWord(folded);

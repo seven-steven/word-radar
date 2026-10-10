@@ -9,7 +9,7 @@ import {
   type CollectResponse,
   type WordsCollectedMessage,
 } from "./messages.js";
-import { getIntakeFilterSettings, type IntakeFilterSettings } from "./settings.js";
+import { getIntakeFilterSettings, DEFAULT_INTAKE_FILTER_SETTINGS, type IntakeFilterSettings } from "./settings.js";
 import { t } from "./i18n.js";
 
 /**
@@ -42,10 +42,9 @@ export async function runCollection(deps: RunCollectionDeps): Promise<CollectRes
   // 开关多滤/少滤几个词」伤害更大——缺省即全开与 settings.ts 的承诺一致。
   // 取舍与 SW 上传路径（extractWithFilters 不降级、走 upload-failed 显式
   // 反馈）不同：采集批次驻留内存、重试成本低，且失败反馈通道只有状态行。
-  const filterSettings = await getFilterSettings().catch(() => ({
-    filterAbbreviations: true,
-    filterContractions: true,
-  } satisfies IntakeFilterSettings));
+  const filterSettings = await getFilterSettings().catch(
+    () => DEFAULT_INTAKE_FILTER_SETTINGS,
+  );
   const text = deps.collectText();
   // 两开关透传给 core；开关语义见 core intake-filter
   const { entries, filteredCount } = extract(text, {

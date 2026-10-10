@@ -183,7 +183,8 @@ function chooseLexicalLemma(
     ].find((c) => c !== out && inLexicon(c));
     if (rescued !== undefined) return rescued;
   }
-  return nounOut ?? verbOut ?? original;
+  // 5. 双冷僻放行（名词优先；双输出皆无的入口在函数开头已分流到 fallback）。
+  return nounOut ?? verbOut;
 }
 
 /**
@@ -205,8 +206,25 @@ function finalizeStem(stem: string, original: string): string {
  * （动词 "he X." / 名词 "the X."，不再让「动词先跑、命中即返回」的代码顺序
  * 决定结果）→ 词典候选政策裁决（chooseLexicalLemma）→ 保守后缀 fallback
  * → 原词。
+ *
+ * 模块级缓存：词形→词元是纯函数（依赖静态词典与 compromise），但双上下文
+ * 并发收集比旧的动词短路路径多一次 nlp() parse——大页面重复词形多（去重前
+ * 每 token 都会路过这里），缓存后每词形只算一次。上限防无界增长，超出整清
+ * （简单优于 LRU）。
  */
+const LEMMA_CACHE_LIMIT = 5000;
+const lemmaCache = new Map<string, string>();
+
 export function lemmatizeWord(word: string): string {
+  const cached = lemmaCache.get(word);
+  if (cached !== undefined) return cached;
+  const lemma = lemmatizeWordUncached(word);
+  if (lemmaCache.size >= LEMMA_CACHE_LIMIT) lemmaCache.clear();
+  lemmaCache.set(word, lemma);
+  return lemma;
+}
+
+function lemmatizeWordUncached(word: string): string {
   const lower = word.toLowerCase();
 
   // 缩写 / 复合词（don't、well-known）不做还原，直接小写。

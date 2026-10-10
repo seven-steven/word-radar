@@ -67,6 +67,15 @@ export interface IntakeFilterSettings {
 }
 
 /**
+ * 收词过滤开关缺省值（缺省即全开）：读取兜底与采集降级（run-collection
+ * 的 storage 读失败 catch）共用一份，缺省语义只此一处、防漂移。
+ */
+export const DEFAULT_INTAKE_FILTER_SETTINGS: IntakeFilterSettings = {
+  filterAbbreviations: true,
+  filterContractions: true,
+};
+
+/**
  * 读收词过滤两开关。键缺失（从未写过）或值非 boolean（脏数据）一律按
  * true 兜底——「缺省即全开」，与 core 的 `?? true` 语义一致，不写默认值
  * 进 storage。
@@ -79,8 +88,10 @@ export async function getIntakeFilterSettings(
     storage.get(FILTER_CONTRACTIONS_KEY),
   ]);
   return {
-    filterAbbreviations: typeof abbreviations === "boolean" ? abbreviations : true,
-    filterContractions: typeof contractions === "boolean" ? contractions : true,
+    filterAbbreviations:
+      typeof abbreviations === "boolean" ? abbreviations : DEFAULT_INTAKE_FILTER_SETTINGS.filterAbbreviations,
+    filterContractions:
+      typeof contractions === "boolean" ? contractions : DEFAULT_INTAKE_FILTER_SETTINGS.filterContractions,
   };
 }
 

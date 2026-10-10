@@ -1055,16 +1055,26 @@ void getIntakeFilterSettings()
   .then(renderIntakeFilterSettings)
   .catch(() => undefined);
 
-// 推送进行中每 ~500ms 拉一次状态，结束即停。
+// 推送进行中每 ~500ms 拉一次状态，结束即停——但完成态不立即收摊：
+// #57 补轮可观测窗口（~600ms）内可能有轮 B 排队（BUSY 期确认的新词），
+// 若见到 completed 就停轮询，轮 B 会在弹窗视野外跑完、pending/计数停在
+// 轮 A 的陈旧值。多观察几个 tick，期间回到 running 则恢复正常轮询，
+// 持续稳定非 running 才停（3×500ms 覆盖 600ms 窗口 + 调度余量）。
 let pushStatusTimer: number | undefined;
+const PUSH_SETTLE_TICKS = 3;
 function startPushStatusPolling(): void {
   if (pushStatusTimer !== undefined) return;
+  let settleTicks = 0;
   const tick = async (): Promise<void> => {
     await refreshPushStatus();
     // 词库计数（待推/已推送）随 SW 的逐词 markPushed 实时变化，轮询期间同步刷新
     await refreshCounts();
     const phase = pushStatusEl?.dataset.phase;
     if (phase === "running") {
+      settleTicks = 0;
+      pushStatusTimer = window.setTimeout(tick, 500);
+    } else if (settleTicks < PUSH_SETTLE_TICKS) {
+      settleTicks += 1;
       pushStatusTimer = window.setTimeout(tick, 500);
     } else {
       pushStatusTimer = undefined;

@@ -240,6 +240,22 @@ describe("issue #56 归一化：所有格剥离大小写不敏感 + 全大写折
     expect(isEnglishWord("Running")).toBe(true); // 句首普通词不受影响
     expect(isEnglishWord("PascalCase")).toBe(false); // 既有拒绝语义保持
   });
+
+  it("含撇号的大写词形不走 PASCAL 判据（去留归专名/缩合判据，code-review 附审）", () => {
+    // O'Henry/D'Angelo 形态上「大写开头+内部大写+含小写」会误中混合大小写
+    // Pascal 判据——但撇号词的去留由专名排除与收词过滤决定（spec 明文），
+    // 形态层不得零反馈吞掉。默认配置下 O'Henry 是 compromise 专名，照常
+    // 走专名排除；显式收录专名后由缩合判据接管（拦并计数）。
+    expect(isEnglishWord("O'Henry")).toBe(true);
+    expect(isEnglishWord("D'Angelo")).toBe(true);
+    const byProper = extractWithBlacklist("O'Henry wrote it");
+    expect(byProper.entries.map((e) => e.lemma)).toEqual(["write", "it"]);
+    const byContraction = extractWithBlacklist("O'Henry wrote it", {
+      excludeProperNouns: false,
+    });
+    expect(byContraction.entries.map((e) => e.lemma)).toEqual(["write", "it"]);
+    expect(byContraction.filteredCount).toBe(1); // o'henry 缩合拦截
+  });
 });
 
 describe("extraction filtering (ADR-0002)", () => {
