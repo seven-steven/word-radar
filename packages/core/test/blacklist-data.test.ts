@@ -84,6 +84,26 @@ describe("ABBREVIATION_BLACKLIST data", () => {
     }
   });
 
+  it("seeds well-known initialisms the guard mis-passed (2026-10-10 grilling C1-i+C2)", () => {
+    // Norvig top-5000 守卫无法区分「高频真词」与「高频真缩写」，这批知名
+    // initialism 从未进榜：css/gps 误放后经 toSingular 剥尾 s 产出伪词 cs/gp
+    // 入库（管线守卫另修，见 lemma 测试）；bbc/nasa/usa 补齐后与 fbi 统一走
+    // 计数拦截（原先靠 compromise 专名判定的零反馈排除，口径不一）。
+    // 与 v3 出榜的词汇化缩写（asap/aka/cpu/usb/pdf…，A2 认出榜）划清界限：
+    // 本批是从未进榜的漏收，不是回捞。
+    for (const word of ["css", "gps", "bbc", "nasa", "usa", "html", "api", "sql", "url", "ceo"]) {
+      expect(ABBREVIATION_BLACKLIST.has(word), `seed initialism missing: "${word}"`).toBe(true);
+    }
+    // 管线级（含 #56 大小写折叠链）：全大写 CSS/GPS 过黑名单预查计数拦截，
+    // 不再入库为剥尾 s 伪词 cs/gp；NASA 与 FBI 同口径计数拦截。
+    // 高频功能词（and/the）明确不过滤（ADR-0002），uses 还原为 use。
+    const out = extractWordEntries("NASA uses CSS and GPS like the FBI does", {
+      excludeProperNouns: true,
+    });
+    expect(out.filteredCount).toBe(4);
+    expect(out.entries.map((e) => e.lemma)).toEqual(["use", "and", "like", "the", "do"]);
+  });
+
   it("keeps every Norvig top-1000 word unfiltered by the abbreviation blacklist (anti high-frequency false kill tripwire)", () => {
     const fixtureWords = readFileSync(
       fileURLToPath(new URL("./fixtures/top-words-1000.txt", import.meta.url)),
@@ -97,8 +117,13 @@ describe("ABBREVIATION_BLACKLIST data", () => {
     // 不触发专名排除与 URL/数字形态拒绝），词形还原后唯一可能的丢弃源是黑名单命中。
     // 默认选项下 compromise 会把 ebay/john/canada 等专名排除（那是专名排除维度的
     // 职责，有自己的测试），不能与黑名单误杀混在一起断言。
+    // 种子豁免（2026-10-10 grilling C1-i+C2）：usa@361/url@798/html@975 是
+    // top-1000 内的人工裁决种子（scripts/build-blacklist.mjs SEED_WORDS）——
+    // 拦截是裁决结果而非误杀，与 build 侧 guardExempt 同语义。
+    const SEEDS_IN_TOP_1000 = new Set(["usa", "url", "html"]);
     const blocked: string[] = [];
     for (const word of fixtureWords) {
+      if (SEEDS_IN_TOP_1000.has(word)) continue;
       const out = extractWordEntries(word, { excludeProperNouns: false });
       if (out.filteredCount > 0 || out.entries.length === 0) blocked.push(word);
     }

@@ -47,7 +47,7 @@
  * 断点续跑：… node scripts/build-blacklist.mjs --resume（类目成员/wikitext/Norvig
  * 原文缓存到 /tmp；调 --guard-top 重跑不需要重新抓 wikitext）。
  */
-import { writeFileSync, readFileSync, existsSync, mkdirSync, appendFileSync, statSync } from "node:fs";
+import { writeFileSync, readFileSync, existsSync, mkdirSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -127,12 +127,23 @@ const CACHE_NORVIG = resolve(CACHE_DIR, "word-radar-blacklist-norvig.txt");
  *   （{{alternative spelling of|egy|mdw}}），不走 clipping/abbreviation/initialism
  *   标签通道，三个类目均不收录，必须手工种子；同时豁免层1纯度过滤
  *   （其定义行是 alternative spelling of，不属缩略族）。（2026-09-09 API 核验）
+ * - 知名 initialism 批（2026-10-10 grilling C1-i+C2 定稿）：css/gps/bbc/
+ *   nasa/usa/html/api/sql/url/ceo。根因：Norvig top-5000 守卫无法区分「高频
+ *   真词」与「高频真缩写」，api/html/url/ceo 等界内真缩写被误放；css/gps
+ *   误放后经 toSingular 剥尾 s 产出伪词 cs/gp 入库（C1-ii 管线守卫另修，
+ *   种子拦截主路径）；bbc/nasa/usa 补齐 initialism 种子后与 fbi 统一走
+ *   计数拦截（原先依赖 compromise 专名判定的零反馈排除，口径不一）。
+ *   与 v3 出榜的词汇化缩写（asap/aka/cpu/usb/pdf…，A2 认出榜）划清界限：
+ *   那批是纯度 proxy 有判定后的出榜，本批是从未进榜的漏收，不是回捞。
  * 曾核查过的候选（均实证无需种子，勿再加回）：
  * - ft：英文词条带 {{abbr of|en|foot}}，自动归入 English abbreviations。
  * - hrs：wikitext 推断疑似漏网，但真实类目抓取证实它已被收录（2026-09-09 构建日志
  *   「类目已收录」），以类目数据为准。
  */
-const SEED_WORDS = ["md"];
+const SEED_WORDS = [
+  "md",
+  "css", "gps", "bbc", "nasa", "usa", "html", "api", "sql", "url", "ceo",
+];
 
 /**
  * 验收线正向词（ADR-0002：md/doc/stat 必须命中黑名单，测试同步断言）。
@@ -322,7 +333,8 @@ function buildBlacklistTs(words, stats) {
  *     小写真词页一票否决大小写变体页担保）
  *   → 层2 守卫（手工闭类功能词表 + Norvig count_1w.txt top-${GUARD_TOP} 高频词
  *     及其词形还原形；验收正向词 md/doc/stat 豁免守卫）
- *   + 手工种子表（md）；
+ *   + 手工种子表（md + 知名 initialism 批：css/gps/bbc/nasa/usa/html/api/
+ *     sql/url/ceo，2026-10-10 grilling 定稿）；
  * 再生成命令：NODE_USE_ENV_PROXY=1 node scripts/build-blacklist.mjs；
  * 断点续跑加 --resume。v2 算法详见脚本头注与 docs/adr/0002。
  * 本次构建：类目候选 ${stats.normalized} → 纯度+否决后 ${stats.afterPurity}
@@ -540,8 +552,9 @@ async function main() {
     `build-blacklist: 守卫表 — 闭类手工 ${GUARD_WORDS.length} + Norvig top-${GUARD_TOP} ` +
       `${norvigGuard.size - stemAdded} + 还原形补丁 ${stemAdded} = ${guardSet.size}`,
   );
-  // 守卫豁免：验收正向词人工裁决必收，优先于自动守卫启发（见 ACCEPTANCE_POSITIVE 注释）
-  const guardExempt = new Set(ACCEPTANCE_POSITIVE);
+  // 守卫豁免：验收正向词 + 种子表整体豁免——人工裁决必收，优先于自动守卫
+  // 启发（种子加词不再需要同步豁免表，构造即保证）
+  const guardExempt = new Set([...ACCEPTANCE_POSITIVE, ...SEED_WORDS]);
   const guardFiltered = [...pure].filter((w) => guardSet.has(w) && !guardExempt.has(w));
   for (const w of guardFiltered) pure.delete(w);
 
@@ -551,12 +564,6 @@ async function main() {
   const final = pure;
 
   // ---------- 自检断言 ----------
-  // 种子表必须全在豁免表内：种子无条件并入（不先过守卫），将来往 SEED_WORDS
-  // 加词若漏同步 ACCEPTANCE_POSITIVE，会静默绕过守卫剔除。
-  assert(
-    SEED_WORDS.every((w) => ACCEPTANCE_POSITIVE.includes(w)),
-    "SEED_WORDS 存在未进 ACCEPTANCE_POSITIVE 的种子——种子绕守卫须显式豁免",
-  );
   for (const w of ACCEPTANCE_POSITIVE) {
     assert(final.has(w), `验收线正向词 "${w}" 不在结果中（纯度通道失效或豁免缺失）`);
   }

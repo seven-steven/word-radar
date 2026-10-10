@@ -5,13 +5,17 @@
  *     小写真词页一票否决大小写变体页担保 + v3 小写词条页主动否决）
  *   → 层2 守卫（手工闭类功能词表 + Norvig count_1w.txt top-5000 高频词
  *     及其词形还原形；验收正向词 md/doc/stat 豁免守卫）
- *   + 手工种子表（md）；
+ *   + 手工种子表（md + 知名 initialism 批：css/gps/bbc/nasa/usa/html/api/
+ *     sql/url/ceo，2026-10-10 grilling 定稿）；
  * 再生成命令：NODE_USE_ENV_PROXY=1 node scripts/build-blacklist.mjs；
  * 断点续跑加 --resume。v2 算法详见脚本头注与 docs/adr/0002。
  * 本次为词条级 patch（issue #51「修」决策，2026-10-10）：对在榜词做 v3
  * 小写词条页主动否决（等价逻辑见 scripts/patch-blacklist-lowercase-veto.mjs
  * 与生成器层1），剔除混合词义词 1523 个；豁免验收线正向词
  * md/doc/stat。基线 16190 → 14667。
+ * 本次种子增补（2026-10-10 grilling C1-i+C2）：css/gps/bbc/nasa/usa/html/
+ * api/sql/url/ceo——守卫误放的知名 initialism 漏收（生成器 SEED_WORDS
+ * 同步）。14667 → 14677。
  */
 export const ABBREVIATION_BLACKLIST: ReadonlySet<string> = new Set([
   "aaa",
@@ -759,6 +763,7 @@ export const ABBREVIATION_BLACKLIST: ReadonlySet<string> = new Set([
   "apg",
   "aph",
   "apha",
+  "api",
   "apida",
   "apipa",
   "apisaa",
@@ -1171,6 +1176,7 @@ export const ABBREVIATION_BLACKLIST: ReadonlySet<string> = new Set([
   "bbbj",
   "bbbm",
   "bbbw",
+  "bbc",
   "bbd",
   "bbe",
   "bbeg",
@@ -2043,6 +2049,7 @@ export const ABBREVIATION_BLACKLIST: ReadonlySet<string> = new Set([
   "cenomar",
   "centcom",
   "centile",
+  "ceo",
   "ceop",
   "ceose",
   "ceph",
@@ -2702,6 +2709,7 @@ export const ABBREVIATION_BLACKLIST: ReadonlySet<string> = new Set([
   "csr",
   "csrf",
   "csrs",
+  "css",
   "cssa",
   "cssom",
   "cstg",
@@ -5080,6 +5088,7 @@ export const ABBREVIATION_BLACKLIST: ReadonlySet<string> = new Set([
   "gpr",
   "gpri",
   "gprs",
+  "gps",
   "gpt",
   "gpu",
   "gpus",
@@ -5683,6 +5692,7 @@ export const ABBREVIATION_BLACKLIST: ReadonlySet<string> = new Set([
   "hthl",
   "htlv",
   "htm",
+  "html",
   "htms",
   "htn",
   "htnb",
@@ -8540,6 +8550,7 @@ export const ABBREVIATION_BLACKLIST: ReadonlySet<string> = new Set([
   "narsol",
   "narth",
   "nas",
+  "nasa",
   "nasams",
   "nasb",
   "nasba",
@@ -12100,6 +12111,7 @@ export const ABBREVIATION_BLACKLIST: ReadonlySet<string> = new Set([
   "sqdg",
   "sqep",
   "sqft",
+  "sql",
   "sqli",
   "sqm",
   "sqn",
@@ -13407,9 +13419,11 @@ export const ABBREVIATION_BLACKLIST: ReadonlySet<string> = new Set([
   "ure",
   "urg",
   "urj",
+  "url",
   "urm",
   "urt",
   "urti",
+  "usa",
   "usac",
   "usace",
   "usada",
