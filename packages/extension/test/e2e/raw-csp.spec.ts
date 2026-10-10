@@ -35,6 +35,10 @@ test("real raw.githubusercontent.com page collects (pre-text with CSP sandbox he
     /本次共计采集 \d+ 个单词，其中新词 \d+ 个/,
     { timeout: 15_000 },
   );
+  // 取消弃批（测试卫生）：驻留批次不清会泄漏给后续用例——upload 用例的
+  // 覆盖确认条（「上传将丢弃网页采集批次」）会拦住它的确认卡。
+  await popup.getByTestId("cancel-collect").click();
+  await expect(popup.getByTestId("confirm-section")).toBeHidden();
   await popup.close();
   await raw.close();
 });
