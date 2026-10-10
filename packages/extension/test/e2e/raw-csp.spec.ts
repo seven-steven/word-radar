@@ -11,7 +11,7 @@
  * 1. 真实 raw URL（text/plain + CSP sandbox 头）整页采集成功
  * 2. 注意标签顺序：popup 必须先开，再把目标页 bringToFront，否则 active tab 是 popup 自己
  */
-import { test, expect } from "./fixtures.js";
+import { test, expect, collectFilterFixture } from "./fixtures.js";
 
 const RAW_URL =
   "https://raw.githubusercontent.com/mattpocock/skills/refs/heads/main/skills/productivity/grill-me/SKILL.md";
@@ -29,12 +29,7 @@ test("real raw.githubusercontent.com page collects (pre-text with CSP sandbox he
   // 先开 popup 再 bringToFront：后开者才是 active tab（raw-pre.spec 同款顺序）
   const popup = await extContext.newPage();
   await popup.goto(popupUrl);
-  await raw.bringToFront();
-  await popup.getByTestId("collect").click();
-  await expect(popup.getByTestId("confirm-summary")).toHaveText(
-    /本次共计采集 \d+ 个单词，其中新词 \d+ 个/,
-    { timeout: 15_000 },
-  );
+  await collectFilterFixture(popup, raw);
   // 取消弃批（测试卫生）：驻留批次不清会泄漏给后续用例——upload 用例的
   // 覆盖确认条（「上传将丢弃网页采集批次」）会拦住它的确认卡。
   await popup.getByTestId("cancel-collect").click();

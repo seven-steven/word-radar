@@ -46,11 +46,10 @@ export async function runCollection(deps: RunCollectionDeps): Promise<CollectRes
     () => DEFAULT_INTAKE_FILTER_SETTINGS,
   );
   const text = deps.collectText();
-  // 两开关透传给 core；开关语义见 core intake-filter
-  const { entries, filteredCount } = extract(text, {
-    filterAbbreviations: filterSettings.filterAbbreviations,
-    filterContractions: filterSettings.filterContractions,
-  });
+  // 两开关透传给 core；开关语义见 core intake-filter。IntakeFilterSettings 即
+  // ExtractOptions 的过滤子集，直传即可——SW 上传路径（background-listener
+  // 的 extractWithFilters）同款
+  const { entries, filteredCount } = extract(text, filterSettings);
   const ack = await deps.broadcast({ type: WORDS_COLLECTED, entries, filteredCount });
   // SW 应答必须是有放回驻留批次的合法 BatchPreview；ack 异常（SW 重启竞态等）
   // 意味着 SW 内存中没有待确认批次，确认页语义已失效——不能谎报

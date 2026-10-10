@@ -79,6 +79,60 @@ export async function drainPendingPool(page: Page): Promise<void> {
 }
 
 /**
+ * e2e 上传夹具临时文件（issue #58-2）：`tmpUpload.write(name, content)` 把
+ * 文件写进本用例独享的 mkdtemp 目录并返回路径。固定 /tmp 路径的旧写法有两
+ * 宗罪——重跑/改动时同名文件互相覆盖，用例失败时留下无人清理的垃圾。
+ * mkdtemp 目录天然唯一（并发安全）；删除挂 fixture teardown——**不走
+ * afterEach + 模块级登记**：Playwright 下每个 spec 文件独立求值 import 图，
+ * 模块级状态与 afterEach 会落到不同实例（probe 实测第二个文件起全部漏删），
+ * fixture 生命周期由 runner 核心管理，跨文件可靠。懒创建：不用例不落目录。
+ * 后缀是上传白名单的判据，调用方按语义命名。
+ */
+export interface TmpUpload {
+  write(name: string, content: string): Promise<string>;
+}
+
+/**
+ * 收词过滤用例的采集底座（issue #43；自 popup.spec 提升为 e2e 共享）：
+ * 开 fixture 文章页 + popup 标签页，等内容脚本注入余量后返回两页；采集动作
+ * 由用例自行驱动——各用例采集前有不同的开关操作（check/uncheck）。
+ */
+export async function openFilterFixturePair(
+  extContext: BrowserContext,
+  popupUrl: string,
+  fixtureServer: { url: string },
+  page = "filter-gate.html",
+): Promise<{ popup: Page; article: Page }> {
+  const article = await extContext.newPage();
+  await article.goto(`${fixtureServer.url}/${page}`);
+  // content script 按 document_idle 注入；给一点余量（collect.spec 同款）
+  await article.waitForTimeout(500);
+  const popup = await extContext.newPage();
+  await popup.goto(popupUrl);
+  return { popup, article };
+}
+
+/**
+ * 把文章页带回前台后点「采集当前页」并等确认卡摘要成形（issue #39：
+ * popup 以标签页模拟时按钮显式触发，采集目标 = 触发时的活动标签）。
+ * 断言文案是缺省批次形状（total / newCount 都不锚具体值）；要锚「新词 ≥1 /
+ * 新词 0」等更紧形状的用例保持内联（push.spec / collect.spec 如此）。
+ * timeout 参数吸收个别用例的 10s 窗口（不改断言语义）。
+ */
+export async function collectFilterFixture(
+  popup: Page,
+  article: Page,
+  timeout = 15_000,
+): Promise<void> {
+  await article.bringToFront();
+  await popup.getByTestId("collect").click();
+  await expect(popup.getByTestId("confirm-summary")).toHaveText(
+    /本次共计采集 \d+ 个单词，其中新词 \d+ 个/,
+    { timeout },
+  );
+}
+
+/**
  * e2e 专用扩展目录：复制 dist 并给 host_permissions 加上 fixture 服务与
  * raw.githubusercontent.com（issue #14 后采集主路径是 executeScript；真实
  * 使用中 popup 由 action 点击打开，activeTab 即刻授权，但 e2e 把 popup 当
@@ -130,8 +184,10 @@ export interface MockBbdc {
   reset(): void;
 }
 
-/** test 级 fixture（当前为空 — 全部 worker 级，整套 run 共享一份扩展状态）。 */
-interface E2eTestFixtures {}
+/** test 级 fixture：用例独享的上传临时目录（tmpUpload.write 懒创建，teardown 删）。 */
+interface E2eTestFixtures {
+  tmpUpload: TmpUpload;
+}
 
 /** worker 级 fixture：单一持久 context + 一份扩展状态，workers=1 串行消费。 */
 interface E2eWorkerFixtures {
@@ -144,6 +200,19 @@ interface E2eWorkerFixtures {
 }
 
 export const test = base.extend<E2eTestFixtures, E2eWorkerFixtures>({
+  tmpUpload: async ({ }, use) => {
+    let dir: string | undefined;
+    await use({
+      async write(name, content) {
+        dir ??= await mkdtemp(join(tmpdir(), "word-radar-e2e-upload-"));
+        const path = join(dir, name);
+        await writeFile(path, content);
+        return path;
+      },
+    });
+    if (dir) await rm(dir, { recursive: true, force: true });
+  },
+
   extContext: [async ({ }, use) => {
     const userDataDir = await mkdtemp(join(tmpdir(), "word-radar-e2e-"));
     const extensionDir = await makeE2eExtensionDir();

@@ -5,7 +5,6 @@
  * 断言重点：确认即推送是唯一路径 + 请求形状（URL / newwordlist JSON / opcode）
  * + 最终 PushStatus 一致性。真实 bbdc.cn 登录路径永不自动化（安全边界）。
  */
-import { writeFileSync } from "node:fs";
 import { test, expect, waitCountsLoaded } from "./fixtures.js";
 
 test.beforeEach(({ mockBbdc }) => {
@@ -274,14 +273,17 @@ test("push progress updates live in popup and badge shows x/y then ✓ (issue #2
 test("completed EMPTY round collapses retry-push and keeps popup scroll-free", async ({
   extContext,
   popupUrl,
+  tmpUpload,
 }) => {
   const page = await extContext.newPage();
   await page.goto(popupUrl);
 
   // 独有词（持久词库）两段式：先导入确认一遍（2 新词入池 + 一轮真实推送），
   // 再导入同一 CSV 确认（新词 0 → 空轮）。上一用例 afterEach 已排空待推池。
-  const csvPath = "/tmp/word-radar-e2e-empty-round.csv";
-  writeFileSync(csvPath, "lemma,flags\nemptyroundgamma,0\nemptyrounddelta,0\n");
+  const csvPath = await tmpUpload.write(
+    "empty-round.csv",
+    "lemma,flags\nemptyroundgamma,0\nemptyrounddelta,0\n",
+  );
 
   const importOnce = async (): Promise<void> => {
     const [chooser] = await Promise.all([
@@ -337,16 +339,21 @@ test("completed EMPTY round collapses retry-push and keeps popup scroll-free", a
 test("follow-up round's receipt is finally rendered in the popup (settle polling pin)", async ({
   extContext,
   popupUrl,
+  tmpUpload,
 }) => {
   test.setTimeout(180_000);
   const page = await extContext.newPage();
   await page.goto(popupUrl);
   await waitCountsLoaded(page);
 
-  const csvA = "/tmp/word-radar-e2e-followup-a.csv";
-  const csvB = "/tmp/word-radar-e2e-followup-b.csv";
-  writeFileSync(csvA, "lemma,flags\nfollowupalpha,0\nfollowupbeta,0\nfollowupgamma,0\n");
-  writeFileSync(csvB, "lemma,flags\nfollowupdelta,0\nfollowupepsilon,0\n");
+  const csvA = await tmpUpload.write(
+    "followup-a.csv",
+    "lemma,flags\nfollowupalpha,0\nfollowupbeta,0\nfollowupgamma,0\n",
+  );
+  const csvB = await tmpUpload.write(
+    "followup-b.csv",
+    "lemma,flags\nfollowupdelta,0\nfollowupepsilon,0\n",
+  );
 
   const importCsv = async (path: string): Promise<void> => {
     const [chooser] = await Promise.all([

@@ -13,7 +13,7 @@
  * 默认 1，viewport 像素 == 文件像素 == 1280×800）。
  */
 import { join } from "node:path";
-import { test, expect } from "./fixtures.js";
+import { test, expect, collectFilterFixture } from "./fixtures.js";
 
 const OUT_DIR = process.env.E2E_SCREENSHOT_DIR;
 const shots = (name: string) => join(OUT_DIR, name);
@@ -52,12 +52,7 @@ test("generates 1280x800 store screenshots of real extension UI", async ({
   const article2 = await extContext.newPage();
   await article2.goto(`${fixtureServer.url}/store-reading.html`);
   await article2.waitForTimeout(500);
-  await article2.bringToFront();
-  await popup.getByTestId("collect").click();
-  await expect(popup.getByTestId("confirm-summary")).toHaveText(
-    /本次共计采集 \d+ 个单词，其中新词 \d+ 个/,
-    { timeout: 15_000 },
-  );
+  await collectFilterFixture(popup, article2);
   // 登录态（mock check-login → 已登录）
   await popup.getByTestId("check-login").click();
   await expect(popup.getByTestId("login-status")).toHaveAttribute("data-state", "logged-in");

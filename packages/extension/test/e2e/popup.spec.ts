@@ -6,9 +6,15 @@
  * i18n 国际化（issue #28）：测试 Chromium 在 fixtures.ts 钉死 zh-CN locale，
  * 断言按中文渲染（也持续验证「中文环境显示中文」这一 issue #28 的主诉）。
  */
-import { writeFileSync } from "node:fs";
 import type { BrowserContext, Page } from "@playwright/test";
-import { test, expect, drainPendingPool, waitCountsLoaded } from "./fixtures.js";
+import {
+  test,
+  expect,
+  drainPendingPool,
+  waitCountsLoaded,
+  openFilterFixturePair,
+  collectFilterFixture,
+} from "./fixtures.js";
 
 test.beforeEach(({ mockBbdc }) => {
   mockBbdc.reset();
@@ -103,13 +109,16 @@ test("push status renders with numeric counters", async ({ extContext, popupUrl 
 test("CSV import goes through the confirmation gate (issue #22 review S-3)", async ({
   extContext,
   popupUrl,
+  tmpUpload,
 }) => {
   const page = await extContext.newPage();
   await page.goto(popupUrl);
 
   // 独有词汇，保证对持久词库是全新词
-  const csvPath = "/tmp/word-radar-e2e-import.csv";
-  writeFileSync(csvPath, "lemma,flags\nimportwordalpha,0\nimportwordbeta,0\n");
+  const csvPath = await tmpUpload.write(
+    "import.csv",
+    "lemma,flags\nimportwordalpha,0\nimportwordbeta,0\n",
+  );
 
   await waitCountsLoaded(page); // 基线读取前置：等 total 脱骨架（骨架屏契约）
   const totalBefore = Number(await page.getByTestId("total").textContent());
@@ -167,13 +176,16 @@ test("upload-canvas walks collect → confirm → push with .txt text (issue #24
   extContext,
   popupUrl,
   mockBbdc,
+  tmpUpload,
 }) => {
   const page = await extContext.newPage();
   await page.goto(popupUrl);
 
   // 独有词汇，保证对持久词库是全新词
-  const txtPath = "/tmp/word-radar-e2e-upload.txt";
-  writeFileSync(txtPath, "The curious astronomer photographed a luminous nebula.\n");
+  const txtPath = await tmpUpload.write(
+    "upload.txt",
+    "The curious astronomer photographed a luminous nebula.\n",
+  );
 
   await waitCountsLoaded(page); // 基线读取前置：等 total 脱骨架（骨架屏契约）
   const totalBefore = Number(await page.getByTestId("total").textContent());
@@ -213,15 +225,20 @@ test("upload-canvas treats multiple selected files as ONE batch (issue #38)", as
   extContext,
   popupUrl,
   mockBbdc,
+  tmpUpload,
 }) => {
   const page = await extContext.newPage();
   await page.goto(popupUrl);
 
   // 两个独有词文件：多文件协议（issue #38）一次选中、整批 = 一次采集
-  const pathA = "/tmp/word-radar-e2e-multi-a.txt";
-  const pathB = "/tmp/word-radar-e2e-multi-b.txt";
-  writeFileSync(pathA, "The curious cartographer charted a silent fjord.\n");
-  writeFileSync(pathB, "A diligent blacksmith forged bright iron.\n");
+  const pathA = await tmpUpload.write(
+    "multi-a.txt",
+    "The curious cartographer charted a silent fjord.\n",
+  );
+  const pathB = await tmpUpload.write(
+    "multi-b.txt",
+    "A diligent blacksmith forged bright iron.\n",
+  );
 
   await waitCountsLoaded(page); // 基线读取前置：等 total 脱骨架（骨架屏契约）
   const totalBefore = Number(await page.getByTestId("total").textContent());
@@ -259,14 +276,14 @@ test("upload-canvas accepts .csv as plain text via NL pipeline, not IMPORT_CSV (
   extContext,
   popupUrl,
   mockBbdc,
+  tmpUpload,
 }) => {
   const page = await extContext.newPage();
   await page.goto(popupUrl);
 
   // 验收修订（用户决策）：上传入口的 .csv 走自然语言提词（extractWordEntries），
   // 不做 IMPORT_CSV 的 lemma,flags 结构化解析——确认页措辞是「上传采集」
-  const csvPath = "/tmp/word-radar-e2e-upload-nl.csv";
-  writeFileSync(csvPath, "name,count\nglimmer,3\n");
+  const csvPath = await tmpUpload.write("upload-nl.csv", "name,count\nglimmer,3\n");
   mockBbdc.reset();
 
   const [chooser] = await Promise.all([
@@ -291,14 +308,14 @@ test("upload-canvas accepts .srt subtitle (17-item allowlist, issue #38)", async
   extContext,
   popupUrl,
   mockBbdc,
+  tmpUpload,
 }) => {
   const page = await extContext.newPage();
   await page.goto(popupUrl);
 
   // 新后缀走通：.srt（字幕）在 issue #38 的 17 项白名单内
-  const srtPath = "/tmp/word-radar-e2e-upload.srt";
-  writeFileSync(
-    srtPath,
+  const srtPath = await tmpUpload.write(
+    "upload.srt",
     "1\n00:00:01,000 --> 00:00:04,000\nThe wanderer climbed beyond the fog.\n",
   );
 
@@ -324,15 +341,15 @@ test("upload-canvas preprocesses .html: script content never enters the vocabula
   extContext,
   popupUrl,
   mockBbdc,
+  tmpUpload,
 }) => {
   const page = await extContext.newPage();
   await page.goto(popupUrl);
 
   // .html 预处理（popup 侧 DOMParser→可见正文）：script/style 的源码文本
   // 不进提取管线，正文词正常进词库
-  const htmlPath = "/tmp/word-radar-e2e-upload.html";
-  writeFileSync(
-    htmlPath,
+  const htmlPath = await tmpUpload.write(
+    "upload.html",
     '<html><head><style>.ghoststyle { color: red }</style></head><body>' +
       "<article><p>The meticulous falconer tamed a stubborn kestrel.</p>" +
       '<script>var e2eghost = "qqghosttoken";</script>' +
@@ -375,13 +392,13 @@ test("upload-canvas click path ignores non plain-text (e.g. .png) with zero writ
   extContext,
   popupUrl,
   mockBbdc,
+  tmpUpload,
 }) => {
   const page = await extContext.newPage();
   await page.goto(popupUrl);
 
   // 验收修订：.csv 已是合法纯文本目标（走自然语言提词），改用 .png 做拒绝用例
-  const pngPath = "/tmp/word-radar-e2e-upload-reject.png";
-  writeFileSync(pngPath, "lemma,flags\nnotafiletarget,0\n");
+  const pngPath = await tmpUpload.write("upload-reject.png", "lemma,flags\nnotafiletarget,0\n");
   await waitCountsLoaded(page); // 基线读取前置：等 total 脱骨架（骨架屏契约）
   const totalBefore = Number(await page.getByTestId("total").textContent());
 
@@ -436,37 +453,29 @@ test("export-log exports storage.local error ring buffer as text (issue #25)", a
 });
 
 /**
- * 收词过滤用例的采集底座（issue #43）：开 fixture 文章页 + popup 标签页，
- * 等内容脚本注入余量后返回两页；采集动作由用例自行驱动——各用例采集前
- * 有不同的开关操作（check/uncheck）。
+ * 过滤用例的「开底座 → 关开关 → 采集」前置（issue #43，组合 fixtures 提升
+ * 出的两个共享 helper）：开 fixture 页对后展开工具抽屉（默认收起，issue #35
+ * 重做）把 `off` 列出的开关逐个取消勾选，再驱动采集；`off` 缺省空 = 双开
+ * 缺省采集（possessive 用例，此时可指定 fixture 页）。收尾的开关恢复不进
+ * 本 helper：各用例恢复时机不同（有的在 cancel 前、有的在 drain 前），且
+ * 此刻抽屉仍展开，直接 check 即可——tools-toggle 二次点击会收起抽屉。
  */
-async function openFilterFixturePair(
+async function collectWithIntakeFilters(
   extContext: BrowserContext,
   popupUrl: string,
   fixtureServer: { url: string },
+  off: ReadonlyArray<"filter-abbreviations" | "filter-contractions"> = [],
   page = "filter-gate.html",
 ): Promise<{ popup: Page; article: Page }> {
-  const article = await extContext.newPage();
-  await article.goto(`${fixtureServer.url}/${page}`);
-  // content script 按 document_idle 注入；给一点余量（collect.spec 同款）
-  await article.waitForTimeout(500);
-  const popup = await extContext.newPage();
-  await popup.goto(popupUrl);
+  const { popup, article } = await openFilterFixturePair(extContext, popupUrl, fixtureServer, page);
+  if (off.length > 0) {
+    await popup.getByTestId("tools-toggle").click();
+    for (const testId of off) {
+      await popup.getByTestId(testId).uncheck();
+    }
+  }
+  await collectFilterFixture(popup, article);
   return { popup, article };
-}
-
-/**
- * 把文章页带回前台后点「采集当前页」并等确认卡摘要成形（issue #39：
- * popup 以标签页模拟时按钮显式触发，采集目标 = 触发时的活动标签；
- * collect.spec 同款驱动方式）。
- */
-async function collectFilterFixture(popup: Page, article: Page): Promise<void> {
-  await article.bringToFront();
-  await popup.getByTestId("collect").click();
-  await expect(popup.getByTestId("confirm-summary")).toHaveText(
-    /本次共计采集 \d+ 个单词，其中新词 \d+ 个/,
-    { timeout: 15_000 },
-  );
 }
 
 // ── 收词过滤（issue #43）：开关 UI + 确认卡「已过滤 N 个」行 ─────────────
@@ -585,13 +594,10 @@ test("disabling filter-abbreviations lets doc/md enter the batch (issue #43)", a
   popupUrl,
   fixtureServer,
 }) => {
-  const { popup, article } = await openFilterFixturePair(extContext, popupUrl, fixtureServer);
-
   // 经 UI 关开关：change 即写 chrome.storage.local，下一次采集在提取地读新鲜值
-  await popup.getByTestId("tools-toggle").click();
-  await popup.getByTestId("filter-abbreviations").uncheck();
-
-  await collectFilterFixture(popup, article);
+  const { popup, article } = await collectWithIntakeFilters(extContext, popupUrl, fixtureServer, [
+    "filter-abbreviations",
+  ]);
   // 黑名单关：doc/md 进批次（total 5→7），过滤只剩缩合判据的 you've/aren't
   await expect(popup.getByTestId("confirm-summary")).toHaveText(
     /^本次共计采集 7 个单词，其中新词 \d+ 个$/,
@@ -612,12 +618,9 @@ test("disabling filter-contractions lets you've/aren't enter as apostrophe lemma
   fixtureServer,
   mockBbdc,
 }) => {
-  const { popup, article } = await openFilterFixturePair(extContext, popupUrl, fixtureServer);
-
-  await popup.getByTestId("tools-toggle").click();
-  await popup.getByTestId("filter-contractions").uncheck();
-
-  await collectFilterFixture(popup, article);
+  const { popup, article } = await collectWithIntakeFilters(extContext, popupUrl, fixtureServer, [
+    "filter-contractions",
+  ]);
   // 缩合关：you've/aren't 以带撇号 lemma 入批（total 5→7），过滤只剩黑名单 doc/md
   await expect(popup.getByTestId("confirm-summary")).toHaveText(
     /^本次共计采集 7 个单词，其中新词 \d+ 个$/,
@@ -644,13 +647,10 @@ test("both filters off: nothing filtered, filtered line hidden (issue #43)", asy
   popupUrl,
   fixtureServer,
 }) => {
-  const { popup, article } = await openFilterFixturePair(extContext, popupUrl, fixtureServer);
-
-  await popup.getByTestId("tools-toggle").click();
-  await popup.getByTestId("filter-abbreviations").uncheck();
-  await popup.getByTestId("filter-contractions").uncheck();
-
-  await collectFilterFixture(popup, article);
+  const { popup, article } = await collectWithIntakeFilters(extContext, popupUrl, fixtureServer, [
+    "filter-abbreviations",
+    "filter-contractions",
+  ]);
   // 双关：9 个 lemma 全部入批，filteredCount=0 → 过滤行隐藏（不渲染「已过滤 0 个」噪音行）
   await expect(popup.getByTestId("confirm-summary")).toHaveText(
     /^本次共计采集 9 个单词，其中新词 \d+ 个$/,
@@ -680,16 +680,15 @@ test("possessive wolf's enters the batch as stripped lemma wolf (issue #43)", as
   fixtureServer,
   mockBbdc,
 }) => {
-  const { popup, article } = await openFilterFixturePair(
+  // 双开缺省采集后确认推送：所有格剥离属归一化、不受过滤开关控制——
+  // 扩展采集路径下批次词面必须是 wolf，不能是带撇号的 wolf's
+  const { popup, article } = await collectWithIntakeFilters(
     extContext,
     popupUrl,
     fixtureServer,
+    [],
     "possessive-gate.html",
   );
-
-  // 双开缺省采集后确认推送：所有格剥离属归一化、不受过滤开关控制——
-  // 扩展采集路径下批次词面必须是 wolf，不能是带撇号的 wolf's
-  await collectFilterFixture(popup, article);
   await popup.getByTestId("confirm-push").click();
 
   // 推送词面实证（addWord 逐词一请求，见 bbdc-client.addWord）
@@ -708,13 +707,16 @@ test("possessive wolf's enters the batch as stripped lemma wolf (issue #43)", as
 test("upload path reports the same filtered-count semantics as page collect (issue #43)", async ({
   extContext,
   popupUrl,
+  tmpUpload,
 }) => {
   const page = await extContext.newPage();
   await page.goto(popupUrl);
 
   // 与网页路径同一份文本（两路共用 core 提取管线，filteredCount 进同一张确认卡）
-  const txtPath = "/tmp/word-radar-e2e-filter-upload.txt";
-  writeFileSync(txtPath, "The doc and the md, you've aren't serendipity monorepo the dog's\n");
+  const txtPath = await tmpUpload.write(
+    "filter-upload.txt",
+    "The doc and the md, you've aren't serendipity monorepo the dog's\n",
+  );
 
   const [chooser] = await Promise.all([
     page.waitForEvent("filechooser"),

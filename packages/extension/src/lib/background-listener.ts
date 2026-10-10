@@ -540,10 +540,8 @@ async function extractWithFilters(
   },
 ): Promise<ExtractResult> {
   const filterSettings = await deps.getFilterSettings();
-  return deps.extract(text, {
-    filterAbbreviations: filterSettings.filterAbbreviations,
-    filterContractions: filterSettings.filterContractions,
-  });
+  // IntakeFilterSettings 即 ExtractOptions 的过滤子集，直传即可（run-collection 同款）
+  return deps.extract(text, filterSettings);
 }
 
 /**
