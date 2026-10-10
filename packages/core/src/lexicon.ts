@@ -2,7 +2,7 @@
  * 由 scripts/build-lexicon.mjs 生成，勿手改；
  * 来源：Norvig count_1w.txt（Google 万亿词料词频表）纯字母小写词 top-20000。
  * 用途：lemmatizeWord 输出的词典级守门（issue #48——畸形 lemma 回退原词形、
- * fixF 拼接形态须过词典、截选外冷僻词零行为变化），详见脚本头注与 lemma.ts finalize。
+ * -f/-fe 拼接救援形态须过词典、截选外冷僻词零行为变化），详见脚本头注与 lemma.ts finalize。
  * 再生成命令：NODE_USE_ENV_PROXY=1 node scripts/build-lexicon.mjs（--refresh 强制重下）。
  * N=20000 依据：覆盖线 thrive 排名 18549；排杂线 thi 排名 20241（N 必须 < 20241）。
  * 本次构建：共 20000 词条。

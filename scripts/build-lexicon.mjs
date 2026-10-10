@@ -10,7 +10,7 @@
  *     11 个验收词全部落在截选内（脚本自检硬断言）；
  *   - 排杂线：this 的 compromise 误剥形 thi 排名 20241 > 20000——N 一旦 ≥ 20241，
  *     thi 会作为「词典词」骗过守门，this→thi 畸变复发（脚本自检硬断言 N < 20241）；
- *   - 体积：约 2 万词条与 blacklist.ts（16514 词条，源码 160KB / gzip 41KB）同量级。
+ *   - 体积：约 2 万词条与 blacklist.ts（14677 词条，源码 144KB / gzip 38KB）同量级。
  *
  * 匹配语义（消费方 lemma.ts finalize）：还原输出按小写精确查词典，
  * 因此本表只需小写纯字母单 token。
@@ -23,6 +23,7 @@
 import { writeFileSync, readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { parseNorvigNormalizedWords, buildNormalizedWordRank } from "./lib/norvig.mjs";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const REPO_ROOT = resolve(__dirname, "..");
@@ -55,24 +56,14 @@ async function fetchWordlist() {
 }
 
 const text = await fetchWordlist();
-const lines = text.split("\n").filter(Boolean);
 
-/** 纯字母小写单 token（匹配语义：还原输出小写精确查表）。 */
-const words = [];
-for (const line of lines) {
-  const w = line.split("\t")[0].trim().toLowerCase();
-  if (!/^[a-z]+$/.test(w)) continue;
-  words.push(w);
-  if (words.length >= TOP_N) break;
-}
+// 归一化档解析与排名（scripts/lib/norvig.mjs）：词字段 trim+lowercase 后截选；
+// rank 按「去空行后原始行号」口径（thi@20241 排杂线依赖含被过滤行的行号）。
+const words = parseNorvigNormalizedWords(text, TOP_N);
 const lexicon = new Set(words);
 
 // 数据自检：任何一条不过都拒绝生成（与 blacklist 同策略——产物自检在构建期）。
-const rank = new Map();
-lines.forEach((line, i) => {
-  const w = line.split("\t")[0].trim().toLowerCase();
-  if (w && !rank.has(w)) rank.set(w, i + 1);
-});
+const rank = buildNormalizedWordRank(text);
 for (const w of MUST_INCLUDE) {
   if (!lexicon.has(w)) {
     throw new Error(`self-check failed: "${w}" (rank ${rank.get(w) ?? "absent"}) not in top-${TOP_N} — N too small for issue #48 coverage`);
@@ -88,7 +79,7 @@ const body = `/**
  * 由 scripts/build-lexicon.mjs 生成，勿手改；
  * 来源：Norvig count_1w.txt（Google 万亿词料词频表）纯字母小写词 top-${TOP_N}。
  * 用途：lemmatizeWord 输出的词典级守门（issue #48——畸形 lemma 回退原词形、
- * fixF 拼接形态须过词典、截选外冷僻词零行为变化），详见脚本头注与 lemma.ts finalize。
+ * -f/-fe 拼接救援形态须过词典、截选外冷僻词零行为变化），详见脚本头注与 lemma.ts finalize。
  * 再生成命令：NODE_USE_ENV_PROXY=1 node scripts/build-lexicon.mjs（--refresh 强制重下）。
  * N=${TOP_N} 依据：覆盖线 thrive 排名 18549；排杂线 thi 排名 20241（N 必须 < 20241）。
  * 本次构建：共 ${lexicon.size} 词条。

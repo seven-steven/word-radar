@@ -58,6 +58,7 @@ import {
   purityVerdict,
   fetchWikitexts,
 } from "./lib/wikitext.mjs";
+import { parseNorvigPureWords, buildPureWordRank } from "./lib/norvig.mjs";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const REPO_ROOT = resolve(__dirname, "..");
@@ -305,22 +306,6 @@ function normalizeTitle(title) {
 // （2026-09-10 实测）。
 const loadLemmatizer = () => loadCoreLemmatizer(CORE_SRC_DIR);
 
-/**
- * 解析 count_1w.txt：返回前 max(needTopN, 10000) 个 /^[a-z]+$/ 词（排名序）。
- * 守卫取前 GUARD_TOP 个；残余碰撞画像取前 10000。
- */
-function parseNorvigTopWords(text) {
-  const words = [];
-  const need = Math.max(GUARD_TOP, 10000);
-  for (const line of text.split("\n")) {
-    if (!line) continue;
-    const word = line.split("\t")[0];
-    if (/^[a-z]+$/.test(word)) words.push(word);
-    if (words.length >= need) break;
-  }
-  return words;
-}
-
 // ---------- 产物生成 ----------
 
 function buildBlacklistTs(words, stats) {
@@ -377,9 +362,11 @@ async function main() {
     norvigText = await downloadText(NORVIG_URL);
     if (RESUME) writeFileSync(CACHE_NORVIG, norvigText, "utf8");
   }
-  const norvigTop = parseNorvigTopWords(norvigText);
+  // 严格纯字母档（scripts/lib/norvig.mjs）：守卫取前 GUARD_TOP 个；残余碰撞
+  // 画像取前 10000。
+  const norvigTop = parseNorvigPureWords(norvigText, Math.max(GUARD_TOP, 10000));
   assert(norvigTop.length >= GUARD_TOP, `Norvig 词料解析不足 ${GUARD_TOP} 词（只得 ${norvigTop.length}）`);
-  const rankOf = new Map(norvigTop.map((w, i) => [w, i + 1]));
+  const rankOf = buildPureWordRank(norvigTop);
   for (const w of ACCEPTANCE_POSITIVE) {
     const r = rankOf.get(w);
     console.error(`build-blacklist: Norvig 排名 — ${w}: ${r ?? ">10000"}`);
