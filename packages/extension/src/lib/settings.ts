@@ -9,6 +9,8 @@
  * chrome.* 调用收在可注入网关后面，便于单测。
  */
 
+import { chromeStorageGateway, defaultStorageGateway } from "./storage-gateway.js";
+
 /** 旧「自动推送」开关的存储键（v0.1.0 及更早写入）。 */
 export const LEGACY_AUTO_PUSH_KEY = "autoPush";
 
@@ -23,31 +25,10 @@ export interface SettingsStorage {
   set(items: Record<string, unknown>): Promise<void>;
 }
 
-export const chromeSettingsStorage: SettingsStorage = {
-  remove(key: string): Promise<void> {
-    return chrome.storage.local.remove(key);
-  },
-  get(key: string): Promise<unknown> {
-    return chrome.storage.local
-      .get(key)
-      .then((items) => (items as Record<string, unknown>)[key]);
-  },
-  set(items: Record<string, unknown>): Promise<void> {
-    return chrome.storage.local.set(items);
-  },
-};
-
-/** 测试等无 chrome 环境下的兜底（读写丢弃，移除操作同样丢弃）。 */
-const fallbackSettingsStorage: SettingsStorage = {
-  remove: async () => undefined,
-  get: async () => undefined,
-  set: async () => undefined,
-};
+export const chromeSettingsStorage: SettingsStorage = chromeStorageGateway("local");
 
 export function defaultSettingsStorage(): SettingsStorage {
-  return typeof chrome !== "undefined" && chrome.storage?.local
-    ? chromeSettingsStorage
-    : fallbackSettingsStorage;
+  return defaultStorageGateway("local");
 }
 
 /**

@@ -7,6 +7,8 @@
  * 超出容量从最旧端淘汰。chrome.* 调用收在可注入网关后面，便于单测。
  */
 
+import { chromeStorageGateway, defaultStorageGateway } from "./storage-gateway.js";
+
 /** storage.local 中的存储键。 */
 export const ERROR_LOG_KEY = "errorLog";
 
@@ -34,25 +36,10 @@ export interface ErrorLogStorage {
   set(items: Record<string, unknown>): Promise<void>;
 }
 
-export const chromeErrorLogStorage: ErrorLogStorage = {
-  get(key: string): Promise<unknown> {
-    return chrome.storage.local.get(key).then((items) => (items as Record<string, unknown>)[key]);
-  },
-  set(items: Record<string, unknown>): Promise<void> {
-    return chrome.storage.local.set(items);
-  },
-}
-
-/** 测试等无 chrome 环境下的兜底（读写丢弃，永不出错）。 */
-const fallbackErrorLogStorage: ErrorLogStorage = {
-  get: async () => undefined,
-  set: async () => undefined,
-};
+export const chromeErrorLogStorage: ErrorLogStorage = chromeStorageGateway("local");
 
 export function defaultErrorLogStorage(): ErrorLogStorage {
-  return typeof chrome !== "undefined" && chrome.storage?.local
-    ? chromeErrorLogStorage
-    : fallbackErrorLogStorage;
+  return defaultStorageGateway("local");
 }
 
 export interface ErrorLogger {
