@@ -37,7 +37,7 @@ WordRadar（单词雷达）是一款浏览器扩展，帮助用户从英文网�
 
 ## 权限说明
 
-扩展仅申请最小必要权限（storage / activeTab / scripting，及 bbdc.cn、langeasy.com.cn 两个域名访问），逐条理由见商店页面的权限说明或 [STORE-LISTING.md](./STORE-LISTING.md)。
+扩展仅申请最小必要权限（storage / activeTab / scripting / contextMenus，及 bbdc.cn、langeasy.com.cn 两个域名访问），逐条理由见商店页面的权限说明或 [STORE-LISTING.md](./STORE-LISTING.md)。
 
 ## 联系方式
 

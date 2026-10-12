@@ -6,15 +6,16 @@
 
 ## 1. 生产 manifest 权限逐条理由
 
-来源：`packages/extension/src/manifest.json`（#14 activeTab 瘦身后定稿，无 `content_scripts`、无 `<all_urls>`）。
+来源：`packages/extension/src/manifest.json`（#14 activeTab 瘦身定稿；v1.1.0 增 `contextMenus`，ADR 0001——右键 action 菜单入口走 `chrome.action.openPopup`，把 `minimum_chrome_version` 抬到 127；无 `content_scripts`、无 `<all_urls>`）。
 
-| 权限 token                  | 理由（可对审核复述）                                                                                                                                       |
-| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `storage`                   | `chrome.storage.local` 保存用户设置（如是否启用自动推送）。词库本体在 IndexedDB（无需权限）。                                                              |
-| `activeTab`                 | 只作用于用户当前点开扩展 popup 的标签页；配合 `scripting` 在扩展（重）加载后对未注入 content script 的旧标签页补注入一次。不授予任何持续性的网站访问权限。 |
-| `scripting`                 | `chrome.scripting.executeScript` 补注入采集脚本（见上）。                                                                                                  |
-| `https://bbdc.cn/*`         | 向不背单词主站发 API 请求：登录检查 / 查词 / 加词 / 删词 / 生词本列表。cookie 由浏览器原生附带，扩展代码不读 cookie 值。                                   |
-| `https://langeasy.com.cn/*` | 向蓝易主站请求单词释义接口（加词前必须先查释义）。                                                                                                         |
+| 权限 token                  | 理由（可对审核复述）                                                                                                                                                                                                                                        |
+| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `storage`                   | `chrome.storage.local` 保存用户设置（如是否启用自动推送）。词库本体在 IndexedDB（无需权限）。                                                                                                                                                               |
+| `activeTab`                 | 只作用于用户当前点开扩展 popup 的标签页；配合 `scripting` 在扩展（重）加载后对未注入 content script 的旧标签页补注入一次。不授予任何持续性的网站访问权限。                                                                                                  |
+| `scripting`                 | `chrome.scripting.executeScript` 补注入采集脚本（见上）。                                                                                                                                                                                                   |
+| `contextMenus`              | 右键工具栏扩展图标的 action 菜单（issue #24/#40）：「采集当前页」「上传文件采集生词」两个入口，点击仅写唤起标记并打开扩展 popup（openPopup 门槛即 ADR 0001 的 minimum_chrome_version 127）。不占用网页右键菜单（2026-09-07 产品决策），不借此读取页面内容。 |
+| `https://bbdc.cn/*`         | 向不背单词主站发 API 请求：登录检查 / 查词 / 加词 / 删词 / 生词本列表。cookie 由浏览器原生附带，扩展代码不读 cookie 值。                                                                                                                                    |
+| `https://langeasy.com.cn/*` | 向蓝易主站请求单词释义接口（加词前必须先查释义）。                                                                                                                                                                                                          |
 
 未申请：`cookies`、`notifications`、`tabs`、`<all_urls>` host 权限、`content_scripts`（MV3 下按需注入，#14 已移除声明式注入）。
 
@@ -33,7 +34,7 @@
 - `不(会)?上传任何(用户)?(数据|信息)` — 假：生词确实发送 bbdc.cn。
 - `不(会)?收集任何(用户)?(数据|信息)` / `不(会)?发送任何(用户)?数据` / `不向任何(第三方)?服务器发送` — 假：同上。
 - `完全不上传` — 假。
-- `无需任何权限` — 假：manifest 声明了 5 个权限 token。
+- `无需任何权限` — 假：manifest 声明了 6 个权限 token。
 
 ```text forbidden-claims
 /不(会)?上传任何(用户)?(数据|信息)/

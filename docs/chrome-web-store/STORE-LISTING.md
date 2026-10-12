@@ -1,8 +1,8 @@
 # STORE-LISTING.md — Chrome Web Store 上架文案（唯一来源）
 
 > 所有 Dashboard 文案以本文件的 ```text 块为唯一来源，直接复制粘贴。
-事实依据见 [FACTS.md](./FACTS.md)；一致性由 `pnpm verify:claims`断言。
-位于`docs/chrome-web-store/`（而非仓库根）：与 FACTS/PRIVACY 同层，避免根目录再增散文件，且文案层三者互相引用。
+> 事实依据见 [FACTS.md](./FACTS.md)；一致性由 `pnpm verify:claims`断言。
+> 位于`docs/chrome-web-store/`（而非仓库根）：与 FACTS/PRIVACY 同层，避免根目录再增散文件，且文案层三者互相引用。
 
 ## 简短描述（≤132 字符）
 
@@ -64,6 +64,8 @@ storage — 在浏览器本地保存扩展设置（如是否启用自动推送�
 activeTab — 仅在你点击扩展图标时获得当前标签页的临时访问，用于读取该页文本以提取生词。不授予对任何网站的持续访问权限。
 
 scripting — 扩展更新或重载后，对尚未注入采集脚本的已打开标签页，在你点击采集时补注入一次采集脚本。仅与 activeTab 配合、仅作用于当前标签页。
+
+contextMenus — 右键点击浏览器工具栏中的扩展图标时，显示「采集当前页」「上传文件采集生词」两个快捷入口，点击仅打开扩展弹窗。不占用网页内的右键菜单，也不借此读取任何页面内容。
 
 https://bbdc.cn/* — 将采集到的生词加入你的「不背单词」生词本（登录检查 / 查词 / 加词 / 生词本列表均请求该域）。登录状态复用你浏览器中 bbdc.cn 的 cookie，扩展不读取 cookie 值。
 

@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-10-12
+
 ### 新增
 
 - 收词过滤（issue #43，ADR-0002）：采集与 CLI 清洗共用双判据——内置**缩略词黑名单**（词形还原后按小写 lemma 精确命中，docs→doc）+ **缩合形式拦截**（剥离所有格 `'s` 后仍含撇号即丢，you've/aren't/o'clock）；所有格剥离（dog's→dog）属归一化、永不受开关控制。被过滤词条不进待确认批次，确认卡报「已过滤 N 个」（网页采集与上传采集同语义，CSV 导入天然豁免）；「过滤缩略词」「过滤缩合形式」两开关默认全开，popup 工具抽屉设置组读写 `chrome.storage.local`；`extractWordEntries` 返回 `{entries, filteredCount}`，测试可注入固定黑名单
@@ -147,6 +149,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/lang/zh-CN/
 - `CONTEXT.md`：项目词汇表，登记 C1–C6 引入的工程词
 - 采集场景、权限口径与手工验收清单同步
 
+[1.1.0]: https://github.com/seven-steven/word-radar/releases/tag/v1.1.0
 [1.0.0]: https://github.com/seven-steven/word-radar/releases/tag/v1.0.0
-
 [0.1.0]: https://github.com/seven-steven/word-radar/releases/tag/v0.1.0
