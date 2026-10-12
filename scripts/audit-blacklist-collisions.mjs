@@ -26,7 +26,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { parseNorvigPureWords, buildPureWordRank } from "./lib/norvig.mjs";
+import { parseNorvigPureWords } from "./lib/norvig.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const BLACKLIST_PATH = resolve(ROOT, "packages/core/src/blacklist.ts");
@@ -56,7 +56,8 @@ const blacklist = new Set(
   [...readFileSync(BLACKLIST_PATH, "utf8").matchAll(/^  "([a-z]+)",$/gm)].map((m) => m[1]),
 );
 
-const rankOf = buildPureWordRank(norvigTop);
+// 排名口径 = 过滤后序号 i+1（与 lib/norvig.mjs buildPureWordRank 同语义；
+// 本脚本按序 map 直接取 i+1，无重复词场景两者等价）
 const collisions = norvigTop.map((w, i) => ({ word: w, rank: i + 1 })).filter((c) => blacklist.has(c.word));
 
 const at = (n) => collisions.filter((c) => c.rank <= n);
