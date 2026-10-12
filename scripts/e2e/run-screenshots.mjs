@@ -6,7 +6,8 @@
  *   1) pnpm build（--no-build 可跳过）
  *   2) Playwright 跑 test/e2e/screenshot.spec.ts（复用 e2e 基座：
  *      persistent context + 真实扩展 + mockBbdc + fixtureServer），
- *      截图直接落 docs/chrome-web-store/screenshots/*.png
+ *      截图直接落 docs/stores/screenshots/*.png（两商店共用，1280×800
+ *      同时是 CWS 与 Edge Add-ons 的合规尺寸）
  *   3) 尺寸硬校验：逐张读 PNG IHDR 真实像素，非 1280×800 → 汇总报错并
  *      非零退出（不信截图脚本自己的日志）
  *
@@ -22,7 +23,7 @@ import { assertStoreScreenshotSize } from "./png-size.mjs";
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const REPO_ROOT = resolve(__dirname, "../..");
 const EXTENSION_DIR = resolve(REPO_ROOT, "packages/extension");
-const OUTPUT_DIR = resolve(REPO_ROOT, "docs/chrome-web-store/screenshots");
+const OUTPUT_DIR = resolve(REPO_ROOT, "docs/stores/screenshots");
 
 const noBuild = process.argv.includes("--no-build");
 

@@ -7,14 +7,18 @@
  *    生产 manifest 的 permissions 与 host_permissions（权限增删任一方漂移、
  *    或 token 只出现在块外无关段落，都会被抓住）。
  * 2. parseForbiddenClaims(factsMd)：
- *    从 docs/chrome-web-store/FACTS.md 的 ```text forbidden-claims 机器解析块
+ *    从 docs/stores/FACTS.md 的 ```text forbidden-claims 机器解析块
  *    读入禁词正则表（单一来源；FACTS 人读优先，块内每行一个 /regex/）。
  * 3. assertNoForbiddenClaims(text, forbidden)：
- *    STORE-LISTING / PRIVACY 不得含禁词表中的不可辩护措辞。
+ *    STORE-LISTING / PRIVACY（共享层）不得含禁词表中的不可辩护措辞。
+ * 4. assertNoChromeWording(text)：
+ *    Edge 上架文案（docs/stores/edge/STORE-LISTING.md）不得含 "Chrome"
+ *    字样——Edge Add-ons 认证硬条件，名称/描述含 Chrome 直接拒审。
  *
  * 断言逻辑抽纯函数导出，便于单测 fixture 覆盖。
  * CLI 入口读仓库根 packages/extension/src/manifest.json 与
- * docs/chrome-web-store/{STORE-LISTING,PRIVACY,FACTS}.md，失败非零退出。
+ * docs/stores/{FACTS,PRIVACY}.md、docs/stores/{chrome,edge}/STORE-LISTING.md，
+ * 失败非零退出。
  */
 import { readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
@@ -154,13 +158,75 @@ export function assertNoForbiddenClaims(text, forbidden) {
   return { ok: true };
 }
 
+/**
+ * 提取 Markdown 中全部 fenced 块的内容（不区分 info string）。
+ * 未闭合的块按到文末处理（宁可多扫不漏扫）。
+ *
+ * @param {string} text
+ * @returns {string[]}
+ */
+function extractFencedBlocks(text) {
+  const blocks = [];
+  const lines = text.split("\n");
+  let inBlock = false;
+  let current = [];
+  for (const line of lines) {
+    if (!inBlock && line.trimStart().startsWith("```")) {
+      inBlock = true;
+      current = [];
+      continue;
+    }
+    if (inBlock && line.trim() === "```") {
+      inBlock = false;
+      blocks.push(current.join("\n"));
+      continue;
+    }
+    if (inBlock) current.push(line);
+  }
+  if (inBlock) blocks.push(current.join("\n"));
+  return blocks;
+}
+
+/**
+ * 断言 Edge 上架文案的 fenced 块不含 "Chrome" 字样。
+ *
+ * Edge Add-ons 认证硬条件：名称/描述含 "Chrome" 直接拒审。只扫要粘贴进
+ * Partner Center 的 fenced 块——说明层（引用块、正文）提及该词合法。
+ * 词边界匹配、大小写敏感：小写 chromium（内核名）与 chrome://（协议
+ * 字面量）不受限。
+ *
+ * @param {string} text - Edge STORE-LISTING 全文
+ * @returns {{ ok: true } | { ok: false, error: string }}
+ */
+export function assertNoChromeWording(text) {
+  if (typeof text !== "string" || text.length === 0) {
+    return { ok: false, error: "text is empty or not a string" };
+  }
+  const hits = [];
+  extractFencedBlocks(text).forEach((block, blockIdx) => {
+    block.split("\n").forEach((line, i) => {
+      if (/\bChrome\b/.test(line)) {
+        hits.push(`"${line.trim()}" (block ${blockIdx + 1}, line ${i + 1})`);
+      }
+    });
+  });
+  if (hits.length > 0) {
+    return {
+      ok: false,
+      error: `Edge listing must not contain the word "Chrome" in any fenced block (Edge Add-ons certification rejects it): ${hits.join("; ")}`,
+    };
+  }
+  return { ok: true };
+}
+
 function main() {
   const manifestPath = resolve(REPO_ROOT, "packages/extension/src/manifest.json");
-  const listingPath = resolve(REPO_ROOT, "docs/chrome-web-store/STORE-LISTING.md");
-  const privacyPath = resolve(REPO_ROOT, "docs/chrome-web-store/PRIVACY.md");
-  const factsPath = resolve(REPO_ROOT, "docs/chrome-web-store/FACTS.md");
+  const listingPath = resolve(REPO_ROOT, "docs/stores/chrome/STORE-LISTING.md");
+  const edgeListingPath = resolve(REPO_ROOT, "docs/stores/edge/STORE-LISTING.md");
+  const privacyPath = resolve(REPO_ROOT, "docs/stores/PRIVACY.md");
+  const factsPath = resolve(REPO_ROOT, "docs/stores/FACTS.md");
 
-  for (const p of [manifestPath, listingPath, privacyPath, factsPath]) {
+  for (const p of [manifestPath, listingPath, edgeListingPath, privacyPath, factsPath]) {
     if (!existsSync(p)) {
       console.error("verify-claims: file not found at", p);
       process.exit(1);
@@ -169,6 +235,7 @@ function main() {
 
   const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
   const listing = readFileSync(listingPath, "utf8");
+  const edgeListing = readFileSync(edgeListingPath, "utf8");
   const privacy = readFileSync(privacyPath, "utf8");
   const facts = readFileSync(factsPath, "utf8");
 
@@ -182,6 +249,9 @@ function main() {
     ["permission justifications", assertPermissionJustifications(listing, manifest)],
     ["STORE-LISTING forbidden claims", assertNoForbiddenClaims(listing, claimsResult.patterns)],
     ["PRIVACY forbidden claims", assertNoForbiddenClaims(privacy, claimsResult.patterns)],
+    ["edge permission justifications", assertPermissionJustifications(edgeListing, manifest)],
+    ["edge STORE-LISTING forbidden claims", assertNoForbiddenClaims(edgeListing, claimsResult.patterns)],
+    ["edge STORE-LISTING Chrome wording", assertNoChromeWording(edgeListing)],
   ].filter(([, result]) => !result.ok);
 
   if (failures.length > 0) {
@@ -192,7 +262,7 @@ function main() {
     process.exit(1);
   }
 
-  console.log("verify-claims: OK — listing covers all manifest permissions; no forbidden claims");
+  console.log("verify-claims: OK — both store listings cover all manifest permissions; no forbidden claims; no Chrome wording in Edge listing");
 }
 
 // 仅作为 CLI 直接执行时运行 main（被测试 import 时不执行）

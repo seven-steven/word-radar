@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   assertPermissionJustifications,
   assertNoForbiddenClaims,
+  assertNoChromeWording,
   parseForbiddenClaims,
 } from "../../../scripts/verify-claims.mjs";
 
@@ -197,6 +198,52 @@ describe("verify-claims: assertNoForbiddenClaims (禁词由调用方传入)", ()
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.error).toContain("forbidden");
+    }
+  });
+});
+
+describe("verify-claims: assertNoChromeWording (Edge 上架文案专属，只扫 fenced 块)", () => {
+  it("returns ok when no fenced block contains the word Chrome", () => {
+    const listing = "# Edge listing\n\n```text\n适用于 chromium 内核浏览器。\n```\n";
+    expect(assertNoChromeWording(listing)).toEqual({ ok: true });
+  });
+
+  it("catches 'Chrome' inside any fenced block (Edge 认证拒审条件)", () => {
+    for (const copy of ["支持 Chrome 浏览器。", "Works with Chrome.", "Chrome 与 Edge 均可。"]) {
+      const listing = `# Edge listing\n\n## 描述\n\n\`\`\`text\n${copy}\n\`\`\`\n`;
+      const result = assertNoChromeWording(listing);
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.error).toContain("Chrome");
+      }
+    }
+  });
+
+  it("does not flag prose lines outside fenced blocks (规则说明层可提及该词)", () => {
+    const listing = '# Edge listing\n\n> 红线：文案块不得出现 "Chrome" 字样，verify:claims 强制。\n\n```text\n干净的文案。\n```\n';
+    expect(assertNoChromeWording(listing)).toEqual({ ok: true });
+  });
+
+  it("does not flag lowercase 'chromium' / 'chrome://' literals inside blocks", () => {
+    const listing = "```text\n采集不支持 chrome:// 特殊页；基于 chromium 内核。\n```\n";
+    expect(assertNoChromeWording(listing)).toEqual({ ok: true });
+  });
+
+  it("reports which block and line hit", () => {
+    const listing = "```text\n第一块干净。\n```\n\n说明文字。\n\n```text\n干净的一行。\n本扩展支持 Chrome。\n```\n";
+    const result = assertNoChromeWording(listing);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toContain("block 2");
+      expect(result.error).toContain("line 2");
+    }
+  });
+
+  it("rejects empty text", () => {
+    const result = assertNoChromeWording("");
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error).toContain("empty");
     }
   });
 });

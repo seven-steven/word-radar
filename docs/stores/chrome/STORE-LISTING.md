@@ -1,8 +1,8 @@
 # STORE-LISTING.md — Chrome Web Store 上架文案（唯一来源）
 
 > 所有 Dashboard 文案以本文件的 ```text 块为唯一来源，直接复制粘贴。
-> 事实依据见 [FACTS.md](./FACTS.md)；一致性由 `pnpm verify:claims`断言。
-> 位于`docs/chrome-web-store/`（而非仓库根）：与 FACTS/PRIVACY 同层，避免根目录再增散文件，且文案层三者互相引用。
+> 事实依据见 [FACTS.md](../FACTS.md)；一致性由 `pnpm verify:claims`断言。
+> 位于 `docs/stores/chrome/`（商店材料共享层 `docs/stores/` 之下）：FACTS/PRIVACY 为两商店共享事实源，上架文案按商店分家。
 
 ## 简短描述（≤132 字符）
 

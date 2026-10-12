@@ -50,7 +50,7 @@ web（Chrome/Edge 桌面浏览器扩展，MV3）
 - `docs/spec.md`：25 条 user stories + 全部已锁定产品决策（triage: ready-for-agent）。
 - API 实测结论：「不背单词」逐词加生词本接口已逆向并打通（spec.md 技术风险条目已消除；lexis 批量词书为另一套接口，第一版不用）。
 - 测试证据：vitest 单测（core/extension/cli）+ Playwright MV3 e2e（`pnpm e2e`，11/11 绿）。
-- CWS 物料：`docs/chrome-web-store/`（FACTS / PRIVACY / STORE-LISTING / SUBMISSION-v0.1.0）、`docs/manual-checklist.md`。
+- 商店物料：`docs/stores/`（共享层 FACTS / PRIVACY / screenshots；`chrome/` 与 `edge/` 各自 STORE-LISTING + SUBMISSION 手册）、`docs/manual-checklist.md`。
 - **缺失且不得虚构**：安装量/留存数据、用户反馈、用户证言、竞品对比结论、定价依据。
 
 ## Product Principles

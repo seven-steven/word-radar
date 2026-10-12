@@ -1,6 +1,6 @@
 # Chrome Web Store 必交材料清单（平台层规范）
 
-> 平台规范以 Developer Dashboard 实测为准（实测 dump 2026-08-22，原始文件位于 `/tmp/cws-dumps/`，权威字段口径见 [`docs/chrome-web-store/research-cws-dashboard-fields.md`](../../docs/chrome-web-store/research-cws-dashboard-fields.md)）。本文件给出材料规范的基线，给 SUBMISSION / STORE-LISTING / PRIVACY 文案层提供"哪些字段、什么上限、哪里手填/自动"的参考。
+> 平台规范以 Developer Dashboard 实测为准（实测 dump 2026-08-22，原始文件位于 `/tmp/cws-dumps/`，权威字段口径见 [`docs/stores/chrome/research-cws-dashboard-fields.md`](../../../../docs/stores/chrome/research-cws-dashboard-fields.md)）。本文件给出材料规范的基线，给 SUBMISSION / STORE-LISTING / PRIVACY 文案层提供"哪些字段、什么上限、哪里手填/自动"的参考。
 
 ## 1. Dashboard 主结构（实测 2026-08-22）
 
@@ -108,7 +108,7 @@ WordRadar 商品编辑入口由 **5 个 tab + 2 个左侧 sidebar 独立页** �
 
 | 字段              | 上限（实测） | 必填 | 文案层来源                                                                                                  |
 | ----------------- | ------------ | ---- | ----------------------------------------------------------------------------------------------------------- |
-| 隐私权政策网址     | **2,048**    | **必填**（标 `*`） | `https://github.com/seven-steven/word-radar/blob/v<version>/docs/chrome-web-store/PRIVACY.md`（PRIVACY.md） |
+| 隐私权政策网址     | **2,048**    | **必填**（标 `*`） | `https://github.com/seven-steven/word-radar/blob/v<version>/docs/stores/PRIVACY.md`（PRIVACY.md） |
 
 ## 4. Distribution（分发 tab）
 
@@ -141,7 +141,7 @@ WordRadar 商品编辑入口由 **5 个 tab + 2 个左侧 sidebar 独立页** �
 
 ## 7. 上传包
 
-- `dist/word-radar-<version>-chrome.zip`（`pnpm build && pnpm package` 产出；`pnpm verify:zip` 断言结构）。
+- `dist/word-radar-<version>.zip`（`pnpm build && pnpm package` 产出；`pnpm verify:zip` 断言结构）。
 - 上传后 Package tab **自动读取**版本/内容类型/权限列表(权限 storage, activeTab, scripting, host permission)/CRX 文件/公钥——无需手填。
 
 ## 8. 人工填写项（绝不入仓库）
@@ -150,5 +150,5 @@ WordRadar 商品编辑入口由 **5 个 tab + 2 个左侧 sidebar 独立页** �
 
 ## 9. 引用方式
 
-- 一切对外声明的事实依据在 `docs/chrome-web-store/FACTS.md`；文案改动必须能回溯到 FACTS，`pnpm verify:claims` 断言一致性。FACTS 变则先改 FACTS 再改文案层。
-- 字段口径与 Dashboard 实测细则：`docs/chrome-web-store/research-cws-dashboard-fields.md`（本文件 [§1–§5](#1-dashboard-主结构实测-2026-08-22) 的来源）。
+- 一切对外声明的事实依据在 `docs/stores/FACTS.md`；文案改动必须能回溯到 FACTS，`pnpm verify:claims` 断言一致性。FACTS 变则先改 FACTS 再改文案层。
+- 字段口径与 Dashboard 实测细则：`docs/stores/chrome/research-cws-dashboard-fields.md`（本文件 [§1–§5](#1-dashboard-主结构实测-2026-08-22) 的来源）。

@@ -1,6 +1,6 @@
 # FACTS.md — 上架事实层
 
-> 本文件是 WordRadar 上架 Chrome Web Store 的**事实基线**。STORE-LISTING.md 与 PRIVACY.md 的每一句对外声明都必须能在本文件（或其引用的仓库文件）里找到依据。`pnpm verify:claims` 断言文案层与生产 manifest、禁词表的一致性。
+> 本文件是 WordRadar 上架的**事实基线**，为 Chrome Web Store 与 Edge Add-ons **两商店共享**（ADR 0004）：两边的 STORE-LISTING 与 PRIVACY 的每一句对外声明都必须能在本文件（或其引用的仓库文件）里找到依据。`pnpm verify:claims` 断言两商店文案层与生产 manifest、禁词表的一致性，并额外断言 Edge 文案块无 "Chrome" 字样（Edge 认证拒审条件）。
 >
 > 维护规则：生产 `packages/extension/src/manifest.json` 的权限、数据流向、产物命名任一变化，先改本文件，再改文案层。
 
@@ -49,7 +49,7 @@
 
 ## 3. 产物命名模式
 
-- 打包命令：`pnpm build && pnpm package` → `dist/word-radar-<version>-chrome.zip`（仓库根 `dist/`，manifest 位于 zip 根层级；打包前自动清理旧版本 zip）。
+- 打包命令：`pnpm build && pnpm package` → `dist/word-radar-<version>.zip`（仓库根 `dist/`，manifest 位于 zip 根层级；打包前自动清理旧版本 zip）。
 - 版本号唯一来源：根 `package.json` 的 `version`（当前 0.1.0）；`pnpm verify:manifest` 断言 package.json / src manifest / **zip 内 manifest** 三方一致，`pnpm verify:zip` 断言 zip 结构（唯一版本化 zip、manifest 在根、三尺寸图标、无 .map）。
 
 ## 4. 语言集
@@ -66,9 +66,11 @@
 
 - GitHub 仓库：`https://github.com/seven-steven/word-radar`（issue / 支持入口）。
 - 文档：README.md、docs/spec.md、docs/manual-checklist.md。
-- 测试账号：Chrome Web Store 审核用的 bbdc 测试账号**仅填写在 Developer Dashboard，不入仓库**（本仓库任何文件不得出现账号/密码）。
+- 测试账号：商店审核用的 bbdc 测试账号**仅填写在商店后台、不入仓库**（本仓库任何文件不得出现账号/密码）——CWS 侧填 Developer Dashboard「测试说明」独立页（`/testcredentials`），Edge 侧随提交写进认证备注（notes for certification）。
 
-## 7. Dashboard 待人工确认项
+## 7. CWS Dashboard 待人工确认项
+
+（本节为 CWS 侧口径；Edge 侧字段口径见 skill `extension-release` 的 `references/edge-materials.md`，两商店共用的口径在 §1–§6。）
 
 - 简短描述 132 字符上限、详细描述约 16,000 字符上限、截图建议 1280×800（至少 1 张，至多 5 张）——以提交时 Dashboard 实际表单限制为准。
 - 类别：效率工具（Productivity Tools）。

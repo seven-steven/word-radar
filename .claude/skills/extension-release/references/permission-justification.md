@@ -1,8 +1,8 @@
 # 权限理由与隐私做法口径（平台层）
 
-> 唯一事实来源：`docs/chrome-web-store/FACTS.md` §1–§2 与生产 `packages/extension/src/manifest.json`。本文件只提示写法要点。
+> 唯一事实来源：`docs/stores/FACTS.md` §1–§2 与生产 `packages/extension/src/manifest.json`。本文件只提示写法要点。
 >
-> 字段结构与 Dashboard 实测口径以 2026-08-22 dump 为准（`docs/chrome-web-store/research-cws-dashboard-fields.md` §3–§4）。
+> 字段结构与 Dashboard 实测口径以 2026-08-22 dump 为准（`docs/stores/chrome/research-cws-dashboard-fields.md` §3–§4）。
 
 ## 1. 宽权限雷区（本项目全部避开）
 
@@ -72,7 +72,7 @@ Dashboard 强制三选全勾，否则不能提交：
 ## 7. 隐私权政策网址
 
 - **必填**（标 `*`），≤ 2,048 字符。
-- 来源：`https://github.com/seven-steven/word-radar/blob/v<version>/docs/chrome-web-store/PRIVACY.md`。
+- 来源：`https://github.com/seven-steven/word-radar/blob/v<version>/docs/stores/PRIVACY.md`。
 
 ## 8. 测试说明（独立页，URL `/testcredentials`）
 

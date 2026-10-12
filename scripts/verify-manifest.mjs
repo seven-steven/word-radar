@@ -3,7 +3,7 @@
  * verify-manifest：断言三方 version 一致 + MV3 基本形态合规 + i18n 结构（src 与 zip）。
  *
  * 三方：根 package.json / packages/extension/src/manifest.json /
- * dist/word-radar-<version>-chrome.zip 内的 manifest.json（verify-zip 提供
+ * dist/word-radar-<version>.zip 内的 manifest.json（verify-zip 提供
  * 纯 Node zip 解析；zip 缺失时提示先 build/package，非零退出）。
  *
  * 断言逻辑全部抽纯函数 `verifyManifest(...)`——locale 载荷由调用方注入，
@@ -12,7 +12,7 @@
 import { readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { findChromeZip, readZipEntry } from "./verify-zip.mjs";
+import { findVersionedZip, readZipEntry } from "./verify-zip.mjs";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const REPO_ROOT = resolve(__dirname, "..");
@@ -55,7 +55,7 @@ export function verifyManifest({ rootVersion, srcManifest, zipManifest, srcLocal
     errors.push("src manifest.json is missing or unreadable");
   }
   if (!zipManifest || typeof zipManifest !== "object") {
-    errors.push("manifest.json in word-radar-<version>-chrome.zip is missing — run 'pnpm build && pnpm package' first");
+    errors.push("manifest.json in word-radar-<version>.zip is missing — run 'pnpm build && pnpm package' first");
   }
   if (errors.length > 0) return { ok: false, errors };
 
@@ -286,7 +286,7 @@ function main() {
 
   let zipPath;
   try {
-    zipPath = findChromeZip(OUT_DIR);
+    zipPath = findVersionedZip(OUT_DIR);
   } catch (err) {
     console.error("verify-manifest:", err instanceof Error ? err.message : String(err));
     process.exit(1);

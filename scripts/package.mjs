@@ -2,7 +2,8 @@
 /**
  * 打包脚本：把 packages/extension/dist 打成 zip，便于分发与加载。
  *
- * 输出：dist/word-radar-extension.zip（位于仓库根目录 dist/）
+ * 输出：dist/word-radar-<version>.zip（位于仓库根目录 dist/；中性命名——
+ * 同一份 Chromium MV3 产物，Chrome Web Store 与 Edge Add-ons 共用）
  *
  * 策略：
  * - 优先使用系统 `zip`（Info-ZIP），Linux / macOS 通常自带；
@@ -17,18 +18,20 @@ import { resolve, relative, join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { deflateRawSync } from "node:zlib";
 
+import { ZIP_NAME_RE } from "./verify-zip.mjs";
+
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const REPO_ROOT = resolve(__dirname, "..");
 const EXTENSION_DIST = resolve(REPO_ROOT, "packages/extension/dist");
 const OUT_DIR = resolve(REPO_ROOT, "dist");
 
-/** 版本号取根 package.json，产物名 word-radar-<version>-chrome.zip。 */
+/** 版本号取根 package.json，产物名 word-radar-<version>.zip（两商店共用的同一份产物）。 */
 function versionedZipName() {
   const pkg = JSON.parse(readFileSync(resolve(REPO_ROOT, "package.json"), "utf8"));
   if (typeof pkg.version !== "string" || pkg.version.length === 0) {
     throw new Error("root package.json has no version");
   }
-  return `word-radar-${pkg.version}-chrome.zip`;
+  return `word-radar-${pkg.version}.zip`;
 }
 
 async function collectFiles(rootDir) {
@@ -169,9 +172,10 @@ async function main() {
   }
 
   await mkdir(OUT_DIR, { recursive: true });
-  // 清理旧版本 zip，保证 dist/ 下唯一版本化产物
+  // 清理旧版本 zip（含 -chrome 后缀的历史命名），保证 dist/ 下唯一版本化产物
+  // （正则与 verify-zip 共用同一常量，避免两处漂移）
   for (const name of await readdir(OUT_DIR)) {
-    if (/^word-radar-.*-chrome\.zip$/.test(name) || name === "word-radar-extension.zip") {
+    if (ZIP_NAME_RE.test(name)) {
       await rm(resolve(OUT_DIR, name));
     }
   }

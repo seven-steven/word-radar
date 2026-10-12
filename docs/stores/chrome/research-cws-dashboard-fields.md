@@ -1,6 +1,6 @@
 # research-cws-dashboard-fields.md — Chrome Web Store Dashboard 字段实测调研
 
-> 目的：把「发布/更新一个扩展版本」时 Dashboard 上的字段口径、约束、必填项、来源（自动 vs 手填）落实清楚，给 `chrome-extension-release` skill 的 SUBMISSION 手册模板提供材料规范的修订依据。
+> 目的：把「发布/更新一个扩展版本」时 Dashboard 上的字段口径、约束、必填项、来源（自动 vs 手填）落实清楚，给 `extension-release` skill 的 SUBMISSION 手册模板提供材料规范的修订依据。
 >
 > 调研日期：2026-08-22
 >
@@ -176,7 +176,7 @@ https://chrome.google.com/webstore/devconsole/{publisherId}/{extensionId}/edit/{
 
 | 字段          | 上限（实测）  | 必填       | 本项目来源                                |
 | ------------- | ------------- | ---------- | ------------------------------------------ |
-| 隐私权政策网址 | **2,048**（实测 "87/2,048"） | **必填**（标注 `*`） | `https://github.com/seven-steven/word-radar/blob/v<version>/docs/chrome-web-store/PRIVACY.md` |
+| 隐私权政策网址 | **2,048**（实测 "87/2,048"） | **必填**（标注 `*`） | `https://github.com/seven-steven/word-radar/blob/v<version>/docs/stores/PRIVACY.md` |
 
 ### 4.7 与 SUBMISSION 手册的偏差
 
@@ -225,7 +225,7 @@ https://chrome.google.com/webstore/devconsole/{publisherId}/{extensionId}/edit/{
 
 ## 8. 对 SUBMISSION 手册模板的影响清单（**按实测复核**）
 
-> 列出现有 `docs/chrome-web-store/SUBMISSION-v0.1.0.md` 与 `.claude/skills/chrome-extension-release/references/{cws-materials,submission-template,permission-justification}.md` 应增/删/改的条目。**所有改动均以本报告 [§1–§7](#1-dashboard-主框架) 实测字段为准**。
+> 列出现有 `docs/stores/chrome/SUBMISSION-v0.1.0.md` 与 `.claude/skills/extension-release/references/{cws-materials,submission-template,permission-justification}.md` 应增/删/改的条目。**所有改动均以本报告 [§1–§7](#1-dashboard-主框架) 实测字段为准**。
 
 | #  | 优先级 | 影响对象                                                                  | 现状                                                                  | 建议改动                                                                                                                                                                                          |
 | -- | ------ | ------------------------------------------------------------------------- | --------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -329,9 +329,9 @@ https://chrome.google.com/webstore/devconsole/{publisherId}/{extensionId}/edit/{
 ## 13. 建议后续动作
 
 1. **本轮**：按 [§8](#8-对-submission-手册模板的影响清单) 的高/中优先级改动，更新：
-   - `.claude/skills/chrome-extension-release/references/cws-materials.md`
-   - `.claude/skills/chrome-extension-release/references/submission-template.md`
-   - `.claude/skills/chrome-extension-release/references/permission-justification.md`
+   - `.claude/skills/extension-release/references/cws-materials.md`
+   - `.claude/skills/extension-release/references/submission-template.md`
+   - `.claude/skills/extension-release/references/permission-justification.md`
 2. **下版本清理**：等 v0.2.0 发版时把 FACTS.md §7「Dashboard 待人工确认项」中已被实测替代的条目删除。
 3. **下次发版前人工实测**：在登录态浏览器里再次走一遍 5 tabs + 2 sidebar pages，把 [§9](#9-已知未实测项再核清单) 的 8 项降级为"已实测"。
 4. **类目决策**：本次不动 STORE-LISTING；下次发版前由发版人决定 Dashboard 当前值"教育"是否切换到"效率工具"。

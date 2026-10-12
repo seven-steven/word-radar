@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * verify-zip：断言 dist/ 下恰好一个 word-radar-*-chrome.zip，且 zip 结构合规：
+ * verify-zip：断言 dist/ 下恰好一个 word-radar-<version>.zip，且 zip 结构合规：
  * manifest.json 在根、三尺寸图标存在、无 .map 泄漏。
  *
  * zip 条目列表用纯 Node 解析 central directory（无系统 unzip 依赖）。
@@ -15,7 +15,7 @@ const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const REPO_ROOT = resolve(__dirname, "..");
 const OUT_DIR = resolve(REPO_ROOT, "dist");
 
-const ZIP_NAME_RE = /^word-radar-.+-chrome\.zip$/;
+export const ZIP_NAME_RE = /^word-radar-.+\.zip$/;
 const ICON_ENTRIES = ["src/assets/icons/icon-16.png", "src/assets/icons/icon-48.png", "src/assets/icons/icon-128.png"];
 
 /**
@@ -129,19 +129,19 @@ export function readZipEntry(buf, name) {
 }
 
 /**
- * 在目录中定位唯一的 word-radar-<version>-chrome.zip。
+ * 在目录中定位唯一的 word-radar-<version>.zip（两商店共用的同一份产物）。
  * 目录缺失 / 无 zip / 多个 zip 时抛错（消息与 CLI 口径一致）。
  *
  * @param {string} outDir
  * @returns {string} zip 绝对路径
  */
-export function findChromeZip(outDir) {
+export function findVersionedZip(outDir) {
   if (!existsSync(outDir)) {
     throw new Error("dist/ not found. Run 'pnpm build && pnpm package' first.");
   }
   const zips = readdirSync(outDir).filter((n) => ZIP_NAME_RE.test(n));
   if (zips.length === 0) {
-    throw new Error("no word-radar-<version>-chrome.zip found in dist/. Run 'pnpm package' first.");
+    throw new Error("no word-radar-<version>.zip found in dist/. Run 'pnpm package' first.");
   }
   if (zips.length > 1) {
     throw new Error(`expected exactly one versioned zip, found ${zips.length}: ${zips.join(", ")}`);
@@ -152,7 +152,7 @@ export function findChromeZip(outDir) {
 function main() {
   let zipPath;
   try {
-    zipPath = findChromeZip(OUT_DIR);
+    zipPath = findVersionedZip(OUT_DIR);
   } catch (err) {
     console.error("verify-zip:", err instanceof Error ? err.message : String(err));
     process.exit(1);
@@ -162,7 +162,7 @@ function main() {
 
   const result = verifyZipContents(entries);
   if (!result.ok) {
-    console.error(`verify-zip: FAILED for ${zips[0]}`);
+    console.error(`verify-zip: FAILED for ${zipPath}`);
     for (const err of result.errors) console.error(`  - ${err}`);
     process.exit(1);
   }
