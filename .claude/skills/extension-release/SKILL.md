@@ -93,28 +93,38 @@ gh 认证失败 → 报告并跳过，不伪造结果。
 
 **版本更新、已配置 API 凭证（1.2.0 起的常态）**：
 
+标识符来源：`CWS_PUBLISHER_ID` / `CWS_ITEM_ID` 取自 CWS Developer Dashboard 的 devconsole URL（`.../devconsole/{publisherId}/{itemId}/...`，亦即扩展 ID）；`EDGE_PRODUCT_ID` 取自 Partner Center 扩展 overview 页的 Extension identity 区（Product ID）。
+
 ```bash
-# —— Edge Add-ons Update API（凭证：EDGE_ADDONS_CLIENT_ID / EDGE_ADDONS_API_KEY 环境变量，绝不入库）——
+# —— Edge Add-ons Update API v1.1（凭证：EDGE_ADDONS_CLIENT_ID / EDGE_ADDONS_API_KEY 环境变量，绝不入库）——
+# ① 传包 → 202 + Location 头含 operationID
 curl -sS -X POST "https://api.addons.microsoftedge.microsoft.com/v1/products/$EDGE_PRODUCT_ID/submissions/draft/package" \
   -H "Authorization: ApiKey $EDGE_ADDONS_API_KEY" -H "X-ClientID: $EDGE_ADDONS_CLIENT_ID" \
-  -H "Content-Type: application/zip" --data-binary @dist/word-radar-<version>.zip    # → 202 + operationID
-curl -sS "https://api.addons.microsoftedge.microsoft.com/v1/products/$EDGE_PRODUCT_ID/operations/<operationID>" \
-  -H "Authorization: ApiKey $EDGE_ADDONS_API_KEY" -H "X-ClientID: $EDGE_ADDONS_CLIENT_ID"    # 轮询至 Succeeded
+  -H "Content-Type: application/zip" --data-binary @dist/word-radar-<version>.zip
+# ② 轮询传包状态至 status=Succeeded（InProgress/Failed；失败看 errorCode）
+curl -sS "https://api.addons.microsoftedge.microsoft.com/v1/products/$EDGE_PRODUCT_ID/submissions/draft/package/operations/<operationID>" \
+  -H "Authorization: ApiKey $EDGE_ADDONS_API_KEY" -H "X-ClientID: $EDGE_ADDONS_CLIENT_ID"
+# ③ 发布（body 带 notes for certification）→ 用 submissions/operations/<operationID> 轮询至 Succeeded
 curl -sS -X POST "https://api.addons.microsoftedge.microsoft.com/v1/products/$EDGE_PRODUCT_ID/submissions" \
   -H "Authorization: ApiKey $EDGE_ADDONS_API_KEY" -H "X-ClientID: $EDGE_ADDONS_CLIENT_ID" \
-  -H "Content-Type: application/json" -d '{}'                                        # 发布（body 可带认证备注 JSON）
+  -H "Content-Type: application/json" -d '{"notes":"<认证备注，可引 STORE-LISTING 测试说明块>"}'
 
-# —— Chrome Web Store API V2（service account impersonation；CWS_ACCESS_TOKEN 为 gcloud 短期令牌）——
+# —— Chrome Web Store API V2（service account impersonation；token 约 1 小时有效，用前现取）——
 gcloud auth print-access-token --impersonate-service-account="$CWS_SA_EMAIL" \
   --scopes="https://www.googleapis.com/auth/chromewebstore" > /tmp/cws.token
-curl -sS -X PUT "https://chromewebstore.googleapis.com/upload/chromewebstore/v1.1/items/$CWS_ITEM_ID" \
-  -H "Authorization: Bearer $(cat /tmp/cws.token)" -H "Content-Type: application/zip" \
-  --data-binary @dist/word-radar-<version>.zip
-curl -sS -X POST "https://chromewebstore.googleapis.com/v1.1/items/$CWS_ITEM_ID/publish" \
+# ① 上传 zip（POST + -T；uploadState=UPLOAD_IN_PROGRESS 时需轮询 :fetchStatus）
+curl -sS -X POST -T dist/word-radar-<version>.zip \
+  "https://chromewebstore.googleapis.com/upload/v2/publishers/$CWS_PUBLISHER_ID/items/$CWS_ITEM_ID:upload" \
+  -H "Authorization: Bearer $(cat /tmp/cws.token)"
+# ② 发布（V2 body：publishType=DEFAULT_PUBLISH；不用 v1.1 的 trustedTesters 查询参数）
+curl -sS -X POST "https://chromewebstore.googleapis.com/v2/publishers/$CWS_PUBLISHER_ID/items/$CWS_ITEM_ID:publish" \
+  -H "Authorization: Bearer $(cat /tmp/cws.token)" -H "Content-Type: application/json" -d '{}'
+# ③ 查上传/发布状态（publishedItemRevisionStatus / lastAsyncUploadState）
+curl -sS "https://chromewebstore.googleapis.com/v2/publishers/$CWS_PUBLISHER_ID/items/$CWS_ITEM_ID:fetchStatus" \
   -H "Authorization: Bearer $(cat /tmp/cws.token)"
 ```
 
-注意：两商店 API 都**只能更新已发布产品、不能改 listing 元数据**——listing / 隐私 tab 有变时仍需网页（参照 SUBMISSION 手册对应小节）。凭证未配置 → 走网页，不伪造 API 结果；API 报错 → 报告原始错误并停在当前步骤。
+注意：两商店 API 都**只能更新已发布产品、不能改 listing 元数据**——listing / 隐私 tab 有变时仍需网页（参照 SUBMISSION 手册对应小节）。Edge API key 有过期日期（Publish API 页可见 Expiry），过期回该页重新 Create API credentials 续期。凭证未配置 → 走网页，不伪造 API 结果；API 报错 → 报告原始错误并停在当前步骤。
 
 ### 9. 提交后人工步骤（告知用户）
 

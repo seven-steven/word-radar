@@ -121,18 +121,20 @@ Edge 无 CWS 式 `/testcredentials` 独立页：测试凭证随提交写入**认
 
 ### 6.1 API 概要
 
-| 项       | 口径                                                                                                             |
-| -------- | ---------------------------------------------------------------------------------------------------------------- |
-| root     | `https://api.addons.microsoftedge.microsoft.com`                                                                 |
-| 认证     | API key 方案：请求头 `Authorization: ApiKey $ApiKey` + `X-ClientID: $ClientID`；旧 v1 OAuth 已于 2024-12-31 终止 |
-| ① 传包   | `POST /v1/products/{productID}/submissions/draft/package`（上传 zip，返回 202 + operationID）                    |
-| ② 查状态 | `GET /v1/products/{productID}/operations/{operationID}`                                                          |
-| ③ 发布   | `POST /v1/products/{productID}/submissions`（body 可带 notes for certification JSON）                            |
+| 项             | 口径                                                                                                                                                    |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| root           | `https://api.addons.microsoftedge.microsoft.com`                                                                                                        |
+| 认证           | API key 方案：请求头 `Authorization: ApiKey $ApiKey` + `X-ClientID: $ClientID`；旧 v1 OAuth 已于 2024-12-31 终止                                        |
+| ① 传包         | `POST /v1/products/{productID}/submissions/draft/package`（Content-Type: application/zip；202 + Location 头含 operationID）                             |
+| ② 查传包状态   | `GET /v1/products/{productID}/submissions/draft/package/operations/{operationID}`（status: InProgress / Succeeded / Failed + errorCode）                |
+| ③ 发布         | `POST /v1/products/{productID}/submissions`（body 带 notes for certification JSON）                                                                     |
+| ④ 查发布状态   | `GET /v1/products/{productID}/submissions/operations/{operationID}`（status=Succeeded 即提交成功，随后进认证审核）                                      |
+| productID 来源 | Partner Center → Microsoft Edge > Overview → 点选扩展 → Extension overview 页 Extension identity 区的 Product ID（无 products list API，UI 是唯一来源） |
 
 ### 6.2 边界与凭证
 
 - **只能更新已发布产品**：不能创建新产品、不能改 listing 元数据——这两件事必须网页（§1）。
-- 凭证创建入口：Partner Center **"Publish API"** 页 Enable → Create API credentials，得到 Client ID + API key。
+- 凭证创建入口：Partner Center **"Publish API"** 页（Microsoft Edge 程序下左侧导航）→ （旧版界面先点 Enable 切换新体验）→ Create API credentials，得到 Client ID + API key——**立即抄录**（key 只在创建后立即可见，页面同时列出每个 key 的 Expiry 过期日期；过期需回该页重新 Create 续期，会生成新 key）。
 - 本项目凭证走环境变量（约定 `EDGE_ADDONS_CLIENT_ID` / `EDGE_ADDONS_API_KEY`），**绝不入库**（与 FACTS.md §6 测试账号同一纪律）。
 
 ### 6.3 两商店对称模型
