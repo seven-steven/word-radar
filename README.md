@@ -1,13 +1,16 @@
 # 单词雷达 WordRadar
 
+[![Chrome 商店安装](https://img.shields.io/badge/Chrome-%E5%AE%89%E8%A3%85%E6%89%A9%E5%B1%95-4285F4?logo=googlechrome&logoColor=white)](https://chromewebstore.google.com/detail/wordradar/klbhhofbdklddefpnkbfdgecoheelpip)
+[![Edge 商店安装](https://img.shields.io/badge/Edge-%E5%AE%89%E8%A3%85%E6%89%A9%E5%B1%95-0078D7?logo=microsoftedge&logoColor=white)](https://microsoftedge.microsoft.com/addons/detail/%E5%8D%95%E8%AF%8D%E9%9B%B7%E8%BE%BE/bpgidbkjoehbpgkkkmobefiajgbgmmdo)
+
 > 把网页里的英文生词一键提取出来，自动加到「不背单词」生词本。
 
 WordRadar 是一款 **浏览器扩展 + Node CLI 双形态** 的英文词拾取工具。两种形态共享同一份核心提取逻辑（`@word-radar/core`），通过 CSV 文件互通数据。
 
-| 形态                   | 适用场景                                                               | 入口                                                                           |
-| ---------------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| **Chrome / Edge 扩展** | 边读边采：打开英文网页 → 一键提取全文生词 → 自动推送到不背单词生词本   | `packages/extension/dist/`（加载已解压扩展）或 `dist/word-radar-extension.zip` |
-| **Node CLI**           | 离线 / 批量：把本地 `.md` / `.txt` 文本清洗成 CSV 词表，或合并多份词表 | `node packages/cli/dist/index.js`（或 `pnpm install -g` 后用 `word-radar`）    |
+| 形态                   | 适用场景                                                               | 入口                                                                        |
+| ---------------------- | ---------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| **Chrome / Edge 扩展** | 边读边采：打开英文网页 → 一键提取全文生词 → 自动推送到不背单词生词本   | 商店安装（推荐，见下方「安装」）或源码构建 `packages/extension/dist/`       |
+| **Node CLI**           | 离线 / 批量：把本地 `.md` / `.txt` 文本清洗成 CSV 词表，或合并多份词表 | `node packages/cli/dist/index.js`（或 `pnpm install -g` 后用 `word-radar`） |
 
 详细产品形态与架构见 [`docs/spec.md`](./docs/spec.md)。
 
@@ -22,6 +25,15 @@ WordRadar 是一款 **浏览器扩展 + Node CLI 双形态** 的英文词拾取�
 `extension` 与 `cli` 只通过包名（`@word-radar/core`）消费 core，禁止 `import` `core/src`。
 
 ## 安装
+
+### 从商店安装（推荐）
+
+扩展已上架两大浏览器商店，点顶部 badge 或下面的链接直达安装页：
+
+- **Chrome**：<https://chromewebstore.google.com/detail/wordradar/klbhhofbdklddefpnkbfdgecoheelpip>
+- **Edge**：<https://microsoftedge.microsoft.com/addons/detail/%E5%8D%95%E8%AF%8D%E9%9B%B7%E8%BE%BE/bpgidbkjoehbpgkkkmobefiajgbgmmdo>
+
+从商店安装后扩展会随版本发布自动更新，无需本地构建；安装完成即可跳到「日常用法」开始使用。以下小节面向需要从源码构建的开发者。
 
 ### 环境要求
 
@@ -57,6 +69,8 @@ pnpm package
 
 ## 使用：浏览器扩展（主形态）
 
+已从商店安装的用户直接从「日常用法」开始即可；以下两小节是未走商店、从源码加载扩展的开发者方式。
+
 ### 加载扩展（Chrome）
 
 1. 打开 `chrome://extensions/`。
@@ -87,13 +101,13 @@ pnpm package
 
 ### 点击扩展图标时各按钮说明
 
-| 按钮                | 作用                                                    |
-| ------------------- | ------------------------------------------------------- |
+| 按钮                | 作用                                                     |
+| ------------------- | -------------------------------------------------------- |
 | 采集当前页          | 对当前标签页跑一次正文提取，先出确认卡，确认后才合并入库 |
-| 检查登录            | 调用 `bbdc.cn/api/check-login` 检测当前 cookie 是否有效 |
-| 打开不背单词        | 新标签页打开 <https://bbdc.cn/>（仅在未登录时显示）     |
-| 重试待推            | 恢复被暂停的推送队列                                    |
-| 导出 CSV / 导入 CSV | 词库 ↔ 本地 CSV 文件                                    |
+| 检查登录            | 调用 `bbdc.cn/api/check-login` 检测当前 cookie 是否有效  |
+| 打开不背单词        | 新标签页打开 <https://bbdc.cn/>（仅在未登录时显示）      |
+| 重试待推            | 恢复被暂停的推送队列                                     |
+| 导出 CSV / 导入 CSV | 词库 ↔ 本地 CSV 文件                                     |
 
 ## 使用：CLI（辅形态）
 
@@ -159,7 +173,7 @@ run,1
 | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `storage`                                     | 用 `chrome.storage.local` 保存用户设置（如是否启用自动推送）。                                                                                                                                               |
 | `activeTab` + `scripting`                     | 扩展（重）加载后已打开的旧标签页没有 content script，点采集时用 `chrome.scripting.executeScript` 补注入一次再重试。`activeTab` 只作用于你当前点开的标签页（打开 popup 即视为授权），不新增任何网站访问权限。 |
-| `contextMenus`                                | 仅注册两个右键菜单入口项（「采集当前页」「上传文件采集生词」），不读取页面内容；页面采集仍走 `activeTab` + `scripting` 现有路径。                                                                             |
+| `contextMenus`                                | 仅注册两个右键菜单入口项（「采集当前页」「上传文件采集生词」），不读取页面内容；页面采集仍走 `activeTab` + `scripting` 现有路径。                                                                            |
 | `host_permissions: https://bbdc.cn/*`         | 向不背单词主站发 API 请求（登录检查 / 查词 / 加词 / 删词 / 列表）。                                                                                                                                          |
 | `host_permissions: https://langeasy.com.cn/*` | 向蓝易主站请求单词释义接口（加词前必须先查释义）。                                                                                                                                                           |
 
